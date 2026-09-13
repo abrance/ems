@@ -3,7 +3,7 @@ name: Docker Publish GHCR
 on:
   push:
     tags:
-      - "*"
+      - "v*.*.*"
 
 permissions:
   contents: read
