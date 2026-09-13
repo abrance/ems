@@ -1,0 +1,19 @@
+name: Go CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  go-ci:
+    uses: abrance/yoc/.github/workflows/go-ci.yml@v1.0.0
+    with:
+      working-directory: OpenLEMS/application
+      go-version-file: OpenLEMS/go.work
+      cache-dependency-path: OpenLEMS/application/go.sum

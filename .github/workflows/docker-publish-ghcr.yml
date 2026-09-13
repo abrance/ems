@@ -1,0 +1,28 @@
+name: Docker Publish GHCR
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker-publish:
+    permissions:
+      contents: read
+      packages: write
+    uses: abrance/yoc/.github/workflows/docker-publish-ghcr.yml@v1.0.0
+    with:
+      context: OpenLEMS
+      file: OpenLEMS/script/Dockerfile.dev
+      image-name: ${{ github.repository }}
+      platforms: linux/amd64
+      tags: |
+        type=ref,event=tag
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
