@@ -1,0 +1,131 @@
+package s_db_basic
+
+import (
+	"common/c_base"
+	"common/c_enum"
+	"context"
+	"s_db/s_db_model"
+	"time"
+)
+
+// IDeviceService 设备服务
+type IDeviceService interface {
+	GetDeviceConfigsWithRecursion(ctx context.Context, parentId string) ([]*c_base.SDeviceConfig, error) // 获取所有设备列表（包括enabled=false）
+	GetAllDevices(ctx context.Context) ([]*s_db_model.SDeviceModel, error)                               // 获取所有设备
+	GetDeviceById(ctx context.Context, id string) (*s_db_model.SDeviceModel, error)                      // 根据ID获取设备
+	GetDevicesByProtocolId(ctx context.Context, protocolId string) ([]*s_db_model.SDeviceModel, error)   // 根据协议ID获取设备列表
+	UpdateDevice(ctx context.Context, deviceId string, data map[string]interface{}) error
+	DeleteDeviceById(ctx context.Context, id string) error // 根据ID删除设备
+}
+
+type ISettingService interface {
+	GetAllSettings(ctx context.Context) ([]*s_db_model.SSettingModel, error)
+	GetAllSettingsByGroup(ctx context.Context, group string) ([]*s_db_model.SSettingModel, error) // 根据分组获取所有设置
+	GetSettingById(ctx context.Context, id string) (*s_db_model.SSettingModel, error)             // 根据ID获取设置详情
+	GetSettingValueById(ctx context.Context, id string) *string                                   // 获取设置，如果获取不到，返回nil
+	SetSettingValueById(ctx context.Context, id string, value string) error
+	GetSettingValueBySystemSettingDefine(ctx context.Context, settingDefine *SSystemSettingDefine) *string // 通过系统设置定义获取设置值
+	GetRootDeviceId(ctx context.Context) *string                                                           // 获取根设备ID
+	GetRootPolicyId(ctx context.Context) *string                                                           // 获取激活的策略ID
+	GetPublicEnabledSettings(ctx context.Context) ([]*s_db_model.SSettingModel, error)                     // 获取公开且启用的设置
+}
+
+type IProtocolService interface {
+	GetProtocolList(ctx context.Context, type_ string) ([]*s_db_model.SProtocolModel, error)
+	UpdateProtocol(ctx context.Context, protocolId string, data map[string]interface{}) error
+	CreateProtocol(ctx context.Context, data map[string]interface{}) (string, error)
+	DeleteProtocol(ctx context.Context, protocolId string) error
+	GetAllProtocolConfigs(ctx context.Context) ([]*c_base.SProtocolConfig, error) // 获取协议列表
+}
+
+type IAlarmService interface {
+	// 告警历史相关方法
+	CreateAlarmHistory(ctx context.Context, deviceId, sourceDeviceId string, meta c_base.IPoint, level c_enum.EAlarmLevel, detail string, triggerAt time.Time) error
+	GetAlarmHistoryByDeviceId(ctx context.Context, deviceId string) ([]*s_db_model.SAlarmHistoryModel, error)
+	GetAlarmHistoryByDeviceIdAndPoint(ctx context.Context, deviceId, point string) ([]*s_db_model.SAlarmHistoryModel, error)
+	DeleteAlarmHistoryByDeviceId(ctx context.Context, deviceId string) error
+	DeleteAlarmHistoryByLevel(ctx context.Context, level string) error
+	DeleteAlarmHistoryByDeviceIdAndLevel(ctx context.Context, deviceId, level string) error
+	DeleteAlarmHistoryByFilters(ctx context.Context, deviceId, level string) error
+	GetAllAlarmHistory(ctx context.Context) ([]*s_db_model.SAlarmHistoryModel, error)
+	GetAlarmHistoryPage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SAlarmHistoryModel, int, error)
+	ClearAllAlarmHistory(ctx context.Context) error
+	GetAlarmHistoryCount(ctx context.Context, deviceId string) int
+
+	// 告警忽略相关方法
+	CreateAlarmIgnore(ctx context.Context, deviceId, sourceDeviceId, point, pointName string) error
+	GetAlarmIgnoreByDeviceId(ctx context.Context, deviceId string) ([]*s_db_model.SAlarmIgnoreModel, error)
+	IsAlarmIgnored(ctx context.Context, deviceId, sourceDeviceId, point string) (bool, error)
+	DeleteAlarmIgnoreByDeviceId(ctx context.Context, deviceId string) error
+	DeleteAlarmIgnoreByDeviceIdAndPoint(ctx context.Context, deviceId, point string) error
+	DeleteAlarmIgnoreByFilters(ctx context.Context, deviceId, point string) error
+	GetAllAlarmIgnore(ctx context.Context) ([]*s_db_model.SAlarmIgnoreModel, error)
+	GetAlarmIgnorePage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SAlarmIgnoreModel, int, error)
+	GetAlarmIgnoreCount(ctx context.Context, deviceId string) int
+}
+
+type ILogService interface {
+	CreateLog(ctx context.Context, logType, deviceId, level, content string) error
+	GetLogByDeviceId(ctx context.Context, deviceId string) ([]*s_db_model.SLogModel, error)
+	GetLogByType(ctx context.Context, logType string) ([]*s_db_model.SLogModel, error)
+	GetLogByLevel(ctx context.Context, level string) ([]*s_db_model.SLogModel, error)
+	GetLogByDeviceIdAndType(ctx context.Context, deviceId, logType string) ([]*s_db_model.SLogModel, error)
+	DeleteLogByDeviceId(ctx context.Context, deviceId string) error
+	DeleteLogByType(ctx context.Context, logType string) error
+	DeleteLogByFilters(ctx context.Context, filters map[string]interface{}) (int, error)
+	GetAllLog(ctx context.Context) ([]*s_db_model.SLogModel, error)
+	GetLogPage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SLogModel, int, error)
+	ClearAllLog(ctx context.Context) error
+	GetLogCount(ctx context.Context) (int, error)
+}
+
+type IAutomationService interface {
+	// 基础 CRUD 方法
+	CreateAutomation(ctx context.Context, name string, startTime, endTime *time.Time, timeRangeType, timeRangeValue *string, triggerRule, executeRule string, executionInterval int) (int, error)
+	GetAutomationById(ctx context.Context, id int) (*s_db_model.SAutomationModel, error)
+	UpdateAutomation(ctx context.Context, id int, data map[string]interface{}) error
+	DeleteAutomation(ctx context.Context, id int) error
+
+	// 查询方法
+	GetAllAutomations(ctx context.Context) ([]*s_db_model.SAutomationModel, error)
+	GetAutomationsByTimeRangeType(ctx context.Context, timeRangeType string) ([]*s_db_model.SAutomationModel, error)
+	GetEnabledAutomations(ctx context.Context) ([]*s_db_model.SAutomationModel, error)
+	GetAutomationsByFilters(ctx context.Context, deviceId string, filters map[string]interface{}) ([]*s_db_model.SAutomationModel, error)
+	GetAutomationPage(ctx context.Context, page, pageSize int, deviceId string, filters map[string]interface{}) ([]*s_db_model.SAutomationModel, int, error)
+
+	// 统计方法
+	ClearAllAutomations(ctx context.Context) error
+	GetAutomationCount(ctx context.Context) (int, error)
+}
+
+// IEnergyStorageStrategyService 储能策略服务接口
+type IEnergyStorageStrategyService interface {
+	// 基础 CRUD 方法
+	CreateEnergyStorage(ctx context.Context, model *s_db_model.SEnergyStorageModel) (int, error)
+	GetEnergyStorageById(ctx context.Context, id int) (*s_db_model.SEnergyStorageModel, error)
+	UpdateEnergyStorage(ctx context.Context, model *s_db_model.SEnergyStorageModel) error
+	DeleteEnergyStorage(ctx context.Context, id int) error
+
+	// 查询与分页
+	GetEnergyStoragePage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SEnergyStorageModel, int, error)
+	GetEnergyStorageByIds(ctx context.Context, ids []int) ([]*s_db_model.SEnergyStorageModel, error)
+	GetEnabledEnergyStorages(ctx context.Context) ([]*s_db_model.SEnergyStorageModel, error) // 获取所有启用的储能定时任务
+}
+
+// IPriceService 电价服务接口
+type IPriceService interface {
+	// 基础 CRUD 方法
+	CreatePrice(ctx context.Context, model *s_db_model.SPriceModel) (int, error)
+	GetPriceById(ctx context.Context, id int) (*s_db_model.SPriceModel, error)
+	UpdatePrice(ctx context.Context, model *s_db_model.SPriceModel) error
+	DeletePrice(ctx context.Context, id int) error
+
+	// 查询与分页
+	GetPricePage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SPriceModel, int, error)
+	GetAllPrices(ctx context.Context) ([]*s_db_model.SPriceModel, error)
+	GetEnabledPrices(ctx context.Context) ([]*s_db_model.SPriceModel, error)                     // 获取所有启用的电价
+	GetPricesByRemoteId(ctx context.Context, remoteId string) ([]*s_db_model.SPriceModel, error) // 根据远程ID获取电价
+
+	// 统计方法
+	GetPriceCount(ctx context.Context) (int, error)
+}

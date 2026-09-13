@@ -1,0 +1,20 @@
+database:
+  default:
+    debug: false
+#    link: "sqlite::@file(data)"
+server:
+  address: ":80"
+  pprofEnabled: false
+  dumpRouterMap: false
+  accessLogEnabled: false
+
+# 日志组件配置
+logger:
+  level:   "info"
+  biz_ems_stdout: false
+
+# 静态文件配置
+static:
+  path: "out/static"
+
+

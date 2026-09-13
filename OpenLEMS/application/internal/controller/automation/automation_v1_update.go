@@ -1,0 +1,83 @@
+package automation
+
+import (
+	v1 "application/api/automation/v1"
+	"common/c_log"
+	"context"
+	"encoding/json"
+	"errors"
+	"s_db"
+	"s_db/s_db_model"
+
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gtime"
+)
+
+// UpdateAutomation 更新自动化任务
+func (c *Controller) UpdateAutomation(ctx context.Context, req *v1.UpdateAutomationReq) (res *v1.UpdateAutomationRes, err error) {
+	c_log.Infof(ctx, "更新自动化任务 - ID: %d", req.Id)
+
+	// 参数验证
+	if req.Id <= 0 {
+		return nil, errors.New("自动化任务ID必须大于0")
+	}
+
+	// 构建更新数据
+	updateData := make(map[string]interface{})
+
+	if req.Name != "" {
+		updateData[s_db_model.FieldAutomationName] = req.Name
+	}
+	if req.StartTime != nil {
+		updateData[s_db_model.FieldAutomationStartTime] = gtime.New(req.StartTime)
+	}
+	if req.EndTime != nil {
+		updateData[s_db_model.FieldAutomationEndTime] = gtime.New(req.EndTime)
+	}
+	if req.TimeRangeType != nil {
+		updateData[s_db_model.FieldAutomationTimeRangeType] = req.TimeRangeType
+	}
+	if req.TimeRangeValue != nil {
+		updateData[s_db_model.FieldAutomationTimeRangeValue] = req.TimeRangeValue
+	}
+	if req.TriggerRule != nil {
+		// 验证触发规则中的设备条件规则语法
+		if err := validateTriggerRule(req.TriggerRule); err != nil {
+			return nil, err
+		}
+
+		// 将触发配置序列化为 JSON 字符串
+		triggerRuleJson, err := json.Marshal(req.TriggerRule)
+		if err != nil {
+			c_log.Errorf(ctx, "序列化触发配置失败: %+v", err)
+			return nil, gerror.WrapCode(gcode.CodeInternalError, err, "序列化触发配置失败")
+		}
+		updateData[s_db_model.FieldAutomationTriggerRule] = string(triggerRuleJson)
+		// 同时更新执行间隔字段
+		updateData[s_db_model.FieldAutomationExecutionInterval] = req.TriggerRule.ExecutionInterval
+	}
+	if req.ExecuteRule != "" {
+		updateData[s_db_model.FieldAutomationExecuteRule] = req.ExecuteRule
+	}
+	if req.Enabled != nil {
+		updateData[s_db_model.FieldEnabled] = *req.Enabled
+	}
+
+	// 检查是否有需要更新的字段
+	if len(updateData) == 0 {
+		return nil, errors.New("没有需要更新的字段")
+	}
+
+	// 调用服务层更新自动化任务
+	err = s_db.GetAutomationService().UpdateAutomation(ctx, req.Id, updateData)
+	if err != nil {
+		c_log.Errorf(ctx, "更新自动化任务失败: %+v", err)
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "更新自动化任务失败")
+	}
+
+	res = &v1.UpdateAutomationRes{}
+
+	c_log.Infof(ctx, "成功更新自动化任务 - ID: %d", req.Id)
+	return res, nil
+}

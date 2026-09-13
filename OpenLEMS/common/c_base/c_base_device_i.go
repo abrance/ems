@@ -1,0 +1,22 @@
+package c_base
+
+import (
+	"common/c_enum"
+	"time"
+)
+
+type IDevice interface {
+	IAlarm // 告警
+
+	GetConfig() *SDeviceConfig
+	GetProtocolStatus() c_enum.EProtocolStatus // 获取协议连接状态
+
+	GetProtocolPointValue(point IPoint) *SPointValue // 获取协议点位缓存值
+	GetLastUpdateTime() *time.Time                   // 获取最后更新时间
+
+	IsVirtualDevice() bool // 是否是虚拟设备
+
+	GetDevicePoints() []IPoint       // 获取设备点位列表（遥测点位+协议点位）
+	GetExportModbusPoints() []IPoint // 获取暴露出去的modbus点位
+	GetTelemetryPoints() []IPoint    // 获取主要遥测点位列表（只返回关键点位，如BMS的状态和SOC）
+}

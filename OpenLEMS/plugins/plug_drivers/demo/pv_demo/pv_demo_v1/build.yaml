@@ -1,0 +1,60 @@
+brand: HEX
+model: Demo
+type: pv
+version: v1.0.0
+author: "zz@hexems.com"
+create: "2025-09-01"
+desc: "测试光伏"
+protocolType: "modbus"
+telemetry:
+  - key: status
+    name: "状态"
+    displayType: label
+    value_type: int
+    component_type: singleSelect
+    valueExplain:
+      - key: "0"
+        value: "未知"
+        color: "#FF5D5D"
+      - key: "1"
+        value: "关机"
+        color: "#9CBF30"
+      - key: "2"
+        value: "待机"
+        color: "#6967EE"
+      - key: "4"
+        value: "发电中"
+        color: "#0098FA"
+      - key: "5"
+        value: "故障"
+        color: "#FF5D5D"
+  - key: power
+    unit: "kW"
+    name: "发电功率"
+    value_type: float
+    component_type: number
+  - key: irradiance
+    name: "当前辐照度"
+    unit: "W/m²"
+    value_type: float
+    component_type: number
+  - key: temperature
+    name: "当前温度"
+    unit: "°C"
+    value_type: float
+    component_type: number
+  - key: historyOutgoingQuantity
+    name: "历史发电量"
+    unit: "kWh"
+    value_type: float
+    component_type: number
+
+service:
+  - key: CustomPowerZeroService
+    name: "零功率"
+    description: "设置功率为零"
+    icon: "power-off"
+  - key:  CustomPowerRandomService
+    name: "随机功率"
+    description: "设置随机功率"
+    icon: "shuffle"

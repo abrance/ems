@@ -1,0 +1,593 @@
+package internal
+
+import (
+	"c_window_counter/public"
+	"common/c_base"
+	"common/c_chart"
+	"common/c_log"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/pkg/errors"
+	"github.com/shockerli/cvt"
+
+	"github.com/prometheus/prometheus/pkg/labels"
+	promtsdb "github.com/prometheus/prometheus/tsdb"
+)
+
+const (
+	DefaultDBPath = "./out/ptdb"
+)
+
+type promDB struct {
+	ctx            context.Context
+	db             *promtsdb.DB
+	sampleCounter  public.IWindowCounter // 滑动窗口计数器，用于统计每秒存储样本数
+	statusCache    map[string]any        // 状态类型缓存，key: deviceId+pointKey
+	statusMutex    sync.RWMutex          // 保护状态缓存的读写锁
+	statsCache     *c_base.StorageStats  // 统计信息缓存
+	statsCacheTime time.Time             // 统计缓存更新时间
+	statsMutex     sync.RWMutex          // 保护统计缓存的读写锁
+}
+
+var (
+	instance c_base.IStorage
+	once     sync.Once
+	mtx      sync.Mutex
+)
+
+func NewPromTSDB(ctx context.Context, storageConfig *c_base.SStorageConfig) c_base.IStorage {
+	once.Do(func() {
+		mtx.Lock()
+		defer mtx.Unlock()
+		if instance != nil {
+			return
+		}
+
+		basePath := DefaultDBPath
+		if storageConfig != nil && storageConfig.Params != nil {
+			if v, ok := storageConfig.Params["path"]; ok && v != "" {
+				basePath = v
+			}
+		}
+
+		// Use default options; caller controls retention via external cleanup or tsdb options if needed
+		db, err := promtsdb.Open(filepath.Clean(basePath), nil, nil, nil)
+		if err != nil {
+			panic(errors.Errorf("打开 Prometheus TSDB 失败: %v", err))
+		}
+
+		// 创建滑动窗口计数器，用于统计每秒存储样本数
+		// 使用1分钟窗口，60个桶，每个桶代表1秒
+		sampleCounter := public.NewQPSWindowCounter()
+
+		instance = &promDB{
+			ctx:           ctx,
+			db:            db,
+			sampleCounter: sampleCounter,
+			statusCache:   make(map[string]any),
+		}
+		c_log.BizInfof(ctx, "启动时序数据库！")
+	})
+	return instance
+}
+
+func (p *promDB) SaveDevices(deviceId string, pointValues []*c_base.SPointValue) error {
+	if len(pointValues) == 0 {
+		return nil
+	}
+
+	ts := time.Now().UnixMilli()
+	app := p.db.Appender()
+	var sampleCount int64 = 0
+
+	for _, pv := range pointValues {
+		if pv == nil || pv.IPoint == nil {
+			continue
+		}
+
+		pointKey := pv.GetKey()
+		value := pv.GetValue()
+
+		// 检查是否是状态类型（有 ValueExplain）
+		if len(pv.GetValueExplain()) > 0 {
+			// 状态类型：检查缓存
+			cacheKey := buildStatusCacheKey(deviceId, pointKey)
+
+			p.statusMutex.RLock()
+			cachedValue, exists := p.statusCache[cacheKey]
+			p.statusMutex.RUnlock()
+
+			// 状态未变化，跳过保存
+			if exists && cachedValue == value {
+				continue
+			}
+
+			// 状态变化，更新缓存
+			p.statusMutex.Lock()
+			p.statusCache[cacheKey] = value
+			p.statusMutex.Unlock()
+		}
+
+		// 保存数值类型数据
+		if numericValue, err := cvt.Float64E(value); err == nil {
+			lbls := buildDeviceLabels(deviceId, pointKey)
+			if _, err := appendSampleWithCount(app, lbls, ts, numericValue); err != nil {
+				if rollbackErr := app.Rollback(); rollbackErr != nil {
+					c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+				}
+				return errors.Wrapf(err, "添加设备数据失败: deviceId=%s, pointKey=%s", deviceId, pointKey)
+			}
+			sampleCount++
+		}
+	}
+
+	if sampleCount > 0 {
+		p.sampleCounter.IncrementBy(sampleCount)
+	}
+
+	if err := app.Commit(); err != nil {
+		return errors.Wrapf(err, "提交设备数据失败: deviceId=%s", deviceId)
+	}
+	return nil
+}
+
+func (p *promDB) SaveProtocolMetrics(protocolConfig *c_base.SProtocolConfig, deviceConfig *c_base.SDeviceConfig, metrics map[string]any) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+	ts := time.Now().UnixMilli()
+	app := p.db.Appender()
+
+	var sampleCount int64 = 0 // 统计本次存储的样本数量
+	for field, value := range metrics {
+		// 只保存数值类型数据
+		if numericValue, err := cvt.Float64E(value); err == nil {
+			lbls := buildProtocolLabels(protocolConfig.Id, deviceConfig.Id, field)
+			if _, err := appendSampleWithCount(app, lbls, ts, numericValue); err != nil {
+				if rollbackErr := app.Rollback(); rollbackErr != nil {
+					c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+				}
+				return errors.Wrapf(err, "添加协议数据失败: protocolId=%s, deviceId=%s, field=%s",
+					protocolConfig.Id, deviceConfig.Id, field)
+			}
+			sampleCount++
+		}
+		// 非数值类型数据将被忽略
+	}
+
+	// 更新滑动窗口计数器
+	if sampleCount > 0 {
+		p.sampleCounter.IncrementBy(sampleCount)
+	}
+
+	if err := app.Commit(); err != nil {
+		return errors.Wrapf(err, "提交协议数据失败: protocolId=%s, deviceId=%s", protocolConfig.Id, deviceConfig.Id)
+	}
+	return nil
+}
+
+func (p *promDB) SaveSystemMetrics(measurement string, tags map[string]string, metrics map[string]any) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+	ts := time.Now().UnixMilli()
+	app := p.db.Appender()
+
+	var sampleCount int64 = 0 // 统计本次存储的样本数量
+	for field, value := range metrics {
+		// 只保存数值类型数据
+		if numericValue, err := cvt.Float64E(value); err == nil {
+			lbls := buildSystemLabels(measurement, field)
+			if _, err := appendSampleWithCount(app, lbls, ts, numericValue); err != nil {
+				if rollbackErr := app.Rollback(); rollbackErr != nil {
+					c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+				}
+				return errors.Wrapf(err, "添加系统数据失败: measurement=%s, field=%s", measurement, field)
+			}
+			sampleCount++
+		}
+		// 非数值类型数据将被忽略
+	}
+
+	// 更新滑动窗口计数器
+	if sampleCount > 0 {
+		p.sampleCounter.IncrementBy(sampleCount)
+	}
+
+	if err := app.Commit(); err != nil {
+		return errors.Wrapf(err, "提交系统数据失败: measurement=%s", measurement)
+	}
+	return nil
+}
+
+func (p *promDB) SavePriceData(priceId int, price float64, priceType string, timestamp int64) error {
+	ts := timestamp * MillisecondsPerSecond // 转换为毫秒时间戳
+	app := p.db.Appender()
+
+	// 保存电价ID
+	lbls := buildSystemLabels("price", "priceId")
+	if _, err := appendSampleWithCount(app, lbls, ts, float64(priceId)); err != nil {
+		if rollbackErr := app.Rollback(); rollbackErr != nil {
+			c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+		}
+		return errors.Wrapf(err, "添加电价ID失败: priceId=%d", priceId)
+	}
+
+	// 保存电价值
+	lbls = buildSystemLabels("price", "price")
+	if _, err := appendSampleWithCount(app, lbls, ts, price); err != nil {
+		if rollbackErr := app.Rollback(); rollbackErr != nil {
+			c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+		}
+		return errors.Wrapf(err, "添加电价值失败: price=%.2f", price)
+	}
+
+	// 保存电价类型（转换为数值）
+	priceTypeValue := getPriceTypeValue(priceType)
+	lbls = buildSystemLabels("price", "priceType")
+	if _, err := appendSampleWithCount(app, lbls, ts, priceTypeValue); err != nil {
+		if rollbackErr := app.Rollback(); rollbackErr != nil {
+			c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+		}
+		return errors.Wrapf(err, "添加电价类型失败: priceType=%s", priceType)
+	}
+
+	// 保存时间戳
+	lbls = buildSystemLabels("price", "timestamp")
+	if _, err := appendSampleWithCount(app, lbls, ts, float64(timestamp)); err != nil {
+		if rollbackErr := app.Rollback(); rollbackErr != nil {
+			c_log.BizErrorf(p.ctx, "回滚失败: %v (原始错误: %v)", rollbackErr, err)
+		}
+		return errors.Wrapf(err, "添加时间戳失败: timestamp=%d", timestamp)
+	}
+
+	// 更新滑动窗口计数器
+	p.sampleCounter.IncrementBy(4) // 保存了4个字段
+
+	if err := app.Commit(); err != nil {
+		return errors.Wrapf(err, "提交电价数据失败: priceId=%d", priceId)
+	}
+	return nil
+}
+
+func (p *promDB) GetStorageData(storageType c_base.StorageType, id string, pointKey []string, startTime, endTime *int64, step int) (*c_chart.ChartData, error) {
+	// 查询 ems_metric 系列（仅数值类型数据）
+	mint := int64(0)
+	maxt := int64(1<<63 - 1)
+	if startTime != nil && *startTime > 0 {
+		mint = *startTime
+	}
+	if endTime != nil && *endTime > 0 {
+		maxt = *endTime
+	}
+
+	q, err := p.db.Querier(context.Background(), mint, maxt)
+	if err != nil {
+		return nil, err
+	}
+	defer q.Close()
+
+	// 构建返回结构
+	chart := c_chart.NewChartData(len(pointKey))
+	seriesMap := make(map[string]*c_chart.Series)
+	for _, k := range pointKey {
+		seriesMap[k] = c_chart.NewSeries(k, c_chart.ChartTypeLine, 0)
+	}
+
+	// 逐点位查询并合并时间戳
+	// 收集所有样本 (timestamp -> map[field]value)
+	data := make(map[int64]map[string]float64)
+
+	for _, k := range pointKey {
+		// 选择器: __name__="ems_metric", type=storageType, id=id, field=k
+		matchers := []*labels.Matcher{
+			labels.MustNewMatcher(labels.MatchEqual, LabelNameMetric, MetricNameEmsMetric),
+			labels.MustNewMatcher(labels.MatchEqual, LabelNameType, string(storageType)),
+			labels.MustNewMatcher(labels.MatchEqual, LabelNameID, id),
+			labels.MustNewMatcher(labels.MatchEqual, LabelNameField, k),
+		}
+		ss, _, err := q.Select(false, nil, matchers...)
+		if err != nil {
+			return nil, err
+		}
+		for ss.Next() {
+			s := ss.At()
+			it := s.Iterator()
+			for it.Next() {
+				t, v := it.At()
+				if _, ok := data[t]; !ok {
+					data[t] = make(map[string]float64)
+				}
+				data[t][k] = v
+			}
+		}
+		if err := ss.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	// 排序时间戳
+	var timestamps []int64
+	for ts := range data {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+
+	// 步长过滤（按毫秒）
+	var nextAllowed int64
+	hasAnchor := false
+	for _, ts := range timestamps {
+		if step > 0 {
+			if !hasAnchor {
+				hasAnchor = true
+				nextAllowed = ts + int64(step)
+			} else if ts < nextAllowed {
+				continue
+			} else {
+				nextAllowed = ts + int64(step)
+			}
+		}
+		chart.AddTimestamp(ts)
+		for _, k := range pointKey {
+			if v, ok := data[ts][k]; ok {
+				seriesMap[k].AppendData(fmt.Sprintf("%.2f", v))
+			} else {
+				seriesMap[k].AppendData("")
+			}
+		}
+	}
+
+	for _, k := range pointKey {
+		chart.AddSeries(seriesMap[k])
+	}
+	return chart, nil
+}
+
+func (p *promDB) GetStorageStats() (*c_base.StorageStats, error) {
+	// 尝试从缓存获取
+	p.statsMutex.RLock()
+	if p.statsCache != nil && time.Since(p.statsCacheTime).Seconds() < StatsCacheDuration {
+		// 缓存有效，但需要更新实时数据（每秒样本数）
+		cachedStats := *p.statsCache
+		p.statsMutex.RUnlock()
+
+		// 更新实时数据
+		cachedStats.SamplesPerSecond = p.sampleCounter.GetQPS()
+		return &cachedStats, nil
+	}
+	p.statsMutex.RUnlock()
+
+	// 缓存过期或不存在，重新计算
+	stats := &c_base.StorageStats{}
+
+	// 获取数据库头部信息
+	head := p.db.Head()
+	if head == nil {
+		return stats, fmt.Errorf("无法获取数据库头部信息")
+	}
+
+	// 获取头部统计信息
+	headStats := head.Stats("")
+	stats.TotalSeries = int64(headStats.NumSeries)
+	// 注意：Prometheus TSDB的Stats结构体没有NumSamples字段，我们通过查询来估算
+	stats.TotalSamples = p.estimateTotalSamples()
+
+	// 获取数据库中真正的第一条数据时间
+	oldestTime, err := p.getOldestTimestamp()
+	if err != nil {
+		c_log.BizInfof(p.ctx, "获取最老时间戳失败: %v", err)
+		// 如果查询失败，回退到使用Head的MinTime
+		if headStats.MinTime > 0 {
+			oldestTime := time.UnixMilli(headStats.MinTime)
+			stats.OldestTimestamp = &oldestTime
+		}
+	} else {
+		stats.OldestTimestamp = &oldestTime
+	}
+	if headStats.MaxTime > 0 {
+		newestTime := time.UnixMilli(headStats.MaxTime)
+		stats.NewestTimestamp = &newestTime
+	}
+
+	// 计算存储大小（通过数据库目录大小估算）
+	storageSize, err := p.calculateStorageSize()
+	if err != nil {
+		c_log.BizInfof(p.ctx, "计算存储大小失败: %v", err)
+		stats.StorageSize = -1 // 表示无法获取
+	} else {
+		stats.StorageSize = storageSize
+	}
+
+	// 计算数据保留时间（秒）
+	if stats.OldestTimestamp != nil && headStats.MaxTime > 0 {
+		oldestTimeMs := stats.OldestTimestamp.UnixMilli()
+		stats.RetentionTime = (headStats.MaxTime - oldestTimeMs) / MillisecondsPerSecond // 转换为秒
+	}
+
+	// 计算平均每个序列占用数据大小
+	if stats.TotalSeries > 0 && stats.StorageSize > 0 {
+		stats.AvgSeriesSize = float64(stats.StorageSize) / float64(stats.TotalSeries)
+	}
+
+	// 使用滑动窗口计数器获取每秒存储样本数
+	stats.SamplesPerSecond = p.sampleCounter.GetQPS()
+
+	// 计算存储大小（MB）
+	stats.StorageSizeMB = float64(stats.StorageSize) / (1024 * 1024)
+
+	// 计算数据保留时间（小时）
+	stats.RetentionHours = float64(stats.RetentionTime) / 3600
+
+	// 更新缓存
+	p.statsMutex.Lock()
+	p.statsCache = stats
+	p.statsCacheTime = time.Now()
+	p.statsMutex.Unlock()
+
+	c_log.Debugf(p.ctx, "获取存储统计信息: 序列数=%d, 样本数=%d, 存储大小=%.2fMB, 保留时间=%.2f小时, 平均序列大小=%.2f字节, 每秒样本数=%.2f",
+		stats.TotalSeries, stats.TotalSamples, stats.StorageSizeMB, stats.RetentionHours, stats.AvgSeriesSize, stats.SamplesPerSecond)
+
+	return stats, nil
+}
+
+// estimateTotalSamples 估算总样本数量
+func (p *promDB) estimateTotalSamples() int64 {
+	// 通过查询所有ems_metric系列来估算样本数量
+	head := p.db.Head()
+	if head == nil {
+		return 0
+	}
+
+	// 创建查询器
+	q, err := p.db.Querier(context.Background(), 0, time.Now().UnixMilli())
+	if err != nil {
+		return 0
+	}
+	defer q.Close()
+
+	// 查询所有ems_metric系列
+	matchers := []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, LabelNameMetric, MetricNameEmsMetric),
+	}
+
+	ss, _, err := q.Select(false, nil, matchers...)
+	if err != nil {
+		return 0
+	}
+
+	var totalSamples int64
+	for ss.Next() {
+		s := ss.At()
+		it := s.Iterator()
+		for it.Next() {
+			totalSamples++
+		}
+	}
+
+	return totalSamples
+}
+
+// getOldestTimestamp 获取数据库中真正的第一条数据时间
+func (p *promDB) getOldestTimestamp() (time.Time, error) {
+	// 创建一个查询器，查询所有时间范围的数据
+	q, err := p.db.Querier(context.Background(), 0, time.Now().UnixMilli())
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer q.Close()
+
+	// 查询所有ems_metric系列来找到最早的时间戳
+	matchers := []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, LabelNameMetric, MetricNameEmsMetric),
+	}
+
+	ss, _, err := q.Select(false, nil, matchers...)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	var oldestTimestamp int64 = -1
+	for ss.Next() {
+		s := ss.At()
+		it := s.Iterator()
+		if it.Next() {
+			t, _ := it.At()
+			if oldestTimestamp == -1 || t < oldestTimestamp {
+				oldestTimestamp = t
+			}
+		}
+	}
+
+	if err := ss.Err(); err != nil {
+		return time.Time{}, err
+	}
+
+	if oldestTimestamp == -1 {
+		return time.Time{}, fmt.Errorf("未找到任何数据")
+	}
+
+	return time.UnixMilli(oldestTimestamp), nil
+}
+
+// calculateStorageSize 计算存储目录大小
+func (p *promDB) calculateStorageSize() (int64, error) {
+	// 获取数据库路径
+	dbPath := p.db.Dir()
+	if dbPath == "" {
+		return 0, fmt.Errorf("无法获取数据库路径")
+	}
+
+	// 遍历目录计算总大小
+	var totalSize int64
+	err := filepath.Walk(dbPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			totalSize += info.Size()
+		}
+		return nil
+	})
+
+	return totalSize, err
+}
+
+func (p *promDB) ClearDeviceHistoryAll(deviceId string) error {
+	if deviceId == "" {
+		return errors.New("设备ID不能为空")
+	}
+
+	// 构建标签选择器：匹配指定设备的所有数据
+	matchers := []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, LabelNameMetric, MetricNameEmsMetric),
+		labels.MustNewMatcher(labels.MatchEqual, LabelNameType, string(c_base.StorageTypeDevice)),
+		labels.MustNewMatcher(labels.MatchEqual, LabelNameID, deviceId),
+	}
+
+	// Prometheus TSDB Delete 方法说明：
+	// - Delete(mint, maxt int64, ms ...*labels.Matcher) 会删除所有匹配的时间序列
+	// - 时间范围 [mint, maxt] 指定要删除的数据时间范围
+	// - 使用 0 到当前时间，表示删除该设备的所有历史数据
+	// - 一次调用即可删除所有匹配的序列，无需遍历
+	err := p.db.Delete(0, time.Now().UnixMilli(), matchers...)
+	if err != nil {
+		return errors.Wrapf(err, "删除设备 %s 的历史数据失败", deviceId)
+	}
+
+	// 清理状态缓存中该设备的数据
+	// 先收集要删除的键，减少锁持有时间
+	var keysToDelete []string
+	p.statusMutex.RLock()
+	for key := range p.statusCache {
+		if matchesDeviceIdPrefix(key, deviceId) {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+	p.statusMutex.RUnlock()
+
+	// 批量删除
+	if len(keysToDelete) > 0 {
+		p.statusMutex.Lock()
+		for _, key := range keysToDelete {
+			delete(p.statusCache, key)
+		}
+		p.statusMutex.Unlock()
+	}
+
+	c_log.BizInfof(p.ctx, "清除设备 %s 的历史数据完成，清理了 %d 条状态缓存", deviceId, len(keysToDelete))
+
+	return nil
+}
+
+func (p *promDB) Close() {
+	if p.db != nil {
+		_ = p.db.Close()
+		c_log.BizInfof(p.ctx, "关闭时序数据库！")
+	}
+}

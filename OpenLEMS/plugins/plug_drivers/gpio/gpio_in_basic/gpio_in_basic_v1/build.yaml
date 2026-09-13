@@ -1,0 +1,28 @@
+brand: Hex
+model: Basic-GPIO-In
+name: "基础GPIO输入驱动"
+type: gpio_in
+version: "v1.0.0"
+author: "zz@hexems.com"
+create: "2025-09-12"
+protocolType: "gpio_in"
+desc: "基础GPIO输入驱动，支持GPIO输入监控和告警"
+telemetry:
+  - key: status
+    name: "状态"
+    value_type: int
+    component_type: singleSelect
+    paramExplain:
+      - key: "true"
+        value: "triggerName"
+      - key: "false"
+        value: "clearName"
+service:
+  - key: SetLow
+    name: "模拟触发低电平"
+    description: "测试设置为低电平"
+    icon: "toggle-left"
+  - key: SetHigh
+    name: "模拟触发高电平"
+    description: "测试设置为高电平"
+    icon: "toggle-right"

@@ -1,0 +1,236 @@
+package s_db_model
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+)
+
+// 数据库相关常量
+const (
+	// 表名
+	TableLog = "log"
+
+	// 日志表特有字段
+	FieldLogDeviceId = "device_id"
+	FieldLogLevel    = "level"
+	FieldLogContent  = "content"
+)
+
+// 日志表结构
+type SLogModel struct {
+	g.Meta    `orm:"table:log"`
+	Id        int        `json:"id" orm:"id,primary,auto_increment"`
+	Type      string     `json:"type" orm:"type"`
+	DeviceId  string     `json:"deviceId" orm:"device_id"`
+	Level     string     `json:"level" orm:"level"`
+	Content   string     `json:"content" orm:"content"`
+	CreatedAt *time.Time `json:"createdAt" orm:"created_at,auto_now_add"`
+}
+
+// Create 创建日志记录
+func (l *SLogModel) Create(ctx context.Context) error {
+	// 排除ID字段，让数据库自动生成
+	_, err := g.Model(TableLog).Ctx(ctx).FieldsEx("id").Insert(l)
+	return err
+}
+
+// GetById 根据ID获取日志记录
+func (l *SLogModel) GetById(ctx context.Context, id int) error {
+	return g.Model(TableLog).Ctx(ctx).Where(FieldId, id).Scan(l)
+}
+
+// GetByDeviceId 根据设备ID获取日志记录
+func (l *SLogModel) GetByDeviceId(ctx context.Context, deviceId string) ([]*SLogModel, error) {
+	var records []*SLogModel
+	err := g.Model(TableLog).Ctx(ctx).Where(FieldLogDeviceId, deviceId).Scan(&records)
+	return records, err
+}
+
+// GetByType 根据日志类型获取日志记录
+func (l *SLogModel) GetByType(ctx context.Context, logType string) ([]*SLogModel, error) {
+	var records []*SLogModel
+	err := g.Model(TableLog).Ctx(ctx).Where(FieldType, logType).Scan(&records)
+	return records, err
+}
+
+// GetByLevel 根据日志等级获取日志记录
+func (l *SLogModel) GetByLevel(ctx context.Context, level string) ([]*SLogModel, error) {
+	var records []*SLogModel
+	err := g.Model(TableLog).Ctx(ctx).Where(FieldLogLevel, level).Scan(&records)
+	return records, err
+}
+
+// GetByDeviceIdAndType 根据设备ID和日志类型获取日志记录
+func (l *SLogModel) GetByDeviceIdAndType(ctx context.Context, deviceId, logType string) ([]*SLogModel, error) {
+	var records []*SLogModel
+	err := g.Model(TableLog).Ctx(ctx).Where(FieldLogDeviceId, deviceId).Where(FieldType, logType).Scan(&records)
+	return records, err
+}
+
+// Update 更新日志记录
+func (l *SLogModel) Update(ctx context.Context) error {
+	_, err := g.Model(TableLog).Ctx(ctx).Where(FieldId, l.Id).Update(l)
+	return err
+}
+
+// Delete 删除日志记录
+func (l *SLogModel) Delete(ctx context.Context) error {
+	_, err := g.Model(TableLog).Ctx(ctx).Where(FieldId, l.Id).Delete()
+	return err
+}
+
+// DeleteByDeviceId 根据设备ID删除日志记录
+func (l *SLogModel) DeleteByDeviceId(ctx context.Context, deviceId string) error {
+	_, err := g.Model(TableLog).Ctx(ctx).Where(FieldLogDeviceId, deviceId).Delete()
+	return err
+}
+
+// DeleteByType 根据日志类型删除日志记录
+func (l *SLogModel) DeleteByType(ctx context.Context, logType string) error {
+	_, err := g.Model(TableLog).Ctx(ctx).Where(FieldType, logType).Delete()
+	return err
+}
+
+// DeleteByFilters 根据过滤条件删除日志记录
+func (l *SLogModel) DeleteByFilters(ctx context.Context, filters map[string]interface{}) (int, error) {
+	model := g.Model(TableLog).Ctx(ctx)
+	hasValidFilter := false
+
+	// 应用过滤条件
+	if filters != nil {
+		// 类型过滤
+		if logType, ok := filters[FieldType].(string); ok && logType != "" {
+			model = model.Where(FieldType, logType)
+			hasValidFilter = true
+		}
+
+		// 级别过滤
+		if level, ok := filters[FieldLogLevel].(string); ok && level != "" {
+			model = model.Where(FieldLogLevel, level)
+			hasValidFilter = true
+		}
+
+		// 设备ID过滤
+		if deviceId, ok := filters[FieldLogDeviceId].(string); ok && deviceId != "" {
+			model = model.Where(FieldLogDeviceId, deviceId)
+			hasValidFilter = true
+		}
+
+		// 日期过滤 (yyyy-MM-dd) - 支持带时区偏移的时间格式
+		if date, ok := filters["date"].(string); ok && date != "" {
+			// 使用时间范围查询，支持带时区的时间格式
+			// 将日期字符串转换为时间范围：从 00:00:00 到 23:59:59
+			startTime := date + " 00:00:00"
+			endTime := date + " 23:59:59"
+			model = model.Where("created_at >= ? AND created_at <= ?", startTime, endTime)
+			hasValidFilter = true
+		}
+
+		// 内容模糊搜索
+		if content, ok := filters[FieldLogContent].(string); ok && content != "" {
+			model = model.Where(FieldLogContent+" LIKE ?", "%"+content+"%")
+			hasValidFilter = true
+		}
+	}
+
+	// 安全检查：如果没有有效的过滤条件，不允许删除所有记录
+	if !hasValidFilter {
+		return 0, errors.New("删除操作必须包含至少一个有效的过滤条件，以防止意外删除所有数据")
+	}
+
+	// 执行删除并返回影响的行数
+	result, err := model.Delete()
+	if err != nil {
+		return 0, err
+	}
+
+	affectedRows, _ := result.RowsAffected()
+	return int(affectedRows), nil
+}
+
+// GetAll 获取所有日志记录
+func (l *SLogModel) GetAll(ctx context.Context) ([]*SLogModel, error) {
+	var records []*SLogModel
+	err := g.Model(TableLog).Ctx(ctx).Scan(&records)
+	return records, err
+}
+
+// GetPage 分页获取日志记录
+func (l *SLogModel) GetPage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*SLogModel, int, error) {
+	model := g.Model(TableLog).Ctx(ctx)
+
+	// 应用过滤条件
+	if filters != nil {
+		// 日期过滤 (yyyy-MM-dd) - 支持带时区偏移的时间格式
+		if date, ok := filters["date"].(string); ok && date != "" {
+			// 使用时间范围查询，支持带时区的时间格式
+			// 将日期字符串转换为时间范围：从 00:00:00 到 23:59:59
+			startTime := date + " 00:00:00"
+			endTime := date + " 23:59:59"
+			model = model.Where("created_at >= ? AND created_at <= ?", startTime, endTime)
+		}
+
+		// 类型过滤
+		if logType, ok := filters[FieldType].(string); ok && logType != "" {
+			model = model.Where(FieldType, logType)
+		}
+
+		// 级别过滤
+		if level, ok := filters[FieldLogLevel].(string); ok && level != "" {
+			model = model.Where(FieldLogLevel, level)
+		}
+
+		// 设备ID过滤
+		if deviceId, ok := filters[FieldLogDeviceId].(string); ok && deviceId != "" {
+			model = model.Where(FieldLogDeviceId, deviceId)
+		}
+
+		// 内容模糊搜索
+		if content, ok := filters[FieldLogContent].(string); ok && content != "" {
+			model = model.Where(FieldLogContent+" LIKE ?", "%"+content+"%")
+		}
+	}
+
+	// 计算总数
+	total, err := model.Count()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 计算偏移量
+	offset := (page - 1) * pageSize
+
+	// 分页查询
+	var records []*SLogModel
+	err = model.Order("created_at DESC").Limit(offset, pageSize).Scan(&records)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return records, total, nil
+}
+
+// ClearAll 清除所有日志记录并执行VACUUM
+func (l *SLogModel) ClearAll(ctx context.Context) error {
+	// 删除所有记录 - 使用 WHERE 1=1 来满足安全要求
+	_, err := g.Model(TableLog).Ctx(ctx).Where("1=1").Delete()
+	if err != nil {
+		return err
+	}
+
+	// 执行VACUUM操作回收空间
+	_, err = g.DB().Exec(ctx, "VACUUM")
+	return err
+}
+
+// GetCount 获取日志表记录总数
+func (l *SLogModel) GetCount(ctx context.Context) (int, error) {
+	count, err := g.Model(TableLog).Ctx(ctx).Count()
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}

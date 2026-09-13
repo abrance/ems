@@ -1,0 +1,36 @@
+brand: Star
+model: 100E
+type: pcs
+version: v1.0.0
+author: "zz@hexems.com"
+create: "2024-09-07"
+desc: "星星充电100E PCS"
+protocolType: "modbus"
+telemetry:
+  - key: status
+    name: "状态"
+    displayType: label
+    valueExplain:
+      - key: "0"
+        value: "未知"
+        color: "#FF5D5D"
+      - key: "1"
+        value: "关机"
+        color: "#9CBF30"
+      - key: "2"
+        value: "待机"
+        color: "#6967EE"
+      - key: "3"
+        value: "同步中"
+        color: "#29A634"
+      - key: "4"
+        value: "发电中"
+        color: "#0098FA"
+      - key: "5"
+        value: "故障"
+        color: "#FF5D5D"
+  - key: power
+    unit: "kW"
+    name: "发电功率"
+    value_type: float
+    component_type: number

@@ -1,0 +1,21 @@
+database:
+  default:
+    debug: false
+
+server:
+  address: ":15880"
+  pprofEnabled: true
+  dumpRouterMap: true
+  accessLogEnabled: true
+
+
+#debug:
+
+
+logger:
+  level:   "info"
+  biz_ems_stdout: true
+
+# 静态文件配置
+static:
+  path: "out/static"

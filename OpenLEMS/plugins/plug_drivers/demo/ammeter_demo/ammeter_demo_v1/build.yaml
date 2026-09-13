@@ -1,0 +1,43 @@
+brand: HEX
+model: Demo
+type: ammeter
+version: v1.0.0
+author: "zz@hexems.com"
+create: "2025-09-01"
+desc: "测试电表"
+protocolType: "modbus"
+telemetry:
+  - key: pTotal
+    unit: "kW"
+    name: "功率"
+    value_type: float
+    component_type: number
+  - key: frequency
+    name: "频率"
+    value_type: float
+    component_type: number
+  - key: pfTotal
+    name: "功率因素"
+    value_type: float
+    component_type: number
+  - key: historyIncomingQuantity
+    name: "正向总有功电能"
+    unit: "kWh"
+    value_type: float
+    component_type: number
+  - key: historyOutgoingQuantity
+    name: "反向总有功电能"
+    unit: "kWh"
+    value_type: float
+    component_type: number
+
+
+service:
+  - key: CustomPowerZeroService
+    name: "零功率"
+    description: "设置功率为零"
+    icon: "power-off"
+  - key:  CustomPowerRandomService
+    name: "随机功率"
+    description: "设置随机功率"
+    icon: "shuffle"

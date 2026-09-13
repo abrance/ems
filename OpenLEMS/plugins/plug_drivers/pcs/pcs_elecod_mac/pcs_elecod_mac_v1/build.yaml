@@ -1,0 +1,32 @@
+brand: Elecod
+model: MAC
+type: pcs
+version: v1.0.0
+author: "zz@hexems.com"
+create: "2025-08-10"
+desc: "亿兰科MAC协议"
+protocolType: "canbus"
+telemetry:
+  - key: power
+    unit: "kW"
+    desc: "功率"
+    value_type: float
+    component_type: number
+  - key: frequency
+    unit: "Hz"
+    desc: "频率"
+    value_type: float
+    component_type: number
+service:
+  - key: CustomShutdownService
+    name: "关机"
+    description: "设备关机"
+    icon: "power-off"
+  - key: CustomStartupService
+    name: "开机"
+    description: "设备开机"
+    icon: "power"
+  - key: CustomStandbyService
+    name: "待机"
+    description: "设备待机"
+    icon: "pause"
