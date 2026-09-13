@@ -1,0 +1,49 @@
+name: Go CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  go-ci:
+    name: Go CI
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+      CGO_LDFLAGS: "-lm"
+    defaults:
+      run:
+        working-directory: OpenLEMS/application
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: OpenLEMS/go.work
+          cache: true
+          cache-dependency-path: OpenLEMS/application/go.sum
+
+      - name: Build hexlib
+        working-directory: OpenLEMS/@cpp/hexlib
+        run: make build
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
