@@ -210,7 +210,8 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 		fileServer.ServeHTTP(r.Response.Writer, r.Request)
 	})
 	s.BindHandler("GET:/libs/*", func(r *ghttp.Request) {
-		fileServer.ServeHTTP(r.Response.Writer, r.Request)
+		// Frontend requests /libs/dashboard/*, while web.zip stores files under dashboard/.
+		http.StripPrefix("/libs", fileServer).ServeHTTP(r.Response.Writer, r.Request)
 	})
 	s.BindHandler("GET:/dashboard/*", func(r *ghttp.Request) {
 		fileServer.ServeHTTP(r.Response.Writer, r.Request)
