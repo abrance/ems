@@ -69,6 +69,18 @@ func (h *Handler) HandleInputRegisters(req *modbus.InputRegistersRequest) ([]uin
 	return nil, modbus.ErrIllegalFunction
 }
 
+func (h *Handler) Get(addr uint16) uint16 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.regs[addr]
+}
+
+func (h *Handler) Set(addr uint16, value uint16) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.regs[addr] = value
+}
+
 func (h *Handler) Snapshot() map[uint16]uint16 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

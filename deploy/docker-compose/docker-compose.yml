@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     pull_policy: always
     platform: linux/amd64
+    depends_on:
+      - emsdevice
     environment:
       APP_PROFILE: ${APP_PROFILE:-prod}
     command:
@@ -41,12 +43,21 @@ services:
     image: ${EMSDEVICE_IMAGE:-ghcr.io/abrance/emsdevice}:${EMSDEVICE_IMAGE_TAG:-v1.0.0}
     container_name: emsdevice
     restart: unless-stopped
+    pull_policy: always
     platform: linux/amd64
     command:
       - --listen
       - tcp://0.0.0.0:1502
       - --unit-id
       - "1"
+    environment:
+      EMSDEVICE_CONFIG: /etc/emsdevice/config.json
+      EMSDEVICE_MOCK: ${EMSDEVICE_MOCK:-live}
+      EMSDEVICE_MOCK_INTERVAL: ${EMSDEVICE_MOCK_INTERVAL:-1s}
+      EMSDEVICE_MOCK_SOC: ${EMSDEVICE_MOCK_SOC:-80}
+      EMSDEVICE_MOCK_POWER: ${EMSDEVICE_MOCK_POWER:-5}
+    volumes:
+      - ./emsdevice.json:/etc/emsdevice/config.json:ro
     ports:
       - "${EMSDEVICE_PORT:-1502}:1502"
     logging:
