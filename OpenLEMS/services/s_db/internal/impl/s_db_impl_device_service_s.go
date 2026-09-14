@@ -118,11 +118,18 @@ func (s *sDeviceServiceImpl) GetDeviceConfigsWithRecursion(ctx context.Context, 
 		return nil, err
 	}
 
-	var devices []*c_base.SDeviceConfig
-	if convErr := list.Structs(&devices); convErr != nil {
+	var models []*s_db_model.SDeviceModel
+	if convErr := list.Structs(&models); convErr != nil {
 		return nil, convErr
 	}
 
+	devices := make([]*c_base.SDeviceConfig, 0, len(models))
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		devices = append(devices, deviceModelToConfig(model))
+	}
 	return devices, nil
 }
 
@@ -250,4 +257,55 @@ func (s *sDeviceServiceImpl) CreateDevice(ctx context.Context, device *s_db_mode
 		return "", err
 	}
 	return device.Id, nil
+}
+
+func deviceModelToConfig(model *s_db_model.SDeviceModel) *c_base.SDeviceConfig {
+	config := &c_base.SDeviceConfig{
+		Id:                 model.Id,
+		Pid:                model.Pid,
+		Name:               model.Name,
+		ProtocolId:         model.ProtocolId,
+		Driver:             model.Driver,
+		EnableDebug:        model.EnableDebug,
+		ManualMode:         model.ManualMode,
+		StorageEnable:      model.StorageEnable,
+		StorageIntervalSec: model.StorageIntervalSec,
+		Sort:               model.Sort,
+		Enabled:            model.Enabled,
+	}
+	if model.CreatedAt != nil {
+		config.CreatedAt = model.CreatedAt.String()
+	}
+	if model.UpdatedAt != nil {
+		config.UpdatedAt = model.UpdatedAt.String()
+	}
+	if params := decodeDeviceParams(model.Params); len(params) > 0 {
+		config.Params = params
+	}
+	if external := decodeExternalParam(model.ExternalParam); external != nil {
+		config.ExternalParam = external
+	}
+	return config
+}
+
+func decodeDeviceParams(raw string) map[string]any {
+	if raw == "" || raw == "{}" || raw == s_db_model.EmptyValue || raw == s_db_model.NullValue {
+		return nil
+	}
+	var params map[string]any
+	if err := gjson.DecodeTo(raw, &params); err != nil {
+		return nil
+	}
+	return params
+}
+
+func decodeExternalParam(raw string) *c_base.SExternalParam {
+	if raw == "" || raw == "{}" || raw == s_db_model.EmptyValue || raw == s_db_model.NullValue {
+		return nil
+	}
+	var external c_base.SExternalParam
+	if err := gjson.DecodeTo(raw, &external); err != nil {
+		return nil
+	}
+	return &external
 }
