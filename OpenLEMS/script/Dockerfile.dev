@@ -46,14 +46,16 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # 设置 Go 环境变量(架构会动态设置)
 ARG TARGETARCH
 ENV GO111MODULE=on \
-    GOPROXY=https://goproxy.cn,direct \
+    GOPROXY=https://proxy.golang.org,https://goproxy.cn,direct \
     GOSUMDB=off \
     CGO_ENABLED=1 \
     GOOS=linux \
     GOARCH=${TARGETARCH} \
     CC=gcc \
     CXX=g++ \
-    PKG_CONFIG_PATH=""
+    PKG_CONFIG_PATH="" \
+    GOWORK=off \
+    GODEBUG=http2client=0
 
 # 设置工作目录
 WORKDIR /app
@@ -76,8 +78,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     echo "Downloading Go dependencies..." && \
     go env -w GOMODCACHE=/go/pkg/mod && \
     go env -w GOCACHE=/root/.cache/go-build && \
-    timeout 300 go mod download -x && \
-    echo "✓ Go dependencies downloaded"
+    i=0; \
+    until go mod download; do \
+      i=$((i+1)); \
+      if [ "$i" -ge 5 ]; then exit 1; fi; \
+      echo "go mod download retry $i"; \
+      sleep 5; \
+    done && \
+    echo "Go dependencies downloaded"
 
 # 第三步：编译 C++ 库（使用改进的 Makefile）
 WORKDIR /app/@cpp/hexlib
