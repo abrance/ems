@@ -3,12 +3,15 @@ package impl
 import (
 	"common/c_base"
 	"context"
+	"fmt"
 	"s_db/s_db_basic"
 	"s_db/s_db_model"
 	"sync"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/google/uuid"
 )
 
 type sDeviceServiceImpl struct {
@@ -227,4 +230,24 @@ func (s *sDeviceServiceImpl) GetDevicesByPidOrderBySort(ctx context.Context, pid
 	var devices []*s_db_model.SDeviceModel
 	err := g.Model(s.deviceModel).Ctx(ctx).Where(s_db_model.FieldDevicePid, pid).Order(s_db_model.FieldSort).Scan(&devices)
 	return devices, err
+}
+
+func (s *sDeviceServiceImpl) CreateDevice(ctx context.Context, device *s_db_model.SDeviceModel) (string, error) {
+	if device == nil {
+		return "", fmt.Errorf("device is nil")
+	}
+	if device.Id == "" {
+		device.Id = uuid.NewString()
+	}
+	existing, err := s.GetDeviceById(ctx, device.Id)
+	if err == nil && existing != nil && existing.Id != "" {
+		return "", fmt.Errorf("device id already exists: %s", device.Id)
+	}
+	now := gtime.Now()
+	device.CreatedAt = now
+	device.UpdatedAt = now
+	if err := device.Create(ctx); err != nil {
+		return "", err
+	}
+	return device.Id, nil
 }
