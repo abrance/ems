@@ -27,11 +27,9 @@ docker compose up -d
 
 ## emsdevice
 
-同 compose 会启动 `ess_demo` Modbus 从站，监听 `1502`。OpenLEMS 协议地址填 `emsdevice`，端口 `1502`，设备驱动 `ess_demo_v1.0.0`，`params.unitId=1`。
+同 compose 会启动 `ess_demo` Modbus 从站，监听 `1502`，并挂载 `emsdevice.json` 作为 mock 配置。
 
-本机调试：
+OpenLEMS 协议地址填 `emsdevice`，端口 `1502`，设备驱动 `ess_demo_v1.0.0`，`params.unitId=1`。
 
-```bash
-cd emsdevice
-go run ./cmd/emsdevice --listen tcp://127.0.0.1:1502 --unit-id 1
-```
+改点表或抖动幅度：编辑 `emsdevice.json` 后 `docker compose up -d emsdevice`。
+`.env` 里的 `EMSDEVICE_MOCK*` 会覆盖 JSON 中的同名项。`EMSDEVICE_MOCK=static` 关闭实时抖动。

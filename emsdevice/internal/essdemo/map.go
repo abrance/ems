@@ -24,22 +24,7 @@ const (
 
 // DefaultRegisters is a static snapshot that looks like a charging cabinet.
 func DefaultRegisters() map[uint16]uint16 {
-	return map[uint16]uint16{
-		AddrStatus:            2,    // charging
-		AddrPower:             50,   // 5.0 kW
-		AddrSOC:               800,  // 80.0%
-		AddrGeneratedEnergy:   1200, // 120.0 kWh
-		AddrConsumedEnergy:    1500, // 150.0 kWh
-		AddrMaxChargePower:    500,  // 50.0 kW
-		AddrMaxDischargePower: 500,  // 50.0 kW
-		AddrDeviceControl:     1,    // on
-		AddrTargetPower:       50,   // 5.0 kW
-		AddrPowerCapacity:     1000, // 100.0 kW
-		AddrEnergyCapacity:    2000, // 200.0 kWh
-		AddrMinSOC:            100,  // 10.0%
-		AddrMaxSOC:            950,  // 95.0%
-		AddrChargeEfficiency:  9500, // 95.00 (scale 0.01)
-	}
+	return DefaultValues().Registers()
 }
 
 func InRange(addr uint16) bool {
