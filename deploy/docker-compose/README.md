@@ -24,3 +24,14 @@ docker compose up -d
 ```
 
 默认映射 `http://服务器IP:80`。换版本时改 `LEMS_IMAGE_TAG` 后再次执行 `docker compose up -d`。
+
+## emsdevice
+
+同 compose 会启动 `ess_demo` Modbus 从站，监听 `1502`。OpenLEMS 协议地址填 `emsdevice`，端口 `1502`，设备驱动 `ess_demo_v1.0.0`，`params.unitId=1`。
+
+本机调试：
+
+```bash
+cd emsdevice
+go run ./cmd/emsdevice --listen tcp://127.0.0.1:1502 --unit-id 1
+```

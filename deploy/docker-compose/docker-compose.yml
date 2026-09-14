@@ -37,5 +37,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  emsdevice:
+    image: ${EMSDEVICE_IMAGE:-ghcr.io/abrance/emsdevice}:${EMSDEVICE_IMAGE_TAG:-v1.0.0}
+    container_name: emsdevice
+    restart: unless-stopped
+    platform: linux/amd64
+    command:
+      - --listen
+      - tcp://0.0.0.0:1502
+      - --unit-id
+      - "1"
+    ports:
+      - "${EMSDEVICE_PORT:-1502}:1502"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   lems-data:

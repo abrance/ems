@@ -1,0 +1,28 @@
+name: Docker Publish emsdevice
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker-publish:
+    permissions:
+      contents: read
+      packages: write
+    uses: abrance/yoc/.github/workflows/docker-publish-ghcr.yml@v1.0.0
+    with:
+      context: emsdevice
+      file: emsdevice/Dockerfile
+      image-name: ${{ github.repository }}device
+      platforms: linux/amd64
+      tags: |
+        type=ref,event=tag
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
