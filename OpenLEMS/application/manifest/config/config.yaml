@@ -36,6 +36,20 @@ database:
     link: "sqlite::@file(out/db.sqlite3)"
     timezone: "Local"
 
+# 电网电价自动同步配置
+# 数据来源：公开的分时电价查询接口，按当前月拉取并写入电价表
+price_sync:
+  enabled: true
+  base_url: "https://energydc.cn/edc/api/v1"
+  region: 40            # 地区ID：40=广东珠三角五市
+  usage: 24             # 用电类型：24=工商业用电
+  cost: 12              # 计费方式：12=两部制
+  voltage: 19           # 电压等级：19=1-10(20)千伏
+  interval_hours: 12    # 同步间隔（小时）
+  lookback_months: 6    # 当前月无数据时向前回溯的月数
+  priority: 1           # 写入电价的优先级（数值越小优先级越高）
+  description: "电网分时电价"
+
 # PID文件配置
 pid:
   file: "out/ems.pid"  # PID文件路径，支持相对路径和绝对路径

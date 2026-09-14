@@ -75,6 +75,11 @@ func (m *sPriceManagerImpl) Start(ctx context.Context) error {
 		return errors.Wrap(err, "启动电价保存定时器失败")
 	}
 
+	// 启动电网电价同步
+	if err := StartEnergydcPriceSync(ctx); err != nil {
+		c_log.Errorf(ctx, "启动电网电价同步失败: %+v", err)
+	}
+
 	c_log.Info(ctx, "电价管理器启动成功")
 	return nil
 }
