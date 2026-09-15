@@ -28,8 +28,24 @@ type Price struct {
 	CreatedBy     string                   `json:"createdBy" dc:"创建人"`
 }
 
-// UnmarshalValue 将数据库Model转换为DTO
+// UnmarshalValue 将数据库Model或运行态电价信息转换为DTO
 func (p *Price) UnmarshalValue(value interface{}) error {
+	if info, ok := value.(*s_price.SPriceInfo); ok {
+		p.Id = info.Id
+		p.Description = info.Description
+		p.Priority = info.Priority
+		p.Status = info.Status
+		p.IsActive = info.IsActive
+		p.DateRange = info.DateRange
+		p.TimeRange = info.TimeRange
+		p.PriceSegments = info.PriceSegments
+		p.RemoteId = info.RemoteId
+		p.CreatedAt = info.CreatedAt
+		p.UpdatedAt = info.UpdatedAt
+		p.CreatedBy = info.CreatedBy
+		return nil
+	}
+
 	if model, ok := value.(*s_db_model.SPriceModel); ok {
 		// 基础字段映射
 		p.Id = model.Id
