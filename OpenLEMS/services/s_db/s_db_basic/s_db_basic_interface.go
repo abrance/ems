@@ -130,3 +130,11 @@ type IPriceService interface {
 	// 统计方法
 	GetPriceCount(ctx context.Context) (int, error)
 }
+
+// ISpotReportService 广东电力现货运行日报档案
+type ISpotReportService interface {
+	List(ctx context.Context) ([]*s_db_model.SSpotReportModel, error)
+	GetByDate(ctx context.Context, runDate string) (*s_db_model.SSpotReportModel, error)
+	GetLatest(ctx context.Context) (*s_db_model.SSpotReportModel, error)
+	Upsert(ctx context.Context, model *s_db_model.SSpotReportModel) error
+}

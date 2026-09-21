@@ -52,3 +52,8 @@ func GetEnergyStorageStrategyService() s_db_basic.IEnergyStorageStrategyService 
 func GetPriceService() s_db_basic.IPriceService {
 	return impl.GetPriceService()
 }
+
+// GetSpotReportService 获取现货日报service对象
+func GetSpotReportService() s_db_basic.ISpotReportService {
+	return impl.GetSpotReportService()
+}

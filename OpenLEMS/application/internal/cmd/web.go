@@ -15,6 +15,7 @@ import (
 	"application/internal/controller/protocol"
 	"application/internal/controller/remote"
 	"application/internal/controller/setting"
+	"application/internal/controller/spotreport"
 	"application/internal/controller/system"
 	"application/internal/utils"
 	"application/manifest"
@@ -141,6 +142,7 @@ func setupAPIRoutes(s *ghttp.Server) {
 		group.Bind(setting.NewV1())
 		group.Bind(automation.NewV1())
 		group.Bind(remote.NewV1())
+		group.Bind(spotreport.NewV1())
 	})
 }
 
@@ -216,6 +218,12 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 	s.BindHandler("GET:/dashboard/*", func(r *ghttp.Request) {
 		fileServer.ServeHTTP(r.Response.Writer, r.Request)
 	})
+	if overlayFS, overlayErr := fs.Sub(manifest.OverlayFS, "overlay"); overlayErr == nil {
+		overlayServer := http.FileServer(http.FS(overlayFS))
+		s.BindHandler("GET:/overlay/*", func(r *ghttp.Request) {
+			http.StripPrefix("/overlay", overlayServer).ServeHTTP(r.Response.Writer, r.Request)
+		})
+	}
 
 	// 根路径：直接输出 index.html
 	s.BindHandler("GET:/", func(r *ghttp.Request) {
@@ -240,6 +248,7 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 			strings.HasPrefix(r.URL.Path, "/config/") ||
 			strings.HasPrefix(r.URL.Path, "/demo/") ||
 			strings.HasPrefix(r.URL.Path, "/libs/") ||
+			strings.HasPrefix(r.URL.Path, "/overlay/") ||
 			r.URL.Path == "/favicon.ico" {
 			r.Response.WriteStatus(http.StatusNotFound)
 			return
@@ -285,7 +294,8 @@ func buildIndexHTMLWithRuntimeConfig(ctx context.Context, webfs fs.FS) ([]byte, 
 	indexHTML := string(indexHTMLBytes)
 
 	if strings.Contains(indexHTML, "</head>") {
-		indexHTML = strings.Replace(indexHTML, "</head>", "    "+runtimeScript+"\n  </head>", 1)
+		overlayTags := runtimeScript + "\n    <link rel=\"stylesheet\" href=\"/overlay/spot-overlay.css\" />\n    <script src=\"/overlay/spot-overlay.js\" defer></script>\n"
+		indexHTML = strings.Replace(indexHTML, "</head>", "    "+overlayTags+"  </head>", 1)
 	} else {
 		indexHTML = runtimeScript + indexHTML
 	}

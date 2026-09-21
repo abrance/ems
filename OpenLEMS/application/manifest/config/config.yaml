@@ -50,6 +50,14 @@ price_sync:
   priority: 1           # 写入电价的优先级（数值越小优先级越高）
   description: "电网分时电价"
 
+# 广东现货运行日报图片存储。密钥用环境变量 QINIU_ACCESS_KEY / QINIU_SECRET_KEY 注入，不要写入仓库。
+qiniu:
+  accessKey: ""
+  secretKey: ""
+  bucket: "tos-me"
+  domain: "http://file.xiaoyxq.top"
+  zone: "z2"
+
 # PID文件配置
 pid:
   file: "out/ems.pid"  # PID文件路径，支持相对路径和绝对路径
