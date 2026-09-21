@@ -224,6 +224,23 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_spot_report (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			run_date VARCHAR(10) NOT NULL UNIQUE,
+			title VARCHAR(255) NOT NULL,
+			source_url TEXT NOT NULL,
+			pages TEXT NOT NULL,
+			collected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	c_log.Info(ctx, "Database tables created successfully")
 
 	// 初始化系统设置数据
