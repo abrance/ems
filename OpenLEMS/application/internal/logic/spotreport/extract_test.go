@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// 回归用例使用真实日报的 OCR 结果（fixture 为坐标压缩后的原始输出）：
+// 回归用例使用真实日报的 OCR 结果（fixture 放在 fixtures/（仓库 .gitignore 忽略了 testdata/））：
 //   - 2026-09-21：4 页齐全，2381x3367
 //   - 2026-09-18：1587x2245（不同分辨率），用于验证模板的坐标归一化
 // fixture 里保留了 OCR 的原始碎片形态（含括号跨行断裂），因此这些用例同时覆盖
@@ -26,7 +26,7 @@ type fixture struct {
 
 func loadPage(t *testing.T, name string, width, height float64) PageInput {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/" + name)
+	raw, err := os.ReadFile("fixtures/" + name)
 	if err != nil {
 		t.Fatalf("读取 fixture %s 失败：%v", name, err)
 	}
