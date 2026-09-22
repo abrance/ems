@@ -562,3 +562,15 @@
   align-items: center;
   gap: 12px;
 }
+
+/* 图像采样预填徽标（需人工确认） */
+.spot-origin-cv {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(52, 115, 210, 0.14);
+  color: #3473d2;
+  font-size: 11px;
+  line-height: 18px;
+}
