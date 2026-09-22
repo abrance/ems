@@ -423,3 +423,113 @@
   height: calc((100vh - 95px) * 0.4) !important;
   flex: 0 0 auto !important;
 }
+
+/* 详情弹窗：原图 / 数据 页签 */
+.spot-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.spot-modal-head h3 {
+  margin: 0 0 4px;
+}
+.spot-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.spot-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border, #e5e6eb);
+  background: var(--color-bg-1, #f7f8fa);
+  color: var(--color-text-1, #1d2129);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.spot-tab.active {
+  background: rgb(var(--primary-6, 255, 125, 0));
+  border-color: rgb(var(--primary-6, 255, 125, 0));
+  color: #fff;
+}
+.spot-detail-body {
+  min-height: 120px;
+}
+.spot-data-meta {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+  margin-bottom: 8px;
+}
+.spot-data-note {
+  font-size: 12px;
+  color: var(--color-text-2, #4e5969);
+  background: var(--color-fill-1, #f2f3f5);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+.spot-data-warn {
+  font-size: 12px;
+  color: #cb272d;
+  background: rgba(203, 39, 45, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 12px;
+}
+.spot-data-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-1, #1d2129);
+  margin: 16px 0 8px;
+}
+.spot-data-title:first-of-type {
+  margin-top: 8px;
+}
+.spot-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.spot-data-table th,
+.spot-data-table td {
+  border-bottom: 1px solid var(--color-border, #e5e6eb);
+  padding: 8px 10px;
+  text-align: right;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.spot-data-table th {
+  background: var(--color-fill-1, #f2f3f5);
+  font-weight: 600;
+  text-align: right;
+}
+.spot-data-table th:first-child,
+.spot-data-table td:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+.spot-data-value {
+  font-variant-numeric: tabular-nums;
+}
+.spot-data-time,
+.spot-data-share {
+  font-size: 11px;
+  color: var(--color-text-3, #86909c);
+}
+.spot-mom {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+}
+.spot-mom.up {
+  color: #cb272d;
+}
+.spot-mom.down {
+  color: #00a870;
+}
+.spot-data-missing {
+  color: var(--color-text-3, #86909c);
+}

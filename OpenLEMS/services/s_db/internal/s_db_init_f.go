@@ -241,6 +241,52 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_spot_metric (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			report_date VARCHAR(10) NOT NULL,
+			run_date VARCHAR(10) NOT NULL,
+			dataset VARCHAR(32) NOT NULL,
+			scope VARCHAR(32) NOT NULL DEFAULT '',
+			metric VARCHAR(32) NOT NULL,
+			value REAL NOT NULL DEFAULT 0,
+			unit VARCHAR(16) NOT NULL DEFAULT '',
+			at_time VARCHAR(8) NOT NULL DEFAULT '',
+			mom_pct REAL,
+			share_pct REAL,
+			source VARCHAR(32) NOT NULL DEFAULT '',
+			conf REAL NOT NULL DEFAULT 0,
+			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (run_date, dataset, scope, metric)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_spot_extract_run (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			report_date VARCHAR(10) NOT NULL UNIQUE,
+			status VARCHAR(16) NOT NULL DEFAULT '',
+			ocr_model VARCHAR(16) NOT NULL DEFAULT '',
+			page_count INTEGER NOT NULL DEFAULT 0,
+			ocr_ms INTEGER NOT NULL DEFAULT 0,
+			warnings TEXT,
+			payload TEXT,
+			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	c_log.Info(ctx, "Database tables created successfully")
 
 	// 初始化系统设置数据
