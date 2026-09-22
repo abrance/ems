@@ -253,6 +253,7 @@ func initConfigDatabase() error {
 			value REAL NOT NULL DEFAULT 0,
 			unit VARCHAR(16) NOT NULL DEFAULT '',
 			at_time VARCHAR(8) NOT NULL DEFAULT '',
+			text_value VARCHAR(32) NOT NULL DEFAULT '',
 			mom_pct REAL,
 			share_pct REAL,
 			source VARCHAR(32) NOT NULL DEFAULT '',
@@ -358,6 +359,7 @@ func migrateSpotMetricUniqueKey(ctx context.Context) error {
 			value REAL NOT NULL DEFAULT 0,
 			unit VARCHAR(16) NOT NULL DEFAULT '',
 			at_time VARCHAR(8) NOT NULL DEFAULT '',
+			text_value VARCHAR(32) NOT NULL DEFAULT '',
 			mom_pct REAL,
 			share_pct REAL,
 			source VARCHAR(32) NOT NULL DEFAULT '',
@@ -374,7 +376,7 @@ func migrateSpotMetricUniqueKey(ctx context.Context) error {
 // migrateSpotMetricEditColumns 老库补列：origin / edited_by / edited_at（人工修订层新增）。
 // sqlite 的 ADD COLUMN 是幂等的轻量操作；列已存在或非 sqlite 时静默跳过。
 func migrateSpotMetricEditColumns(ctx context.Context) error {
-	columns := []string{"origin", "edited_by", "edited_at"}
+	columns := []string{"origin", "edited_by", "edited_at", "text_value"}
 	for _, name := range columns {
 		value, err := g.DB().GetValue(ctx,
 			`SELECT COUNT(*) FROM pragma_table_info('gd_spot_metric') WHERE name = ?`, name)
@@ -390,6 +392,8 @@ func migrateSpotMetricEditColumns(ctx context.Context) error {
 			ddl = `ALTER TABLE gd_spot_metric ADD COLUMN edited_by VARCHAR(64) NOT NULL DEFAULT ''`
 		case "edited_at":
 			ddl = `ALTER TABLE gd_spot_metric ADD COLUMN edited_at DATETIME`
+		case "text_value":
+			ddl = `ALTER TABLE gd_spot_metric ADD COLUMN text_value VARCHAR(32) NOT NULL DEFAULT ''`
 		}
 		if _, err := g.DB().Exec(ctx, ddl); err != nil {
 			return err

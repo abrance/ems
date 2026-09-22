@@ -7,19 +7,25 @@
   let homeState = { dates: [], date: "", report: null, page: 0, empty: true };
 
   // 结构化数据的展示配置：数据集 → 展示名与列（列 = [指标名, 单位]）
-  const DATASET_ORDER = ["summary", "day_ahead_trade", "realtime_trade", "day_ahead_decl"];
+  const DATASET_ORDER = ["summary", "day_ahead_trade", "realtime_trade", "day_ahead_decl",
+                         "node_price_peak", "node_price_valley"];
   const DATASET_LABELS = {
     summary: "正文摘要指标",
     day_ahead_trade: "日前成交电价",
     realtime_trade: "实时成交电价",
-    day_ahead_decl: "日前申报信息"
+    day_ahead_decl: "日前申报信息",
+    node_price_peak: "高峰时刻地市节点电价档位（图2-1）",
+    node_price_valley: "低谷时刻地市节点电价档位（图2-2）"
   };
+  const BUCKET_LABELS = ["[-inf,200)", "[200,400)", "[400,600)", "[600,800)", "[800,+inf)"];
   const DATASET_COLUMNS = {
     summary: [["日前加权平均电价"], ["燃煤均价"], ["燃气均价"], ["日前成交最高价"], ["日前成交最低价"]],
     day_ahead_trade: [["最高电价"], ["最低电价"], ["平均电价"], ["电价环比"]],
     realtime_trade: [["最高电价"], ["最低电价"], ["平均电价"], ["电价环比"]],
     day_ahead_decl: [["最高电价"], ["最低电价"], ["平均电价"], ["自主申报台数"], ["默认申报台数"],
-                     ["申报容量"], ["煤机容量"], ["气机容量"], ["新能源容量"]]
+                     ["申报容量"], ["煤机容量"], ["气机容量"], ["新能源容量"]],
+    node_price_peak: [["价格档位"]],
+    node_price_valley: [["价格档位"]]
   };
   let listState = [];
   let lastPath = "";
@@ -323,12 +329,21 @@
 
   // 人工修订单个字段：就地输入 → 保存（origin 变 manual，后台留审计）
   function editMetric(container, report, metric) {
+    const isBucket = metric.metric === "价格档位";
+    const hint = isBucket
+      ? "\n请输入档位序号 1-" + BUCKET_LABELS.length + "：\n" +
+        BUCKET_LABELS.map(function (l, i) { return "  " + (i + 1) + " = " + l; }).join("\n")
+      : "";
     const next = window.prompt("修订 " + metric.scope + " / " + metric.metric +
-      "（运行日 " + metric.runDate + "）\n当前值：" + metric.value + (metric.unit || "") +
-      "\n注意：再次执行「解析数据」会以 OCR 结果覆盖本次修订（审计表会留痕）", String(metric.value));
+      "（运行日 " + metric.runDate + "）\n当前值：" + metric.value + (metric.unit || "") + hint +
+      "\n注意：再次执行「解析数据」会以采样/OCR 结果覆盖本次修订（审计表会留痕）", String(metric.value));
     if (next === null) return;
     const value = Number(next);
     if (!isFinite(value)) { window.alert("请输入数字"); return; }
+    if (isBucket && (value < 1 || value > BUCKET_LABELS.length || value !== Math.round(value))) {
+      window.alert("档位必须是 1-" + BUCKET_LABELS.length + " 的整数");
+      return;
+    }
     api("/api/spot-report/metric", {
       method: "POST",
       body: JSON.stringify({
@@ -338,6 +353,7 @@
     }).then(function () {
       metric.value = value;
       metric.origin = "manual";
+      if (isBucket) metric.textValue = BUCKET_LABELS[value - 1];
       renderDataTab(container, report);
     }).catch(function (err) {
       window.alert("修订失败：" + (err.message || "未知错误"));
@@ -416,6 +432,11 @@
         container.appendChild(el("div", { class: "spot-data-note",
           text: "注：日报里的表2 承载滞后运行日 " + data.tradeDate + " 的日前/实时成交电价" }));
       }
+      const pending = metrics.filter(function (m) { return m.origin === "cv"; }).length;
+      if (pending) {
+        container.appendChild(el("div", { class: "spot-data-note",
+          text: "其中有 " + pending + " 项为图像采样预填（标记「预填」），请人工确认；确认后会自动标记为人工值" }));
+      }
       if (info && info.warnings && info.warnings.length) {
         container.appendChild(el("div", { class: "spot-data-warn", text: "校验告警：" + info.warnings.join("；") }));
       }
@@ -446,7 +467,10 @@
               return;
             }
             const cellChildren = [];
-            const valueText = fmtNum(hit.value) + (hit.unit === "%" ? "%" : "");
+            const isBucket = hit.metric === "价格档位";
+            const valueText = isBucket
+              ? (fmtNum(hit.value) + " 档" + (hit.textValue ? " · " + hit.textValue : ""))
+              : fmtNum(hit.value) + (hit.unit === "%" ? "%" : "");
             if (isAdmin()) {
               cellChildren.push(el("button", {
                 class: "spot-data-value spot-data-editable",
@@ -461,6 +485,9 @@
               cellChildren.push(el("span", { class: "spot-origin-manual",
                 text: "人工" + (hit.editedBy ? "·" + hit.editedBy : ""),
                 title: "人工修订" + (hit.editedAt ? "于 " + hit.editedAt.slice(0, 19).replace("T", " ") : "") }));
+            } else if (hit.origin === "cv") {
+              cellChildren.push(el("span", { class: "spot-origin-cv", text: "预填",
+                title: "图像颜色采样预填，请人工确认" }));
             }
             if (hit.atTime) cellChildren.push(el("div", { class: "spot-data-time", text: "@" + hit.atTime }));
             const badge = momBadge(hit.momPct);

@@ -91,6 +91,7 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 				s_db_model.FieldSpotMetricValue:         m.Value,
 				s_db_model.FieldSpotMetricUnit:          m.Unit,
 				s_db_model.FieldSpotMetricAtTime:        m.AtTime,
+				"text_value":                            m.TextValue,
 				s_db_model.FieldSpotMetricMomPct:        m.MomPct,
 				s_db_model.FieldSpotMetricSharePct:      m.SharePct,
 				s_db_model.FieldSpotMetricSource:        m.Source,

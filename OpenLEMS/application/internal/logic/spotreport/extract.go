@@ -109,18 +109,21 @@ type PageInput struct {
 
 // Metric 一条结构化指标
 type Metric struct {
-	RunDate  string
-	Dataset  string
-	Scope    string
-	Metric   string
-	Value    float64
-	Unit     string
-	AtTime   string
-	MomPct   *float64
-	SharePct *float64
-	Source   string
-	Conf     float64
-	Text     string // 原始单元格文本，便于排查
+	RunDate   string
+	Dataset   string
+	Scope     string
+	Metric    string
+	Value     float64
+	Unit      string
+	AtTime    string
+	TextValue string // 非数值载荷（地市电价档位区间等）
+	MomPct    *float64
+	SharePct  *float64
+	Source    string
+	Conf      float64
+	// Origin 取值 ocr/cv/manual：cv 表示图像采样预填（需人工确认）
+	Origin string
+	Text   string // 原始单元格文本，便于排查
 }
 
 // ExtractResult 一次模板提取的产物
@@ -670,6 +673,27 @@ func validate(res *ExtractResult) []string {
 			warnings = append(warnings, fmt.Sprintf("%s 最高%.2f≥平均%.2f≥最低%.2f 不成立", key, hi, av, lo))
 		}
 	}
+	// 地图分档自检：同一地市的高峰档位不应低于低谷档位
+	peak := map[string]float64{}
+	valley := map[string]float64{}
+	for _, m := range res.Metrics {
+		if m.Metric != MetricPriceBucket {
+			continue
+		}
+		switch m.Dataset {
+		case DatasetNodePricePeak:
+			peak[m.Scope] = m.Value
+		case DatasetNodePriceValley:
+			valley[m.Scope] = m.Value
+		}
+	}
+	for city, pv := range peak {
+		if vv, ok := valley[city]; ok && pv < vv {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s 高峰电价档位(%.0f) 低于低谷档位(%.0f)，地图采样可能有误，请人工确认", city, pv, vv))
+		}
+	}
+
 	// 低置信度单元格
 	for _, m := range res.Metrics {
 		if m.Conf > 0 && m.Conf < 0.8 {

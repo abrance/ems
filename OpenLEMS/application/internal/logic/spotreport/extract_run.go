@@ -1,9 +1,13 @@
 package spotreport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"time"
 
 	v1 "application/api/spotreport/v1"
@@ -41,28 +45,38 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 	}
 
 	inputs := make([]PageInput, 0, len(pages))
+	linesByPage := map[int][]OCRLine{}
+	imageByPage := map[int]image.Image{}
 	ocrMs := 0
 	for _, page := range pages {
-		image, err := downloadImage(ctx, page.URL)
+		imageBytes, err := downloadImage(ctx, page.URL)
 		if err != nil {
 			return nil, err
 		}
-		result, err := client.Recognize(ctx, image)
+		result, err := client.Recognize(ctx, imageBytes)
 		if err != nil {
 			return nil, fmt.Errorf("第 %d 页识别失败：%v", page.Page, err)
 		}
 		ocrMs += int(result.TimeMs)
+		linesByPage[page.Page] = result.Results
 		inputs = append(inputs, PageInput{
 			Width:  float64(page.Width),
 			Height: float64(page.Height),
 			Lines:  result.Results,
 		})
+		// 图2-1 / 图2-2 的数值只在像素里，需要图像本身做颜色采样
+		if page.Page == 2 || page.Page == 3 {
+			if decoded, _, err := image.Decode(bytes.NewReader(imageBytes)); err == nil {
+				imageByPage[page.Page] = decoded
+			}
+		}
 	}
 
 	extracted, err := ExtractFromPages(reportDate, inputs)
 	if err != nil {
 		return nil, err
 	}
+	extracted.Metrics = append(extracted.Metrics, sampleNodePriceMetrics(reportDate, &extracted.Warnings, imageByPage, linesByPage)...)
 	// 与库中已有的同日指标交叉校验（表2 承载的是滞后运行日，正常情况下应与那天的表1(二) 一致）
 	extracted.Warnings = append(extracted.Warnings, crossCheckStored(ctx, extracted)...)
 
@@ -77,6 +91,7 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 			Value:            m.Value,
 			Unit:             m.Unit,
 			AtTime:           m.AtTime,
+			TextValue:        m.TextValue,
 			MomPct:           m.MomPct,
 			SharePct:         m.SharePct,
 			Source:           m.Source,
@@ -144,7 +159,8 @@ func GetReportData(ctx context.Context, reportDate string) (*v1.GetSpotReportDat
 		}
 		metrics = append(metrics, &v1.SpotMetric{
 			RunDate: m.RunDate, Dataset: m.Dataset, Scope: m.Scope, Metric: m.Metric, Value: m.Value,
-			Unit: m.Unit, AtTime: m.AtTime, MomPct: m.MomPct, SharePct: m.SharePct,
+			Unit: m.Unit, AtTime: m.AtTime, TextValue: m.TextValue,
+			MomPct: m.MomPct, SharePct: m.SharePct,
 			Source: m.Source, Conf: m.Conf, Origin: m.Origin,
 			EditedBy: m.EditedBy, EditedAt: editedAt,
 		})
@@ -261,6 +277,38 @@ func overwriteWarnings(overwritten []s_db_basic.SpotMetricOverwrite) []string {
 		}
 		out = append(out, fmt.Sprintf("重跑覆盖人工修订：运行日 %s %s/%s（%s）人工值 %v → OCR 值 %s",
 			o.Key.RunDate, o.Key.Scope, o.Key.Metric, source, o.OldValue, newText))
+	}
+	return out
+}
+
+// sampleNodePriceMetrics 采样图2-1（高峰）/ 图2-2（低谷）的地市电价档位。
+//
+// 这两张图的数值只存在于像素里（choropleth 填色），OCR 拿不到；采样结果标记为
+// origin=cv，属于「预填」，需要人工在页面上确认。配色与图例不一致时不预填。
+func sampleNodePriceMetrics(runDate string, warnings *[]string, images map[int]image.Image, lines map[int][]OCRLine) []Metric {
+	specs := []struct {
+		page    int
+		dataset string
+		source  string
+	}{
+		{2, DatasetNodePricePeak, "图2-1"},
+		{3, DatasetNodePriceValley, "图2-2"},
+	}
+	var out []Metric
+	for _, spec := range specs {
+		img, okImg := images[spec.page]
+		if !okImg {
+			continue
+		}
+		buckets, warns := SampleMapBuckets(img, lines[spec.page])
+		*warnings = append(*warnings, warns...)
+		for _, b := range buckets {
+			out = append(out, Metric{
+				RunDate: runDate, Dataset: spec.dataset, Scope: b.City,
+				Metric: MetricPriceBucket, Value: float64(b.Bucket), TextValue: b.Label,
+				Source: spec.source, Conf: b.Conf, Origin: OriginCV,
+			})
+		}
 	}
 	return out
 }
