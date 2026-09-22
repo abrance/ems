@@ -80,25 +80,7 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 	// 与库中已有的同日指标交叉校验（表2 承载的是滞后运行日，正常情况下应与那天的表1(二) 一致）
 	extracted.Warnings = append(extracted.Warnings, crossCheckStored(ctx, extracted)...)
 
-	metrics := make([]*s_db_model.SSpotMetricModel, 0, len(extracted.Metrics))
-	for _, m := range extracted.Metrics {
-		metrics = append(metrics, &s_db_model.SSpotMetricModel{
-			ReportDate:       reportDate,
-			RunDate:          m.RunDate,
-			Dataset:          m.Dataset,
-			Scope:            m.Scope,
-			Metric:           m.Metric,
-			Value:            m.Value,
-			Unit:             m.Unit,
-			AtTime:           m.AtTime,
-			TextValue:        m.TextValue,
-			MomPct:           m.MomPct,
-			SharePct:         m.SharePct,
-			Source:           m.Source,
-			Conf:             m.Conf,
-			ExtractorVersion: ExtractorVersion,
-		})
-	}
+	metrics := metricModels(reportDate, extracted.Metrics)
 	overwritten, err := s_db.GetSpotExtractService().ReplaceMetrics(ctx, reportDate, metrics)
 	if err != nil {
 		return nil, err
@@ -309,6 +291,34 @@ func sampleNodePriceMetrics(runDate string, warnings *[]string, images map[int]i
 				Source: spec.source, Conf: b.Conf, Origin: OriginCV,
 			})
 		}
+	}
+	return out
+}
+
+// metricModels 把提取结果映射为库模型。
+//
+// 单独抽出来是为了可测：映射漏字段（例如 origin）不会报错，只会让上游语义静默丢失
+// —— 之前就漏过 origin，导致图像采样预填被当成普通 OCR 值入库。
+func metricModels(reportDate string, metrics []Metric) []*s_db_model.SSpotMetricModel {
+	out := make([]*s_db_model.SSpotMetricModel, 0, len(metrics))
+	for _, m := range metrics {
+		out = append(out, &s_db_model.SSpotMetricModel{
+			ReportDate:       reportDate,
+			RunDate:          m.RunDate,
+			Dataset:          m.Dataset,
+			Scope:            m.Scope,
+			Metric:           m.Metric,
+			Value:            m.Value,
+			Unit:             m.Unit,
+			AtTime:           m.AtTime,
+			TextValue:        m.TextValue,
+			MomPct:           m.MomPct,
+			SharePct:         m.SharePct,
+			Source:           m.Source,
+			Conf:             m.Conf,
+			Origin:           m.Origin,
+			ExtractorVersion: ExtractorVersion,
+		})
 	}
 	return out
 }
