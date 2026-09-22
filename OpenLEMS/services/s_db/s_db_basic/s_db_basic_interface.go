@@ -163,6 +163,9 @@ type ISpotExtractService interface {
 	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel) ([]SpotMetricOverwrite, error)
 	// UpdateMetricValue 人工修订单个指标值（origin 置为 manual，并写审计）
 	UpdateMetricValue(ctx context.Context, key SpotMetricKey, value float64, operator string) (*s_db_model.SSpotMetricModel, error)
+	// ConfirmMetrics 把某份日报中 origin=cv 的预填项标记为人工已确认（origin=manual），
+	// 并写审计。dataset 为空表示该日报全部数据集。返回确认条数。
+	ConfirmMetrics(ctx context.Context, reportDate, dataset, operator string) (int, error)
 	// ListMetricAudit 查询某份日报的指标变更审计
 	ListMetricAudit(ctx context.Context, reportDate string, limit int) ([]*s_db_model.SSpotMetricAuditModel, error)
 	// ListMetrics 按日报查询指标（含该日报里滞后运行日的数据）

@@ -206,6 +206,10 @@ func crossCheckStored(ctx context.Context, extracted *ExtractResult) []string {
 
 // UpdateMetric 人工修订单个指标（异常兜底：自动提取为主，只改有问题的字段）
 func UpdateMetric(ctx context.Context, req *v1.UpdateSpotMetricReq, operator string) (*v1.UpdateSpotMetricRes, error) {
+	// 请求里显式给了修订人就用它，否则回落到会话角色
+	if req.Operator != "" {
+		operator = req.Operator
+	}
 	if operator == "" {
 		operator = "admin"
 	}
@@ -321,4 +325,16 @@ func metricModels(reportDate string, metrics []Metric) []*s_db_model.SSpotMetric
 		})
 	}
 	return out
+}
+
+// ConfirmReportMetrics 一键确认某份日报的采样/OCR 预填值（人工复核）
+func ConfirmReportMetrics(ctx context.Context, reportDate, dataset, operator string) (*v1.ConfirmSpotMetricRes, error) {
+	if operator == "" {
+		operator = "admin"
+	}
+	count, err := s_db.GetSpotExtractService().ConfirmMetrics(ctx, reportDate, dataset, operator)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.ConfirmSpotMetricRes{Confirmed: count}, nil
 }

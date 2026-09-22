@@ -360,6 +360,22 @@
     });
   }
 
+  // 一键确认预填：origin=cv → manual（人工复核，不是逐项重填）
+  function confirmPrefill(container, report, pending) {
+    if (!window.confirm("确认将 " + pending + " 项预填值标记为已人工复核？\n（数值不变；如需修正请先点击对应字段修改）")) return;
+    api("/api/spot-report/confirm", {
+      method: "POST",
+      body: JSON.stringify({ date: report.date })
+    }).then(function (res) {
+      renderDataTab(container, report);
+      if (res && res.confirmed) {
+        window.alert("已确认 " + res.confirmed + " 项，可在「变更记录」中查看");
+      }
+    }).catch(function (err) {
+      window.alert("确认失败：" + (err.message || "未知错误"));
+    });
+  }
+
   // 审计：人工修订与被覆盖记录
   function showAudit(report) {
     api("/api/spot-report/audit?date=" + encodeURIComponent(report.date) + "&limit=50").then(function (data) {
@@ -388,7 +404,7 @@
                 el("td", { text: a.metric }),
                 el("td", { text: a.oldValue === null || a.oldValue === undefined ? "-" : String(a.oldValue) }),
                 el("td", { text: a.newValue === null || a.newValue === undefined ? "-" : String(a.newValue) }),
-                el("td", { text: a.operation === "edit" ? "人工修订" : "被解析覆盖" }),
+                el("td", { text: a.operation === "edit" ? "人工修订" : (a.operation === "confirm" ? "人工确认" : "被解析覆盖") }),
                 el("td", { text: a.operator || "-" })
               ]);
             }))
@@ -434,8 +450,12 @@
       }
       const pending = metrics.filter(function (m) { return m.origin === "cv"; }).length;
       if (pending) {
-        container.appendChild(el("div", { class: "spot-data-note",
-          text: "其中有 " + pending + " 项为图像采样预填（标记「预填」），请人工确认；确认后会自动标记为人工值" }));
+        const note = el("div", { class: "spot-data-note" }, [
+          el("span", { text: "其中 " + pending + " 项为图像采样预填（标记「预填」）。核对无误后点右侧按钮一次确认，无需逐项修改。" }),
+          isAdmin() ? el("button", { class: "spot-btn primary spot-confirm-btn", text: "确认预填",
+            onClick: function () { confirmPrefill(container, report, pending); } }) : null
+        ]);
+        container.appendChild(note);
       }
       if (info && info.warnings && info.warnings.length) {
         container.appendChild(el("div", { class: "spot-data-warn", text: "校验告警：" + info.warnings.join("；") }));

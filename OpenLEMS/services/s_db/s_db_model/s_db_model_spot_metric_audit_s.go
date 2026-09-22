@@ -16,6 +16,7 @@ const (
 const (
 	SpotMetricAuditEdit      = "edit"                   // 人工修订
 	SpotMetricAuditOverwrite = "overwritten_by_extract" // 重跑解析覆盖了人工值
+	SpotMetricAuditConfirm   = "confirm"                // 人工确认了采样/OCR 预填值
 )
 
 // SSpotMetricAuditModel 指标变更审计。人工修订与「被解析覆盖」都留痕，

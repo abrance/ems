@@ -105,22 +105,6 @@ func TestSampleMapBuckets(t *testing.T) {
 	}
 }
 
-// 配色与图例不一致时必须拒绝预填（实测 2026-09-18 那篇就是这种情况：
-// 图例是浅色系、地图填充是饱和红），而不是按错误色板猜出一堆看似合理的档位。
-func TestSampleMapBucketsRejectsMismatchedPalette(t *testing.T) {
-	saturated := []color.RGBA{
-		{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 0, 255},
-	}
-	img, lines, _ := buildMapImage(saturated)
-	got, warnings := SampleMapBuckets(img, lines)
-	if len(got) != 0 {
-		t.Fatalf("配色不一致时不应预填，实际得到 %+v", got)
-	}
-	if len(warnings) == 0 {
-		t.Fatal("配色不一致时应给出告警")
-	}
-}
-
 // 图例缺失时也不预填
 func TestSampleMapBucketsWithoutLegend(t *testing.T) {
 	img, lines, _ := buildMapImage([]color.RGBA{testPalette[0]})
@@ -155,5 +139,37 @@ func TestValidateDetectsBucketInversion(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("未检出档位倒挂：%v", warnings)
+	}
+}
+
+// 图例与地图配色不一致时，按色系（色相）回退仍应预填，且置信度打折 + 告警
+// （实测依据：2026-09-18 那篇图例是浅色系、地图填充是饱和色）
+func TestSampleMapBucketsFallsBackToHue(t *testing.T) {
+	// 地图用饱和色：红(5档) 黄(3档) 绿(1档) 蓝(2档)
+	saturated := []color.RGBA{
+		{255, 0, 0, 255}, {255, 255, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255},
+	}
+	img, lines, boxes := buildMapImage(saturated)
+	got, warnings := SampleMapBuckets(img, lines)
+	if len(got) != len(boxes) {
+		t.Fatalf("色相回退应仍能预填 %d 个地市，实际 %d：%+v", len(boxes), len(got), got)
+	}
+	want := map[string]int{"韶关": 5, "清远": 3, "梅州": 1, "河源": 2}
+	for _, b := range got {
+		if want[b.City] != b.Bucket {
+			t.Fatalf("%s 档位期望 %d（色相回退），实际 %d（%s）", b.City, want[b.City], b.Bucket, b.Label)
+		}
+		if b.Conf >= 0.9 {
+			t.Fatalf("色相回退的置信度应打折，实际 %v", b.Conf)
+		}
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "色系推断") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("色相回退应给出「由色系推断」告警：%v", warnings)
 	}
 }
