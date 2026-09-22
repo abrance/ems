@@ -122,7 +122,7 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 		TradeDate:   extracted.TradeDate,
 		MetricCount: len(metrics),
 		Status:      status,
-		Warnings:    extracted.Warnings,
+		Warnings:    nonNilStrings(extracted.Warnings),
 	}, nil
 }
 
@@ -167,7 +167,7 @@ func GetReportData(ctx context.Context, reportDate string) (*v1.GetSpotReportDat
 		}
 		res.Extract = &v1.SpotExtractInfo{
 			Status: run.Status, OcrModel: run.OcrModel, PageCount: run.PageCount,
-			OcrMs: run.OcrMs, Warnings: warnings, UpdatedAt: updated,
+			OcrMs: run.OcrMs, Warnings: nonNilStrings(warnings), UpdatedAt: updated,
 			ExtractorV: run.ExtractorVersion,
 		}
 	}
@@ -341,4 +341,13 @@ func ConfirmReportMetrics(ctx context.Context, reportDate, dataset, operator str
 		return nil, err
 	}
 	return &v1.ConfirmSpotMetricRes{Confirmed: count}, nil
+}
+
+// nonNilStrings 保证 JSON 里空数组序列化为 []，而不是 null。
+// 前端虽然用 `&&` 判空做了兼容，但接口返回 null 属于脏数据，容易在下游踩坑。
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }

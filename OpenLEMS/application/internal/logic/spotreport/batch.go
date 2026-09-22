@@ -95,7 +95,7 @@ func GetBatchExtract(id string) (*v1.BatchExtractStatusRes, error) {
 	res := &v1.BatchExtractStatusRes{
 		Id: job.Id, Status: job.Status, Total: job.Total, Done: job.Done,
 		Succeeded: job.Succeeded, Failed: job.Failed, Overwritten: job.Overwritten,
-		Current: job.Current, Errors: append([]string(nil), job.Errors...),
+		Current: job.Current, Errors: nonNilStrings(append([]string{}, job.Errors...)),
 		StartedAt: job.StartedAt.In(shanghaiLocation()).Format(time.RFC3339),
 	}
 	if !job.FinishedAt.IsZero() {
