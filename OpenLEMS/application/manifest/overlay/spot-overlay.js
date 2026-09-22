@@ -586,6 +586,70 @@
     switchTab("pages");
   }
 
+  // 批量重跑解析：解析器升级后回填历史日报（后台任务 + 进度轮询）
+  function showBatchExtract() {
+    const dates = listState.map(function (item) { return item.date; }).sort();
+    if (!dates.length) { window.alert("还没有已采集的日报"); return; }
+    const defFrom = dates[0];
+    const defTo = dates[dates.length - 1];
+    const from = window.prompt("批量重跑解析：起始日报日（YYYY-MM-DD，留空表示最早 " + defFrom + "）", defFrom);
+    if (from === null) return;
+    const to = window.prompt("结束日报日（留空表示最新 " + defTo + "）", defTo);
+    if (to === null) return;
+    if (!window.confirm("将对 " + (from || defFrom) + " ~ " + (to || defTo) + " 的日报逐篇重跑解析。\n" +
+      "每篇约 6-10 秒，会串行执行；本次重跑以 OCR/采样结果为准，" +
+      "已人工确认或修订的值会被覆盖（覆盖前写审计，结束时给出条数）。确定继续？")) return;
+    api("/api/spot-report/extract/batch", {
+      method: "POST",
+      body: JSON.stringify({ from: from || "", to: to || "" })
+    }).then(function (res) {
+      window.alert("已启动批量任务 " + res.id + "，共 " + res.total + " 篇。\n进度会显示在「信息管理」标题旁，请勿关闭页面。");
+      pollBatch(res.id);
+    }).catch(function (err) {
+      window.alert("启动失败：" + (err.message || "未知错误"));
+    });
+  }
+
+  function pollBatch(id) {
+    const tick = async function () {
+      try {
+        const st = await api("/api/spot-report/extract/batch/status?id=" + encodeURIComponent(id));
+        renderBatchProgress(st);
+        if (st.status === "running") {
+          setTimeout(tick, 2500);
+          return;
+        }
+        await refreshList();
+        const lines = [
+          "批量解析完成：" + st.succeeded + "/" + st.total + " 成功" + (st.failed ? "，" + st.failed + " 失败" : ""),
+          st.overwritten ? "覆盖人工值 " + st.overwritten + " 条（已写审计，可在「变更记录」查看）" : "未覆盖任何人工值"
+        ];
+        if (st.errors && st.errors.length) lines.push("错误：" + st.errors.slice(0, 5).join("；"));
+        window.alert(lines.join("\n"));
+      } catch (err) {
+        renderBatchProgress(null);
+      }
+    };
+    tick();
+  }
+
+  function renderBatchProgress(st) {
+    const host = document.querySelector(".spot-info-actions");
+    if (!host) return;
+    let box = document.getElementById("spot-batch-progress");
+    if (!st) {
+      if (box) box.remove();
+      return;
+    }
+    if (!box) {
+      box = el("span", { id: "spot-batch-progress", class: "spot-batch-progress" });
+      host.insertBefore(box, host.firstChild);
+    }
+    box.textContent = st.status === "running"
+      ? "重跑 " + st.done + "/" + st.total + (st.current ? "（" + st.current + "）" : "")
+      : "重跑完成 " + st.succeeded + "/" + st.total + (st.overwritten ? "，覆盖人工值 " + st.overwritten + " 条" : "");
+  }
+
   async function extractData(item) {
     if (!item || !item.date) return;
     const confirmed = window.confirm("对 " + item.date + " 的日报执行 OCR 解析？4 页识别约需 6-10 秒。");
@@ -622,7 +686,10 @@
     root.innerHTML = "";
     root.appendChild(el("div", { class: "spot-info-head" }, [
       el("div", { class: "spot-info-title", text: "信息管理" }),
-      isAdmin() ? el("button", { class: "spot-btn primary", text: "新增采集", onClick: showCollectModal }) : null
+      el("div", { class: "spot-info-actions" }, [
+        isAdmin() ? el("button", { class: "spot-btn", text: "批量重跑解析", onClick: showBatchExtract }) : null,
+        isAdmin() ? el("button", { class: "spot-btn primary", text: "新增采集", onClick: showCollectModal }) : null
+      ])
     ]));
     const table = el("table", { class: "spot-info-table" });
     table.appendChild(el("thead", {}, [

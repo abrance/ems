@@ -149,3 +149,26 @@ func (c *ControllerV1) ConfirmSpotMetric(ctx context.Context, req *v1.ConfirmSpo
 	}
 	return res, nil
 }
+
+// BatchExtractSpotReport 批量重跑解析（后台任务，立即返回任务 id）
+func (c *ControllerV1) BatchExtractSpotReport(ctx context.Context, req *v1.BatchExtractReq) (*v1.BatchExtractRes, error) {
+	for _, d := range []string{req.From, req.To} {
+		if d != "" && !datePattern.MatchString(d) {
+			return nil, gerror.NewCode(gcode.CodeInvalidParameter, "日报日格式无效")
+		}
+	}
+	res, err := logic.StartBatchExtract(ctx, req.From, req.To)
+	if err != nil {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+	}
+	return res, nil
+}
+
+// GetBatchExtractStatus 批量重跑进度
+func (c *ControllerV1) GetBatchExtractStatus(ctx context.Context, req *v1.BatchExtractStatusReq) (*v1.BatchExtractStatusRes, error) {
+	res, err := logic.GetBatchExtract(req.Id)
+	if err != nil {
+		return nil, gerror.NewCode(gcode.CodeNotFound, err.Error())
+	}
+	return res, nil
+}

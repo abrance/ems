@@ -248,6 +248,10 @@ func ListMetricAudit(ctx context.Context, reportDate string, limit int) (*v1.Get
 	return &v1.GetSpotReportAuditRes{List: list}, nil
 }
 
+// OverwriteWarningPrefix 「重跑覆盖人工修订」告警前缀：生产与批量任务计数共用，
+// 避免文案改动导致覆盖数被静默算成 0（曾用字节切片判断中文前缀，直接失效）。
+const OverwriteWarningPrefix = "重跑覆盖人工修订"
+
 // overwriteWarnings 把「重跑覆盖了人工修订」转成可读告警。
 // 重跑语义是以 OCR 为准，但人工判断不应无声消失：审计表留痕 + 这里显式提示。
 func overwriteWarnings(overwritten []s_db_basic.SpotMetricOverwrite) []string {
@@ -261,7 +265,7 @@ func overwriteWarnings(overwritten []s_db_basic.SpotMetricOverwrite) []string {
 		if source == "" {
 			source = "-"
 		}
-		out = append(out, fmt.Sprintf("重跑覆盖人工修订：运行日 %s %s/%s（%s）人工值 %v → OCR 值 %s",
+		out = append(out, fmt.Sprintf(OverwriteWarningPrefix+"：运行日 %s %s/%s（%s）人工值 %v → OCR 值 %s",
 			o.Key.RunDate, o.Key.Scope, o.Key.Metric, source, o.OldValue, newText))
 	}
 	return out

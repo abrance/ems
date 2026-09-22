@@ -106,6 +106,37 @@ type UpdateSpotMetricRes struct {
 	Metric *SpotMetric `json:"metric"`
 }
 
+type BatchExtractReq struct {
+	g.Meta `path:"/spot-report/extract/batch" method:"post" tags:"现货日报" summary:"批量重跑解析（后台任务）" role:"admin"`
+	From   string `json:"from" dc:"起始日报日 YYYY-MM-DD，留空表示最早"`
+	To     string `json:"to" dc:"结束日报日 YYYY-MM-DD，留空表示最新"`
+}
+
+type BatchExtractRes struct {
+	Id     string `json:"id"`
+	Total  int    `json:"total" dc:"本次涉及日报数"`
+	Status string `json:"status"`
+}
+
+type BatchExtractStatusReq struct {
+	g.Meta `path:"/spot-report/extract/batch/status" method:"get" tags:"现货日报" summary:"批量重跑进度" role:"admin"`
+	Id     string `json:"id" dc:"任务 id，留空表示最近一次"`
+}
+
+type BatchExtractStatusRes struct {
+	Id          string   `json:"id"`
+	Status      string   `json:"status" dc:"running/done/failed"`
+	Total       int      `json:"total"`
+	Done        int      `json:"done"`
+	Succeeded   int      `json:"succeeded"`
+	Failed      int      `json:"failed"`
+	Overwritten int      `json:"overwritten" dc:"被本次重跑覆盖的人工值条数（已写审计）"`
+	Current     string   `json:"current" dc:"当前处理中的日报日"`
+	Errors      []string `json:"errors"`
+	StartedAt   string   `json:"startedAt"`
+	FinishedAt  string   `json:"finishedAt"`
+}
+
 type ConfirmSpotMetricReq struct {
 	g.Meta   `path:"/spot-report/confirm" method:"post" tags:"现货日报" summary:"确认图像/OCR 预填值" role:"admin"`
 	Date     string `json:"date" v:"required" dc:"日报日 YYYY-MM-DD"`
