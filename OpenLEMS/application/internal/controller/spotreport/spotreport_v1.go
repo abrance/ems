@@ -78,3 +78,27 @@ func (c *ControllerV1) CollectSpotReport(ctx context.Context, req *v1.CollectSpo
 	}
 	return &v1.CollectSpotReportRes{Report: report}, nil
 }
+
+// ExtractSpotReport 解析日报数据（OCR + 模板提取）
+func (c *ControllerV1) ExtractSpotReport(ctx context.Context, req *v1.ExtractSpotReportReq) (*v1.ExtractSpotReportRes, error) {
+	if !datePattern.MatchString(req.Date) {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
+	}
+	res, err := logic.ExtractReport(ctx, req.Date)
+	if err != nil {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+	}
+	return res, nil
+}
+
+// GetSpotReportData 获取日报结构化数据
+func (c *ControllerV1) GetSpotReportData(ctx context.Context, req *v1.GetSpotReportDataReq) (*v1.GetSpotReportDataRes, error) {
+	if !datePattern.MatchString(req.Date) {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
+	}
+	res, err := logic.GetReportData(ctx, req.Date)
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取日报数据失败")
+	}
+	return res, nil
+}

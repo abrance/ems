@@ -5,6 +5,22 @@
   const COL_ID = "spot-info-col";
 
   let homeState = { dates: [], date: "", report: null, page: 0, empty: true };
+
+  // 结构化数据的展示配置：数据集 → 展示名与列（列 = [指标名, 单位]）
+  const DATASET_ORDER = ["summary", "day_ahead_trade", "realtime_trade", "day_ahead_decl"];
+  const DATASET_LABELS = {
+    summary: "正文摘要指标",
+    day_ahead_trade: "日前成交电价",
+    realtime_trade: "实时成交电价",
+    day_ahead_decl: "日前申报信息"
+  };
+  const DATASET_COLUMNS = {
+    summary: [["日前加权平均电价"], ["燃煤均价"], ["燃气均价"], ["日前成交最高价"], ["日前成交最低价"]],
+    day_ahead_trade: [["最高电价"], ["最低电价"], ["平均电价"], ["电价环比"]],
+    realtime_trade: [["最高电价"], ["最低电价"], ["平均电价"], ["电价环比"]],
+    day_ahead_decl: [["最高电价"], ["最低电价"], ["平均电价"], ["自主申报台数"], ["默认申报台数"],
+                     ["申报容量"], ["煤机容量"], ["气机容量"], ["新能源容量"]]
+  };
   let listState = [];
   let lastPath = "";
 
@@ -292,27 +308,162 @@
     input.focus();
   }
 
+  function fmtNum(v) {
+    if (v === null || v === undefined) return "-";
+    const n = Math.round(v * 100) / 100;
+    return n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+  }
+
+  function momBadge(v) {
+    if (v === null || v === undefined) return null;
+    const up = v >= 0;
+    return el("span", { class: "spot-mom " + (up ? "up" : "down"),
+      text: (up ? "▲" : "▼") + Math.abs(v).toFixed(2) + "%" });
+  }
+
+  // 数据页签：按数据集分组，行=对象，列=指标，环比以角标显示
+  function renderDataTab(container, report) {
+    container.innerHTML = "";
+    container.appendChild(el("div", { class: "spot-empty", text: "解析数据加载中…" }));
+    api("/api/spot-report/data?date=" + encodeURIComponent(report.date)).then(function (data) {
+      container.innerHTML = "";
+      const metrics = (data && data.metrics) || [];
+      const info = data && data.extract;
+      if (!metrics.length) {
+        container.appendChild(el("div", { class: "spot-empty", text: "该日报还没有结构化数据" }));
+        container.appendChild(el("div", { class: "spot-empty-hint", text: isAdmin() ? "在「信息管理」里点该行的「解析数据」" : "请联系管理员解析" }));
+        return;
+      }
+      const metaBits = [];
+      if (info) {
+        metaBits.push("OCR " + info.ocrModel);
+        metaBits.push(info.pageCount + " 页");
+        metaBits.push(Math.round(info.ocrMs / 1000) + "s");
+        if (info.updatedAt) metaBits.push("提取于 " + info.updatedAt.slice(0, 19).replace("T", " "));
+      }
+      container.appendChild(el("div", { class: "spot-data-meta", text: metaBits.join(" · ") }));
+      if (data.tradeDate && data.tradeDate !== report.date) {
+        container.appendChild(el("div", { class: "spot-data-note",
+          text: "注：日报里的表2 承载滞后运行日 " + data.tradeDate + " 的日前/实时成交电价" }));
+      }
+      if (info && info.warnings && info.warnings.length) {
+        container.appendChild(el("div", { class: "spot-data-warn", text: "校验告警：" + info.warnings.join("；") }));
+      }
+
+      DATASET_ORDER.forEach(function (dataset) {
+        const rows = metrics.filter(function (m) { return m.dataset === dataset; });
+        if (!rows.length) return;
+        const columns = DATASET_COLUMNS[dataset] || [];
+        const scopes = [];
+        rows.forEach(function (m) { if (scopes.indexOf(m.scope) < 0) scopes.push(m.scope); });
+        const title = DATASET_LABELS[dataset] || dataset;
+        const runDates = rows.map(function (m) { return m.runDate; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+        container.appendChild(el("div", { class: "spot-data-title",
+          text: title + (runDates.length === 1 && runDates[0] !== report.date ? "（运行日 " + runDates[0] + "）" : "") }));
+
+        const table = el("table", { class: "spot-data-table" });
+        const head = el("tr", {}, [el("th", { text: "对象" })]);
+        columns.forEach(function (c) { head.appendChild(el("th", { text: c[0] })); });
+        table.appendChild(el("thead", {}, [head]));
+        const tbody = el("tbody");
+        scopes.forEach(function (scope) {
+          const tr = el("tr", {}, [el("td", { class: "spot-data-scope", text: scope })]);
+          columns.forEach(function (col) {
+            const name = col[0];
+            const hit = rows.filter(function (m) { return m.scope === scope && m.metric === name; })[0];
+            if (!hit) {
+              tr.appendChild(el("td", { class: "spot-data-missing", text: "-" }));
+              return;
+            }
+            const cellChildren = [el("div", { class: "spot-data-value", text: fmtNum(hit.value) + (hit.unit === "%" ? "%" : "") })];
+            if (hit.atTime) cellChildren.push(el("div", { class: "spot-data-time", text: "@" + hit.atTime }));
+            const badge = momBadge(hit.momPct);
+            if (badge) cellChildren.push(badge);
+            if (hit.sharePct !== null && hit.sharePct !== undefined) {
+              cellChildren.push(el("div", { class: "spot-data-share", text: "占市场 " + fmtNum(hit.sharePct) + "%" }));
+            }
+            tr.appendChild(el("td", {}, cellChildren));
+          });
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+      });
+    }).catch(function (err) {
+      container.innerHTML = "";
+      container.appendChild(el("div", { class: "spot-error", text: err.message || "加载数据失败" }));
+    });
+  }
+
   function showDetail(report) {
     closeModal();
-    const pages = (report.pages || []).map(function (page) {
+    let active = "pages";
+    const body = el("div", { class: "spot-detail-body" });
+    const tabPages = el("button", { class: "spot-tab active", text: "原图", onClick: function () { switchTab("pages"); } });
+    const tabData = el("button", { class: "spot-tab", text: "数据", onClick: function () { switchTab("data"); } });
+
+    const pagesView = el("div", { class: "spot-detail-pages" }, (report.pages || []).map(function (page) {
       return el("figure", {}, [
         el("img", { src: page.url, alt: page.label }),
         el("figcaption", { text: page.page + ". " + page.label })
       ]);
-    });
+    }));
+
+    function switchTab(tab) {
+      active = tab;
+      tabPages.className = "spot-tab" + (tab === "pages" ? " active" : "");
+      tabData.className = "spot-tab" + (tab === "data" ? " active" : "");
+      body.innerHTML = "";
+      if (tab === "pages") {
+        body.appendChild(pagesView);
+      } else {
+        renderDataTab(body, report);
+      }
+    }
+
     const mask = el("div", { class: "spot-modal-mask", onClick: function (ev) {
       if (ev.target === mask) closeModal();
     }}, [
       el("div", { class: "spot-modal" }, [
-        el("h3", { text: report.title || "现货运行日报" }),
-        el("div", { class: "spot-page-caption", text: "运行日 " + report.date }),
-        el("div", { class: "spot-detail-pages" }, pages),
+        el("div", { class: "spot-modal-head" }, [
+          el("div", {}, [
+            el("h3", { text: report.title || "现货运行日报" }),
+            el("div", { class: "spot-page-caption", text: "运行日 " + report.date })
+          ]),
+          el("div", { class: "spot-tabs" }, [tabPages, tabData])
+        ]),
+        body,
         el("div", { class: "spot-modal-actions" }, [
           el("button", { class: "spot-btn", text: "关闭", onClick: closeModal })
         ])
       ])
     ]);
     document.body.appendChild(mask);
+    switchTab("pages");
+  }
+
+  async function extractData(item) {
+    if (!item || !item.date) return;
+    const confirmed = window.confirm("对 " + item.date + " 的日报执行 OCR 解析？4 页识别约需 6-10 秒。");
+    if (!confirmed) return;
+    try {
+      const res = await api("/api/spot-report/extract", {
+        method: "POST",
+        body: JSON.stringify({ date: item.date })
+      });
+      const warnings = (res && res.warnings) || [];
+      const lines = [
+        "解析完成：" + item.date,
+        "状态：" + (res && res.status),
+        "指标数：" + (res && res.metricCount),
+        res && res.tradeDate && res.tradeDate !== item.date ? "表2 运行日：" + res.tradeDate : null,
+        warnings.length ? "告警：" + warnings.join("；") : "校验无告警"
+      ].filter(Boolean);
+      window.alert(lines.join("\n"));
+      await refreshList();
+    } catch (err) {
+      window.alert("解析失败：" + (err.message || "未知错误"));
+    }
   }
 
   async function refreshList() {
@@ -349,7 +500,10 @@
           el("td", { text: item.date }),
           el("td", { text: item.title }),
           el("td", { text: String(item.pageCount || 0) }),
-          el("td", {}, [el("button", { class: "spot-link", text: "查看", onClick: function () { showDetail(item); } })])
+          el("td", {}, [
+            el("button", { class: "spot-link", text: "查看", onClick: function () { showDetail(item); } }),
+            isAdmin() ? el("button", { class: "spot-link", text: "解析数据", onClick: function () { extractData(item); } }) : null
+          ])
         ]));
       });
     }

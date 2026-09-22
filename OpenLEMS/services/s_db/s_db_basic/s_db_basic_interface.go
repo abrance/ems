@@ -138,3 +138,15 @@ type ISpotReportService interface {
 	GetLatest(ctx context.Context) (*s_db_model.SSpotReportModel, error)
 	Upsert(ctx context.Context, model *s_db_model.SSpotReportModel) error
 }
+
+// ISpotExtractService 现货日报结构化提取结果
+type ISpotExtractService interface {
+	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）
+	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel) error
+	// ListMetrics 按日报查询指标（含该日报里滞后运行日的数据）
+	ListMetrics(ctx context.Context, reportDate string) ([]*s_db_model.SSpotMetricModel, error)
+	// ListMetricsByRunDate 按运行日查询指标（跨日报聚合，供趋势/交叉校验用）
+	ListMetricsByRunDate(ctx context.Context, runDate string) ([]*s_db_model.SSpotMetricModel, error)
+	GetRun(ctx context.Context, reportDate string) (*s_db_model.SSpotExtractRunModel, error)
+	UpsertRun(ctx context.Context, model *s_db_model.SSpotExtractRunModel) error
+}
