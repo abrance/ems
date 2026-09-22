@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"common/c_log"
 	"common/c_util"
@@ -259,10 +260,14 @@ func initConfigDatabase() error {
 			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (run_date, dataset, scope, metric)
+			UNIQUE (report_date, run_date, dataset, scope, metric)
 		)
 	`)
 	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+	if err := migrateSpotMetricUniqueKey(ctx); err != nil {
 		c_log.Error(ctx, err)
 		return err
 	}
@@ -293,6 +298,49 @@ func initConfigDatabase() error {
 	initSystemSettings(context.Background())
 
 	return nil
+}
+
+// migrateSpotMetricUniqueKey 一次性迁移：gd_spot_metric 初版把唯一键放在
+// (run_date, dataset, scope, metric)，但同一运行日的指标会由多份日报产出
+// （表2 承载滞后运行日），必须让每份日报各自成行，唯一键因此改为含 report_date。
+//
+// 该表是新功能产物、数据可由重跑解析恢复，所以直接删表重建；只对 sqlite 生效，
+// 其他驱动或表不存在时静默跳过。
+func migrateSpotMetricUniqueKey(ctx context.Context) error {
+	value, err := g.DB().GetValue(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, "gd_spot_metric")
+	if err != nil || value.IsNil() {
+		return nil // 非 sqlite 或表刚创建
+	}
+	if !strings.Contains(value.String(), "UNIQUE (run_date, dataset, scope, metric)") {
+		return nil
+	}
+	c_log.Warning(ctx, "检测到 gd_spot_metric 旧唯一键，删除重建（数据可由重新解析恢复）")
+	_, err = g.DB().Exec(ctx, `DROP TABLE IF EXISTS gd_spot_metric`)
+	if err != nil {
+		return err
+	}
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_spot_metric (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			report_date VARCHAR(10) NOT NULL,
+			run_date VARCHAR(10) NOT NULL,
+			dataset VARCHAR(32) NOT NULL,
+			scope VARCHAR(32) NOT NULL DEFAULT '',
+			metric VARCHAR(32) NOT NULL,
+			value REAL NOT NULL DEFAULT 0,
+			unit VARCHAR(16) NOT NULL DEFAULT '',
+			at_time VARCHAR(8) NOT NULL DEFAULT '',
+			mom_pct REAL,
+			share_pct REAL,
+			source VARCHAR(32) NOT NULL DEFAULT '',
+			conf REAL NOT NULL DEFAULT 0,
+			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (report_date, run_date, dataset, scope, metric)
+		)
+	`)
+	return err
 }
 
 // initSystemSettings 初始化系统设置数据
