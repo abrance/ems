@@ -533,3 +533,32 @@
 .spot-data-missing {
   color: var(--color-text-3, #86909c);
 }
+
+/* 人工修订层：可编辑值、人工徽标、审计入口 */
+.spot-data-editable {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(var(--primary-6, 255, 125, 0), 0.6);
+}
+.spot-data-editable:hover {
+  color: rgb(var(--primary-6, 255, 125, 0));
+}
+.spot-origin-manual {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(var(--primary-6, 255, 125, 0), 0.14);
+  color: rgb(var(--primary-6, 255, 125, 0));
+  font-size: 11px;
+  line-height: 18px;
+}
+.spot-data-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}

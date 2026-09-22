@@ -139,10 +139,32 @@ type ISpotReportService interface {
 	Upsert(ctx context.Context, model *s_db_model.SSpotReportModel) error
 }
 
+// SpotMetricKey 指标定位键（与 gd_spot_metric 唯一键一致）
+type SpotMetricKey struct {
+	ReportDate  string
+	RunDate     string
+	Dataset     string
+	Scope       string
+	Metric      string
+	SourceLabel string // 来源表（如 表1(二)），仅用于提示
+}
+
+// SpotMetricOverwrite 被重跑解析覆盖的人工修订
+type SpotMetricOverwrite struct {
+	Key      SpotMetricKey
+	OldValue float64  // 人工填写值
+	NewValue *float64 // 本次 OCR 值（为 nil 表示本次未提取到该字段）
+}
+
 // ISpotExtractService 现货日报结构化提取结果
 type ISpotExtractService interface {
-	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）
-	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel) error
+	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）。
+	// 重跑以 OCR 为准：人工修订行会被覆盖，但覆盖前写入审计并作为返回值返回。
+	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel) ([]SpotMetricOverwrite, error)
+	// UpdateMetricValue 人工修订单个指标值（origin 置为 manual，并写审计）
+	UpdateMetricValue(ctx context.Context, key SpotMetricKey, value float64, operator string) (*s_db_model.SSpotMetricModel, error)
+	// ListMetricAudit 查询某份日报的指标变更审计
+	ListMetricAudit(ctx context.Context, reportDate string, limit int) ([]*s_db_model.SSpotMetricAuditModel, error)
 	// ListMetrics 按日报查询指标（含该日报里滞后运行日的数据）
 	ListMetrics(ctx context.Context, reportDate string) ([]*s_db_model.SSpotMetricModel, error)
 	// ListMetricsByRunDate 按运行日查询指标（跨日报聚合，供趋势/交叉校验用）

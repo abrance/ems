@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -99,6 +100,34 @@ func (c *ControllerV1) GetSpotReportData(ctx context.Context, req *v1.GetSpotRep
 	res, err := logic.GetReportData(ctx, req.Date)
 	if err != nil {
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取日报数据失败")
+	}
+	return res, nil
+}
+
+// UpdateSpotMetric 人工修订单个指标（管理员）
+func (c *ControllerV1) UpdateSpotMetric(ctx context.Context, req *v1.UpdateSpotMetricReq) (*v1.UpdateSpotMetricRes, error) {
+	if !datePattern.MatchString(req.Date) || !datePattern.MatchString(req.RunDate) {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
+	}
+	operator := ""
+	if r := g.RequestFromCtx(ctx); r != nil {
+		operator = r.Session.MustGet("role").String()
+	}
+	res, err := logic.UpdateMetric(ctx, req, operator)
+	if err != nil {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+	}
+	return res, nil
+}
+
+// GetSpotReportAudit 指标变更审计（管理员）
+func (c *ControllerV1) GetSpotReportAudit(ctx context.Context, req *v1.GetSpotReportAuditReq) (*v1.GetSpotReportAuditRes, error) {
+	if !datePattern.MatchString(req.Date) {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
+	}
+	res, err := logic.ListMetricAudit(ctx, req.Date, req.Limit)
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取审计失败")
 	}
 	return res, nil
 }
