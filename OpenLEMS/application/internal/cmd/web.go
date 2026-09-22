@@ -270,6 +270,20 @@ func getWebRuntimeConfig(ctx context.Context) webRuntimeConfig {
 	}
 }
 
+// authBypassScript 生成注入到 index.html 的引导脚本：把会话写入 localStorage，
+// 使前端与后端的 AUTH_BYPASS_ROLE 保持一致。必须排在 SPA 入口之前执行。
+func authBypassScript(role string) string {
+	roleJSON, err := json.Marshal(role)
+	if err != nil {
+		roleJSON = []byte(`""`)
+	}
+	return "<script>(function(){try{" +
+		"localStorage.setItem(\"ems:user:token\",\"auth-bypass\");" +
+		"localStorage.setItem(\"ems:user:role\"," + string(roleJSON) + ");" +
+		"localStorage.removeItem(\"ems:user:expireAt\");" +
+		"}catch(e){}})();</script>"
+}
+
 func buildIndexHTMLWithRuntimeConfig(ctx context.Context, webfs fs.FS) ([]byte, error) {
 	indexHTMLBytes, err := fs.ReadFile(webfs, "index.html")
 	if err != nil {
@@ -291,6 +305,13 @@ func buildIndexHTMLWithRuntimeConfig(ctx context.Context, webfs fs.FS) ([]byte, 
 	).Replace(string(runtimeConfigJSON))
 
 	runtimeScript := "<script>window.__APP_RUNTIME__=" + escapedRuntimeConfig + ";</script>"
+	if bypassRole := utils.AuthBypassRole(); bypassRole != "" {
+		// 与后端 AUTH_BYPASS_ROLE 配套：让前端也认为已以该角色登录，
+		// 否则 SPA 不会带会话、悬浮层也不显示管理员入口。
+		runtimeScript = authBypassScript(bypassRole) + runtimeScript
+		c_log.Warningf(ctx, "已开启鉴权绕过：%s=%s，所有请求按该角色放行，请勿在公网环境长期开启",
+			utils.EnvAuthBypassRole, bypassRole)
+	}
 	indexHTML := string(indexHTMLBytes)
 
 	if strings.Contains(indexHTML, "</head>") {
