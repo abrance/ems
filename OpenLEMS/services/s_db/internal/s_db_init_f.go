@@ -258,6 +258,9 @@ func initConfigDatabase() error {
 			source VARCHAR(32) NOT NULL DEFAULT '',
 			conf REAL NOT NULL DEFAULT 0,
 			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
+			origin VARCHAR(8) NOT NULL DEFAULT 'ocr',
+			edited_by VARCHAR(64) NOT NULL DEFAULT '',
+			edited_at DATETIME,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE (report_date, run_date, dataset, scope, metric)
@@ -268,6 +271,31 @@ func initConfigDatabase() error {
 		return err
 	}
 	if err := migrateSpotMetricUniqueKey(ctx); err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+	if err := migrateSpotMetricEditColumns(ctx); err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_spot_metric_audit (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			report_date VARCHAR(10) NOT NULL,
+			run_date VARCHAR(10) NOT NULL,
+			dataset VARCHAR(32) NOT NULL,
+			scope VARCHAR(32) NOT NULL DEFAULT '',
+			metric VARCHAR(32) NOT NULL,
+			old_value REAL,
+			new_value REAL,
+			old_origin VARCHAR(8) NOT NULL DEFAULT '',
+			operation VARCHAR(32) NOT NULL DEFAULT '',
+			operator VARCHAR(64) NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
 		c_log.Error(ctx, err)
 		return err
 	}
@@ -341,6 +369,34 @@ func migrateSpotMetricUniqueKey(ctx context.Context) error {
 		)
 	`)
 	return err
+}
+
+// migrateSpotMetricEditColumns 老库补列：origin / edited_by / edited_at（人工修订层新增）。
+// sqlite 的 ADD COLUMN 是幂等的轻量操作；列已存在或非 sqlite 时静默跳过。
+func migrateSpotMetricEditColumns(ctx context.Context) error {
+	columns := []string{"origin", "edited_by", "edited_at"}
+	for _, name := range columns {
+		value, err := g.DB().GetValue(ctx,
+			`SELECT COUNT(*) FROM pragma_table_info('gd_spot_metric') WHERE name = ?`, name)
+		if err != nil || value.IsNil() {
+			return nil // 非 sqlite
+		}
+		if value.Int() > 0 {
+			continue
+		}
+		ddl := `ALTER TABLE gd_spot_metric ADD COLUMN origin VARCHAR(8) NOT NULL DEFAULT 'ocr'`
+		switch name {
+		case "edited_by":
+			ddl = `ALTER TABLE gd_spot_metric ADD COLUMN edited_by VARCHAR(64) NOT NULL DEFAULT ''`
+		case "edited_at":
+			ddl = `ALTER TABLE gd_spot_metric ADD COLUMN edited_at DATETIME`
+		}
+		if _, err := g.DB().Exec(ctx, ddl); err != nil {
+			return err
+		}
+		c_log.Infof(ctx, "gd_spot_metric 补充列 %s", name)
+	}
+	return nil
 }
 
 // initSystemSettings 初始化系统设置数据

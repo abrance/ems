@@ -8,6 +8,7 @@ import (
 
 	v1 "application/api/spotreport/v1"
 	"s_db"
+	"s_db/s_db_basic"
 	"s_db/s_db_model"
 
 	"github.com/gogf/gf/v2/os/gtime"
@@ -83,9 +84,11 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 			ExtractorVersion: ExtractorVersion,
 		})
 	}
-	if err := s_db.GetSpotExtractService().ReplaceMetrics(ctx, reportDate, metrics); err != nil {
+	overwritten, err := s_db.GetSpotExtractService().ReplaceMetrics(ctx, reportDate, metrics)
+	if err != nil {
 		return nil, err
 	}
+	extracted.Warnings = append(extracted.Warnings, overwriteWarnings(overwritten)...)
 
 	status := s_db_model.SpotExtractStatusOk
 	if len(metrics) == 0 {
@@ -135,10 +138,15 @@ func GetReportData(ctx context.Context, reportDate string) (*v1.GetSpotReportDat
 	metrics := make([]*v1.SpotMetric, 0, len(models))
 	tradeDate := ""
 	for _, m := range models {
+		editedAt := ""
+		if m.EditedAt != nil {
+			editedAt = m.EditedAt.Time.In(shanghaiLocation()).Format(time.RFC3339)
+		}
 		metrics = append(metrics, &v1.SpotMetric{
-			Dataset: m.Dataset, Scope: m.Scope, Metric: m.Metric, Value: m.Value,
+			RunDate: m.RunDate, Dataset: m.Dataset, Scope: m.Scope, Metric: m.Metric, Value: m.Value,
 			Unit: m.Unit, AtTime: m.AtTime, MomPct: m.MomPct, SharePct: m.SharePct,
-			Source: m.Source, Conf: m.Conf,
+			Source: m.Source, Conf: m.Conf, Origin: m.Origin,
+			EditedBy: m.EditedBy, EditedAt: editedAt,
 		})
 		if m.RunDate != reportDate && m.Dataset != DatasetSummary && tradeDate == "" {
 			tradeDate = m.RunDate
@@ -196,4 +204,63 @@ func crossCheckStored(ctx context.Context, extracted *ExtractResult) []string {
 		}
 	}
 	return warnings
+}
+
+// UpdateMetric 人工修订单个指标（异常兜底：自动提取为主，只改有问题的字段）
+func UpdateMetric(ctx context.Context, req *v1.UpdateSpotMetricReq, operator string) (*v1.UpdateSpotMetricRes, error) {
+	if operator == "" {
+		operator = "admin"
+	}
+	model, err := s_db.GetSpotExtractService().UpdateMetricValue(ctx, s_db_basic.SpotMetricKey{
+		ReportDate: req.Date, RunDate: req.RunDate, Dataset: req.Dataset,
+		Scope: req.Scope, Metric: req.Metric,
+	}, req.Value, operator)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.UpdateSpotMetricRes{Metric: &v1.SpotMetric{
+		Dataset: model.Dataset, Scope: model.Scope, Metric: model.Metric, Value: model.Value,
+		Unit: model.Unit, AtTime: model.AtTime, MomPct: model.MomPct, SharePct: model.SharePct,
+		Source: model.Source, Conf: model.Conf, Origin: model.Origin, EditedBy: model.EditedBy,
+	}}, nil
+}
+
+// ListMetricAudit 指标变更审计
+func ListMetricAudit(ctx context.Context, reportDate string, limit int) (*v1.GetSpotReportAuditRes, error) {
+	models, err := s_db.GetSpotExtractService().ListMetricAudit(ctx, reportDate, limit)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]*v1.SpotMetricAudit, 0, len(models))
+	for _, m := range models {
+		created := ""
+		if m.CreatedAt != nil {
+			created = m.CreatedAt.Time.In(shanghaiLocation()).Format(time.RFC3339)
+		}
+		list = append(list, &v1.SpotMetricAudit{
+			RunDate: m.RunDate, Dataset: m.Dataset, Scope: m.Scope, Metric: m.Metric,
+			OldValue: m.OldValue, NewValue: m.NewValue, Operation: m.Operation,
+			Operator: m.Operator, CreatedAt: created,
+		})
+	}
+	return &v1.GetSpotReportAuditRes{List: list}, nil
+}
+
+// overwriteWarnings 把「重跑覆盖了人工修订」转成可读告警。
+// 重跑语义是以 OCR 为准，但人工判断不应无声消失：审计表留痕 + 这里显式提示。
+func overwriteWarnings(overwritten []s_db_basic.SpotMetricOverwrite) []string {
+	out := make([]string, 0, len(overwritten))
+	for _, o := range overwritten {
+		newText := "本次未提取到"
+		if o.NewValue != nil {
+			newText = fmt.Sprintf("%v", *o.NewValue)
+		}
+		source := o.Key.SourceLabel
+		if source == "" {
+			source = "-"
+		}
+		out = append(out, fmt.Sprintf("重跑覆盖人工修订：运行日 %s %s/%s（%s）人工值 %v → OCR 值 %s",
+			o.Key.RunDate, o.Key.Scope, o.Key.Metric, source, o.OldValue, newText))
+	}
+	return out
 }

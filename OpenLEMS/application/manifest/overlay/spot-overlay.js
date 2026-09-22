@@ -321,6 +321,73 @@
       text: (up ? "▲" : "▼") + Math.abs(v).toFixed(2) + "%" });
   }
 
+  // 人工修订单个字段：就地输入 → 保存（origin 变 manual，后台留审计）
+  function editMetric(container, report, metric) {
+    const next = window.prompt("修订 " + metric.scope + " / " + metric.metric +
+      "（运行日 " + metric.runDate + "）\n当前值：" + metric.value + (metric.unit || "") +
+      "\n注意：再次执行「解析数据」会以 OCR 结果覆盖本次修订（审计表会留痕）", String(metric.value));
+    if (next === null) return;
+    const value = Number(next);
+    if (!isFinite(value)) { window.alert("请输入数字"); return; }
+    api("/api/spot-report/metric", {
+      method: "POST",
+      body: JSON.stringify({
+        date: report.date, runDate: metric.runDate, dataset: metric.dataset,
+        scope: metric.scope, metric: metric.metric, value: value
+      })
+    }).then(function () {
+      metric.value = value;
+      metric.origin = "manual";
+      renderDataTab(container, report);
+    }).catch(function (err) {
+      window.alert("修订失败：" + (err.message || "未知错误"));
+    });
+  }
+
+  // 审计：人工修订与被覆盖记录
+  function showAudit(report) {
+    api("/api/spot-report/audit?date=" + encodeURIComponent(report.date) + "&limit=50").then(function (data) {
+      const list = (data && data.list) || [];
+      const mask = el("div", { class: "spot-modal-mask", onClick: function (ev) {
+        if (ev.target === mask) closeModal();
+      }}, [
+        el("div", { class: "spot-modal" }, [
+          el("div", { class: "spot-modal-head" }, [
+            el("div", {}, [
+              el("h3", { text: "指标变更记录" }),
+              el("div", { class: "spot-page-caption", text: "日报日 " + report.date })
+            ])
+          ]),
+          list.length ? el("table", { class: "spot-data-table" }, [
+            el("thead", {}, [el("tr", {}, [
+              el("th", { text: "时间" }), el("th", { text: "运行日" }), el("th", { text: "对象" }),
+              el("th", { text: "指标" }), el("th", { text: "原值" }), el("th", { text: "新值" }),
+              el("th", { text: "类型" }), el("th", { text: "操作人" })
+            ])]),
+            el("tbody", {}, list.map(function (a) {
+              return el("tr", {}, [
+                el("td", { text: (a.createdAt || "").slice(0, 19).replace("T", " ") }),
+                el("td", { text: a.runDate }),
+                el("td", { text: a.scope }),
+                el("td", { text: a.metric }),
+                el("td", { text: a.oldValue === null || a.oldValue === undefined ? "-" : String(a.oldValue) }),
+                el("td", { text: a.newValue === null || a.newValue === undefined ? "-" : String(a.newValue) }),
+                el("td", { text: a.operation === "edit" ? "人工修订" : "被解析覆盖" }),
+                el("td", { text: a.operator || "-" })
+              ]);
+            }))
+          ]) : el("div", { class: "spot-empty", text: "暂无变更记录" }),
+          el("div", { class: "spot-modal-actions" }, [
+            el("button", { class: "spot-btn", text: "关闭", onClick: closeModal })
+          ])
+        ])
+      ]);
+      document.body.appendChild(mask);
+    }).catch(function (err) {
+      window.alert("加载审计失败：" + (err.message || "未知错误"));
+    });
+  }
+
   // 数据页签：按数据集分组，行=对象，列=指标，环比以角标显示
   function renderDataTab(container, report) {
     container.innerHTML = "";
@@ -341,7 +408,10 @@
         metaBits.push(Math.round(info.ocrMs / 1000) + "s");
         if (info.updatedAt) metaBits.push("提取于 " + info.updatedAt.slice(0, 19).replace("T", " "));
       }
-      container.appendChild(el("div", { class: "spot-data-meta", text: metaBits.join(" · ") }));
+      container.appendChild(el("div", { class: "spot-data-meta" }, [
+        el("span", { text: metaBits.join(" · ") }),
+        isAdmin() ? el("button", { class: "spot-link", text: "变更记录", onClick: function () { showAudit(report); } }) : null
+      ]));
       if (data.tradeDate && data.tradeDate !== report.date) {
         container.appendChild(el("div", { class: "spot-data-note",
           text: "注：日报里的表2 承载滞后运行日 " + data.tradeDate + " 的日前/实时成交电价" }));
@@ -375,7 +445,23 @@
               tr.appendChild(el("td", { class: "spot-data-missing", text: "-" }));
               return;
             }
-            const cellChildren = [el("div", { class: "spot-data-value", text: fmtNum(hit.value) + (hit.unit === "%" ? "%" : "") })];
+            const cellChildren = [];
+            const valueText = fmtNum(hit.value) + (hit.unit === "%" ? "%" : "");
+            if (isAdmin()) {
+              cellChildren.push(el("button", {
+                class: "spot-data-value spot-data-editable",
+                text: valueText,
+                title: "点击修订该字段",
+                onClick: function () { editMetric(container, report, hit); }
+              }));
+            } else {
+              cellChildren.push(el("div", { class: "spot-data-value", text: valueText }));
+            }
+            if (hit.origin === "manual") {
+              cellChildren.push(el("span", { class: "spot-origin-manual",
+                text: "人工" + (hit.editedBy ? "·" + hit.editedBy : ""),
+                title: "人工修订" + (hit.editedAt ? "于 " + hit.editedAt.slice(0, 19).replace("T", " ") : "") }));
+            }
             if (hit.atTime) cellChildren.push(el("div", { class: "spot-data-time", text: "@" + hit.atTime }));
             const badge = momBadge(hit.momPct);
             if (badge) cellChildren.push(badge);

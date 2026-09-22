@@ -61,6 +61,7 @@ type CollectSpotReportRes struct {
 
 // SpotMetric 单条指标
 type SpotMetric struct {
+	RunDate  string   `json:"runDate" dc:"运行日（表2 为滞后运行日）"`
 	Dataset  string   `json:"dataset" dc:"数据集：day_ahead_decl/day_ahead_trade/realtime_trade/summary"`
 	Scope    string   `json:"scope" dc:"对象：发电侧/燃煤/燃气/新能源/零价及以下/报价600以上/市场"`
 	Metric   string   `json:"metric" dc:"指标名"`
@@ -71,6 +72,47 @@ type SpotMetric struct {
 	SharePct *float64 `json:"sharePct" dc:"占比%"`
 	Source   string   `json:"source" dc:"来源：表1(一)/表1(二)/表2(一)/表2(二)/正文"`
 	Conf     float64  `json:"conf" dc:"OCR 置信度"`
+	Origin   string   `json:"origin" dc:"取值来源：ocr/manual"`
+	EditedBy string   `json:"editedBy" dc:"人工修订人"`
+	EditedAt string   `json:"editedAt" dc:"人工修订时间"`
+}
+
+// SpotMetricAudit 指标变更审计条目
+type SpotMetricAudit struct {
+	RunDate   string   `json:"runDate"`
+	Dataset   string   `json:"dataset"`
+	Scope     string   `json:"scope"`
+	Metric    string   `json:"metric"`
+	OldValue  *float64 `json:"oldValue"`
+	NewValue  *float64 `json:"newValue"`
+	Operation string   `json:"operation" dc:"edit=人工修订，overwritten_by_extract=被重跑覆盖"`
+	Operator  string   `json:"operator"`
+	CreatedAt string   `json:"createdAt"`
+}
+
+type UpdateSpotMetricReq struct {
+	g.Meta   `path:"/spot-report/metric" method:"post" tags:"现货日报" summary:"人工修订单个指标" role:"admin"`
+	Date     string  `json:"date" v:"required" dc:"日报日 YYYY-MM-DD"`
+	RunDate  string  `json:"runDate" v:"required" dc:"运行日"`
+	Dataset  string  `json:"dataset" v:"required"`
+	Scope    string  `json:"scope"`
+	Metric   string  `json:"metric" v:"required"`
+	Value    float64 `json:"value"`
+	Operator string  `json:"operator" dc:"修订人备注，缺省为当前角色"`
+}
+
+type UpdateSpotMetricRes struct {
+	Metric *SpotMetric `json:"metric"`
+}
+
+type GetSpotReportAuditReq struct {
+	g.Meta `path:"/spot-report/audit" method:"get" tags:"现货日报" summary:"指标变更审计" role:"admin"`
+	Date   string `json:"date" v:"required"`
+	Limit  int    `json:"limit" dc:"默认 50，最大 200"`
+}
+
+type GetSpotReportAuditRes struct {
+	List []*SpotMetricAudit `json:"list"`
 }
 
 // SpotExtractInfo 提取运行信息
