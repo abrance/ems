@@ -391,3 +391,35 @@
     flex-wrap: wrap;
   }
 }
+
+/* 首页纵向滚动支持
+ *
+ * SPA 的 scoped 规则（.dashboard .dashboard-landscape[data-v-…]）把首页容器写成
+ * height: calc(100vh - 95px) + overflow: hidden，行高是按容器百分比给的
+ * （row1 60%、row2 40%）。四页并排的现货卡片变高后，容器高度不变，flex 只能压缩
+ * 行——row1 从 483px 被压到 84px，里面的「能源系统」等图表随之被压扁。
+ *
+ * 这里改为：容器高度随内容增长，行按原设计比例给定高度，页面整体上下滚动。
+ * 横向仍不开滚动（overflow-x 保持 hidden，body 本身也是 overflow-x: hidden）。
+ *
+ * 注意：这些选择器是在覆盖 SPA 的 scoped 样式，必须带 !important 才能生效；
+ * 若 SPA 后续调整行类名或 60/40 的比例，这里需要同步。
+ */
+.arco-layout-content {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+.dashboard .dashboard-landscape {
+  height: auto !important;
+  min-height: calc(100vh - 95px) !important;
+  overflow-y: visible !important;
+  overflow-x: hidden !important;
+}
+.dashboard .dashboard-landscape .dashboard-landscape-row1 {
+  height: calc((100vh - 95px) * 0.6) !important;
+  flex: 0 0 auto !important;
+}
+.dashboard .dashboard-landscape .dashboard-landscape-row2 {
+  height: calc((100vh - 95px) * 0.4) !important;
+  flex: 0 0 auto !important;
+}
