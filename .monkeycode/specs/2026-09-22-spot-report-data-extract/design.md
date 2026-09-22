@@ -192,7 +192,7 @@ gd_spot_extract_run(     -- 每次解析的运行记录
 
 - `dataset = node_price_peak / node_price_valley`，`scope = 地市名`，`metric = 价格档位`，`value = 1..5`
 - 新增 `text_value` 列存档位区间文本（如 `[800,+inf)`）；老库用同一个 `ALTER TABLE` 迁移补齐
-- `origin = cv` 表示采样预填，页面显示「预填」徽标；**「确认预填」按钮一键把该日报全部 cv 项标为已复核**（`origin=manual` + 审计 `confirm`），无需逐项重填；需要修正时点单个字段改（审计 `edit`）
+- `origin = cv` 表示采样预填，页面显示「预填」徽标；**确认预填支持整篇或按数据集**：`POST /api/spot-report/confirm {date, dataset?}`，页面上既有「确认全部 N 项」，每个数据集标题行也有「确认本表 N 项」（例如只确认两张地图档位、不动表格值）。确认后 `origin=manual` + 审计 `confirm`（值不变）；需要修正时点单个字段改（审计 `edit`）
 - 编辑档位时给 1–5 下拉式提示（列出各档区间），并校验取值
 
 ## Go 侧实现与测试

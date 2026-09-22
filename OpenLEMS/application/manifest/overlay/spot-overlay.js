@@ -361,11 +361,14 @@
   }
 
   // 一键确认预填：origin=cv → manual（人工复核，不是逐项重填）
-  function confirmPrefill(container, report, pending) {
-    if (!window.confirm("确认将 " + pending + " 项预填值标记为已人工复核？\n（数值不变；如需修正请先点击对应字段修改）")) return;
+  function confirmPrefill(container, report, pending, dataset) {
+    const scopeText = dataset ? "（仅 " + (DATASET_LABELS[dataset] || dataset) + "）" : "（该日报全部数据集）";
+    if (!window.confirm("确认将 " + pending + " 项预填值标记为已人工复核" + scopeText + "？\n（数值不变；如需修正请先点击对应字段修改）")) return;
+    const payload = { date: report.date };
+    if (dataset) payload.dataset = dataset;
     api("/api/spot-report/confirm", {
       method: "POST",
-      body: JSON.stringify({ date: report.date })
+      body: JSON.stringify(payload)
     }).then(function (res) {
       renderDataTab(container, report);
       if (res && res.confirmed) {
@@ -451,9 +454,9 @@
       const pending = metrics.filter(function (m) { return m.origin === "cv"; }).length;
       if (pending) {
         const note = el("div", { class: "spot-data-note" }, [
-          el("span", { text: "其中 " + pending + " 项为图像采样预填（标记「预填」）。核对无误后点右侧按钮一次确认，无需逐项修改。" }),
-          isAdmin() ? el("button", { class: "spot-btn primary spot-confirm-btn", text: "确认预填",
-            onClick: function () { confirmPrefill(container, report, pending); } }) : null
+          el("span", { text: "其中 " + pending + " 项为图像采样预填（标记「预填」）。可整篇确认，也可只确认某一张表；核对无误后一次点击即可，无需逐项修改。" }),
+          isAdmin() ? el("button", { class: "spot-btn primary spot-confirm-btn", text: "确认全部 " + pending + " 项",
+            onClick: function () { confirmPrefill(container, report, pending, ""); } }) : null
         ]);
         container.appendChild(note);
       }
@@ -469,8 +472,16 @@
         rows.forEach(function (m) { if (scopes.indexOf(m.scope) < 0) scopes.push(m.scope); });
         const title = DATASET_LABELS[dataset] || dataset;
         const runDates = rows.map(function (m) { return m.runDate; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
-        container.appendChild(el("div", { class: "spot-data-title",
-          text: title + (runDates.length === 1 && runDates[0] !== report.date ? "（运行日 " + runDates[0] + "）" : "") }));
+        const datasetPending = rows.filter(function (m) { return m.origin === "cv"; }).length;
+        const titleRow = el("div", { class: "spot-data-title-row" }, [
+          el("div", { class: "spot-data-title",
+            text: title + (runDates.length === 1 && runDates[0] !== report.date ? "（运行日 " + runDates[0] + "）" : "") }),
+          isAdmin() && datasetPending
+            ? el("button", { class: "spot-btn spot-confirm-btn", text: "确认本表 " + datasetPending + " 项",
+                onClick: function () { confirmPrefill(container, report, datasetPending, dataset); } })
+            : null
+        ]);
+        container.appendChild(titleRow);
 
         const table = el("table", { class: "spot-data-table" });
         const head = el("tr", {}, [el("th", { text: "对象" })]);
