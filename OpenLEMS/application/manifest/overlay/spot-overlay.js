@@ -64,7 +64,6 @@
     root.innerHTML = "";
     const idx = currentIndex();
     const pages = (homeState.report && homeState.report.pages) || [];
-    const page = pages[homeState.page] || null;
     const prevDate = el("button", {
       class: "spot-btn",
       text: "前一天",
@@ -84,8 +83,12 @@
     if (idx <= 0) prevDate.disabled = true;
     if (idx < 0 || idx >= homeState.dates.length - 1) nextDate.disabled = true;
 
+    const report = homeState.report || {};
     root.appendChild(el("div", { class: "spot-home-head" }, [
-      el("div", { class: "spot-home-title", text: "电力现货" }),
+      el("div", { class: "spot-home-heading" }, [
+        el("div", { class: "spot-home-title", text: "电力现货" }),
+        el("div", { class: "spot-home-sub", text: report.title ? report.title : "暂无日报" })
+      ]),
       el("div", { class: "spot-date-nav" }, [
         prevDate,
         el("div", { class: "spot-date-label", text: homeState.date || "暂无日报" }),
@@ -93,30 +96,101 @@
       ])
     ]));
 
-    const body = el("div", { class: "spot-home-body" });
-    if (homeState.empty || !page) {
-      body.appendChild(el("div", { class: "spot-empty", text: "暂无日报" }));
-    } else {
-      const prevPage = el("button", { class: "spot-page-btn", text: "<", onClick: function () {
-        homeState.page = (homeState.page + pages.length - 1) % pages.length;
-        renderHome();
-      }});
-      const nextPage = el("button", { class: "spot-page-btn", text: ">", onClick: function () {
-        homeState.page = (homeState.page + 1) % pages.length;
-        renderHome();
-      }});
-      const stage = el("div", { class: "spot-page-stage" }, [
-        el("img", { src: page.url, alt: page.label }),
-        el("div", { class: "spot-page-caption", text: (homeState.page + 1) + " / 4  " + page.label })
-      ]);
-      body.appendChild(prevPage);
-      body.appendChild(stage);
-      body.appendChild(nextPage);
+    if (homeState.empty || !pages.length) {
+      root.appendChild(el("div", { class: "spot-home-empty" }, [
+        el("div", { class: "spot-home-empty-icon", text: "讯" }),
+        el("div", { class: "spot-empty", text: "暂无现货日报" }),
+        el("div", { class: "spot-empty-hint", text: isAdmin() ? "可在 系统管理 → 信息管理 中新增采集" : "等待管理员采集" })
+      ]));
+      return;
     }
-    root.appendChild(body);
+
+    // 四页并排：图片按原始比例铺满各自列宽，一眼看全 4 页；点击任一张放大查看
+    root.appendChild(el("div", { class: "spot-grid" }, pages.map(function (item, index) {
+      return el("button", {
+        class: "spot-cell",
+        type: "button",
+        title: item.label,
+        onClick: function () { openViewer(index); }
+      }, [
+        el("img", { src: item.url, alt: item.label, loading: "lazy" }),
+        el("div", { class: "spot-cell-tag" }, [
+          el("div", { class: "spot-cell-index", text: String(item.page || index + 1) }),
+          el("div", { class: "spot-cell-label", text: item.label })
+        ])
+      ]);
+    })));
+  }
+
+  let viewerIndex = -1;
+
+  function viewerKeydown(ev) {
+    if (ev.key === "Escape") {
+      closeViewer();
+    } else if (ev.key === "ArrowLeft") {
+      stepViewer(-1);
+    } else if (ev.key === "ArrowRight") {
+      stepViewer(1);
+    }
+  }
+
+  function closeViewer() {
+    document.querySelectorAll(".spot-modal-mask.spot-viewer-mask").forEach(function (node) { node.remove(); });
+    if (viewerIndex >= 0) {
+      viewerIndex = -1;
+      document.removeEventListener("keydown", viewerKeydown);
+    }
+  }
+
+  function stepViewer(delta) {
+    const pages = (homeState.report && homeState.report.pages) || [];
+    if (!pages.length) return;
+    viewerIndex = (viewerIndex + delta + pages.length) % pages.length;
+    renderViewer();
+  }
+
+  function renderViewer() {
+    const mask = document.querySelector(".spot-modal-mask.spot-viewer-mask");
+    const report = homeState.report || {};
+    const pages = report.pages || [];
+    if (!mask || viewerIndex < 0 || !pages.length) return;
+    const page = pages[viewerIndex];
+    mask.innerHTML = "";
+    mask.appendChild(el("div", { class: "spot-viewer" }, [
+      el("div", { class: "spot-viewer-head" }, [
+        el("div", { class: "spot-viewer-title", text: report.title || "现货运行日报" }),
+        el("button", { class: "spot-btn", text: "关闭", onClick: closeViewer })
+      ]),
+      el("div", { class: "spot-viewer-body" }, [
+        el("button", { class: "spot-page-btn", text: "<", title: "上一页", onClick: function () { stepViewer(-1); } }),
+        el("img", { src: page.url, alt: page.label }),
+        el("button", { class: "spot-page-btn", text: ">", title: "下一页", onClick: function () { stepViewer(1); } })
+      ]),
+      el("div", { class: "spot-viewer-foot" }, [
+        el("div", { class: "spot-page-caption", text: "运行日 " + (report.date || "") + " · " + (viewerIndex + 1) + " / " + pages.length + " · " + page.label }),
+        el("div", { class: "spot-viewer-hint", text: "← → 翻页，Esc 关闭" })
+      ])
+    ]));
+  }
+
+  function openViewer(index) {
+    const pages = (homeState.report && homeState.report.pages) || [];
+    if (!pages.length) return;
+    closeModal();
+    viewerIndex = index;
+    const mask = el("div", {
+      class: "spot-modal-mask spot-viewer-mask",
+      onClick: function (ev) {
+        if (ev.target === mask) closeViewer();
+      }
+    });
+    document.body.appendChild(mask);
+    renderViewer();
+    document.addEventListener("keydown", viewerKeydown);
   }
 
   async function loadHomeDate(date) {
+    closeViewer();
     try {
       const data = await api("/api/spot-report/detail?date=" + encodeURIComponent(date));
       homeState.date = date;
@@ -175,7 +249,8 @@
   }
 
   function closeModal() {
-    document.querySelectorAll(".spot-modal-mask").forEach(function (node) { node.remove(); });
+    // 只关采集/详情弹窗，不碰放大查看视图（sync 定时重跑会反复调用本函数）
+    document.querySelectorAll(".spot-modal-mask:not(.spot-viewer-mask)").forEach(function (node) { node.remove(); });
   }
 
   function showCollectModal() {
