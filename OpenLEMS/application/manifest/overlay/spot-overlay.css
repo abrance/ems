@@ -587,3 +587,21 @@
   align-items: center;
   gap: 10px;
 }
+
+/* 数据集标题行 + 按表确认预填 */
+.spot-data-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+.spot-data-title-row .spot-data-title {
+  margin: 0;
+}
+.spot-data-title-row .spot-confirm-btn {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
