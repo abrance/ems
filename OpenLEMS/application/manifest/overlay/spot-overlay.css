@@ -1,11 +1,12 @@
+/* 电力现货：四页并排总览。卡片宽度即容器整宽，4 列等分，图片按原始比例
+   铺满列宽（2381x3367 → 约 1.414 竖版），一眼看全 4 页；点击任一页放大查看。 */
 .spot-home {
-  flex: 0 0 250px;
-  min-height: 230px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-2, #fff);
   border: 1px solid var(--color-border, #e5e6eb);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }
 .spot-home-head,
@@ -17,16 +18,30 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--color-border, #e5e6eb);
 }
+.spot-home-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
 .spot-home-title,
 .spot-info-title {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text-1, #1d2129);
 }
+.spot-home-sub {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .spot-date-nav {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
 }
 .spot-btn {
   border: 1px solid var(--color-border, #e5e6eb);
@@ -47,51 +62,174 @@
   color: #fff;
 }
 .spot-date-label {
-  min-width: 108px;
+  min-width: 92px;
   text-align: center;
   font-size: 13px;
   color: var(--color-text-2, #4e5969);
+  font-variant-numeric: tabular-nums;
 }
-.spot-home-body {
-  flex: 1;
+.spot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+.spot-cell {
+  position: relative;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #0f1115;
+  overflow: hidden;
+  cursor: zoom-in;
+  transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+.spot-cell img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 68vh;
+  object-fit: contain;
+  background: #0f1115;
+}
+.spot-cell:hover {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  transform: translateY(-1px);
+}
+.spot-cell:focus-visible {
+  outline: 2px solid rgb(var(--primary-6, 255, 125, 0));
+  outline-offset: 2px;
+}
+.spot-cell-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  background: rgba(15, 17, 21, 0.62);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+}
+.spot-cell-index {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(var(--primary-6, 255, 125, 0));
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 10px 12px;
-  min-height: 0;
 }
-.spot-empty {
-  color: var(--color-text-3, #86909c);
-  font-size: 14px;
+.spot-cell-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.spot-page-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid var(--color-border, #e5e6eb);
-  background: var(--color-bg-1, #f7f8fa);
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-.spot-page-stage {
-  flex: 1;
-  min-width: 0;
-  height: 170px;
+.spot-home-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  min-height: 180px;
+  padding: 24px;
 }
-.spot-page-stage img {
+.spot-home-empty-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(var(--primary-6, 255, 125, 0), 0.12);
+  color: rgb(var(--primary-6, 255, 125, 0));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+.spot-empty {
+  color: var(--color-text-2, #4e5969);
+  font-size: 14px;
+}
+.spot-empty-hint {
+  color: var(--color-text-3, #86909c);
+  font-size: 12px;
+}
+.spot-viewer {
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-2, #fff);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.spot-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border, #e5e6eb);
+}
+.spot-viewer-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-1, #1d2129);
+}
+.spot-viewer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  background: #0f1115;
+}
+.spot-viewer-body img {
   max-width: 100%;
-  max-height: 148px;
+  max-height: 74vh;
   object-fit: contain;
-  border-radius: 4px;
-  background: #111;
+  border-radius: 6px;
+}
+.spot-viewer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--color-border, #e5e6eb);
+}
+.spot-viewer-hint {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+.spot-page-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.spot-page-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 .spot-page-caption {
-  margin-top: 6px;
   font-size: 12px;
   color: var(--color-text-2, #4e5969);
 }
@@ -231,6 +369,11 @@
   font-size: 12px;
   color: var(--color-text-2, #4e5969);
 }
+@media (max-width: 1280px) {
+  .spot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 @media (max-width: 900px) {
   .spot-detail-pages {
     grid-template-columns: 1fr;
@@ -238,5 +381,13 @@
   .spot-info-page {
     top: 48px;
     padding: 12px;
+  }
+}
+@media (max-width: 720px) {
+  .spot-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .spot-home-head {
+    flex-wrap: wrap;
   }
 }
