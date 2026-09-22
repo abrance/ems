@@ -24,9 +24,11 @@ const (
 
 // SSpotMetricModel 现货日报结构化指标。
 //
-// 一个 (运行日, 数据集, 对象, 指标) 一行。report_date 与 run_date 必须分开：
-// 日报里「表2」承载的是滞后运行日（T-2）的日前/实时成交电价，同一运行日的
-// 同一指标无论来自哪一天的日报都应落到同一行。
+// 指标归属「产出它的那份日报」，唯一键为 (report_date, run_date, dataset, scope, metric)。
+// report_date 与 run_date 必须分开：日报里「表2」承载的是滞后运行日（T-2）的
+// 日前/实时成交电价。同一运行日的同一指标会由多份日报产出（例：09-19 的日前成交电价
+// 既来自 09-19 日报的表1(二)，也来自 09-21 日报的表2(一)），两份日报各自成行、
+// 数值由交叉校验保证一致；按运行日聚合时优先取 source=表1(二) 的行。
 type SSpotMetricModel struct {
 	g.Meta           `orm:"table:gd_spot_metric"`
 	Id               int64       `json:"id" orm:"id,primary,auto_increment"`

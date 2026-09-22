@@ -66,7 +66,7 @@ gd_spot_metric(          -- 指标长表
   value, unit, at_time,
   mom_pct, share_pct,
   source, conf, extractor_version,
-  UNIQUE (run_date, dataset, scope, metric)
+  UNIQUE (report_date, run_date, dataset, scope, metric)
 )
 gd_spot_extract_run(     -- 每次解析的运行记录
   report_date UNIQUE, status, ocr_model, page_count, ocr_ms,
@@ -74,7 +74,9 @@ gd_spot_extract_run(     -- 每次解析的运行记录
 )
 ```
 
-`report_date` 与 `run_date` 必须分开：表2 的数据属于 T-2 运行日却来自 T 的日报；唯一键按运行日聚合，因此同一天无论从哪篇日报提取，都收敛到同一行，交叉校验天然成立。
+`report_date` 与 `run_date` 必须分开：表2 的数据属于 T-2 运行日却来自 T 的日报。
+
+唯一键含 `report_date`（指标归属产出它的那份日报）。初版把唯一键放在 (run_date, dataset, scope, metric)，上线即失败：09-19 的日前成交电价既由 09-19 日报的表1(二) 产出，也已由 09-21 日报的表2(一) 产出，后一次提取必然撞唯一键。改为含 report_date 后两份日报各自成行，数值由跨日报校验保证一致；按运行日聚合（趋势、交叉校验）时优先取 `source=表1(二)` 的行，忽略滞后来源。
 
 数据集取值：`summary`（正文摘要）、`day_ahead_decl`（表1(一)）、`day_ahead_trade`（表1(二)/表2(一)）、`realtime_trade`（表2(二)）。
 
