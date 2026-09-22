@@ -106,6 +106,17 @@ type UpdateSpotMetricRes struct {
 	Metric *SpotMetric `json:"metric"`
 }
 
+type ConfirmSpotMetricReq struct {
+	g.Meta   `path:"/spot-report/confirm" method:"post" tags:"现货日报" summary:"确认图像/OCR 预填值" role:"admin"`
+	Date     string `json:"date" v:"required" dc:"日报日 YYYY-MM-DD"`
+	Dataset  string `json:"dataset" dc:"留空表示确认该日报全部数据集"`
+	Operator string `json:"operator" dc:"确认人，缺省为当前角色"`
+}
+
+type ConfirmSpotMetricRes struct {
+	Confirmed int `json:"confirmed" dc:"确认条数"`
+}
+
 type GetSpotReportAuditReq struct {
 	g.Meta `path:"/spot-report/audit" method:"get" tags:"现货日报" summary:"指标变更审计" role:"admin"`
 	Date   string `json:"date" v:"required"`

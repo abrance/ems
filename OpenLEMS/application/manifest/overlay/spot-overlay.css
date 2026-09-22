@@ -574,3 +574,16 @@
   font-size: 11px;
   line-height: 18px;
 }
+
+/* 预填确认条：说明文字与按钮同行 */
+.spot-confirm-btn {
+  margin-left: auto;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.spot-data-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

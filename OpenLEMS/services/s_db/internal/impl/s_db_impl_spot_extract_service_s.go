@@ -162,6 +162,57 @@ func (s *sSpotExtractServiceImpl) UpdateMetricValue(ctx context.Context, key s_d
 	return model, nil
 }
 
+// ConfirmMetrics 批量确认预填：origin=cv → manual，并逐条写审计
+func (s *sSpotExtractServiceImpl) ConfirmMetrics(ctx context.Context, reportDate, dataset, operator string) (int, error) {
+	count := 0
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		query := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+			Where(s_db_model.FieldSpotMetricReportDate, reportDate).
+			Where(s_db_model.FieldSpotMetricOrigin, "cv")
+		if dataset != "" {
+			query = query.Where(s_db_model.FieldSpotMetricDataset, dataset)
+		}
+		var rows []*s_db_model.SSpotMetricModel
+		if err := query.Scan(&rows); err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		now := gtime.Now()
+		ids := make([]int64, 0, len(rows))
+		audits := make([]g.Map, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.Id)
+			audits = append(audits, g.Map{
+				"report_date": r.ReportDate, "run_date": r.RunDate, "dataset": r.Dataset,
+				"scope": r.Scope, "metric": r.Metric,
+				"old_value": r.Value, "new_value": r.Value, "old_origin": "cv",
+				"operation": s_db_model.SpotMetricAuditConfirm, "operator": operator, "created_at": now,
+			})
+		}
+		if _, err := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+			WhereIn("id", ids).
+			Data(g.Map{
+				s_db_model.FieldSpotMetricOrigin:   "manual",
+				s_db_model.FieldSpotMetricEditedBy: operator,
+				s_db_model.FieldSpotMetricEditedAt: now,
+				"updated_at":                       now,
+			}).Update(); err != nil {
+			return err
+		}
+		if _, err := tx.Model(s_db_model.TableSpotMetricAudit).Ctx(ctx).Data(audits).Insert(); err != nil {
+			return err
+		}
+		count = len(rows)
+		return nil
+	})
+	if err != nil {
+		return 0, errors.Wrap(err, "确认预填失败")
+	}
+	return count, nil
+}
+
 // ListMetricAudit 指标变更审计（人工修订 + 被解析覆盖）
 func (s *sSpotExtractServiceImpl) ListMetricAudit(ctx context.Context, reportDate string, limit int) ([]*s_db_model.SSpotMetricAuditModel, error) {
 	if limit <= 0 || limit > 200 {

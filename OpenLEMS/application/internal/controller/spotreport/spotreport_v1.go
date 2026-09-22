@@ -131,3 +131,21 @@ func (c *ControllerV1) GetSpotReportAudit(ctx context.Context, req *v1.GetSpotRe
 	}
 	return res, nil
 }
+
+// ConfirmSpotMetric 确认预填值（管理员一键复核）
+func (c *ControllerV1) ConfirmSpotMetric(ctx context.Context, req *v1.ConfirmSpotMetricReq) (*v1.ConfirmSpotMetricRes, error) {
+	if !datePattern.MatchString(req.Date) {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
+	}
+	operator := req.Operator
+	if operator == "" {
+		if r := g.RequestFromCtx(ctx); r != nil {
+			operator = r.Session.MustGet("role").String()
+		}
+	}
+	res, err := logic.ConfirmReportMetrics(ctx, req.Date, req.Dataset, operator)
+	if err != nil {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+	}
+	return res, nil
+}

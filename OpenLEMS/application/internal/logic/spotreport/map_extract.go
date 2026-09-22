@@ -17,9 +17,12 @@ import (
 //  2. 城市：OCR 已识别出地市名，取其标签窗口内出现最多的「有饱和度且非黑」颜色
 //  3. 匹配：颜色需贴近色板某档，且该颜色在窗口内占比够高（否则标签跨在色块边界上）
 //
-// 关键安全行为：当图例与地图配色不一致时（实测 2026-09-18 那篇：图例是浅色系、
-// 地图填充是饱和红），颜色匹配会全部失败 → 不预填任何值，交人工填写，
-// 而不是按错误色板猜出一堆看似合理的档位。
+// 两段匹配：
+//  1. 严格 RGB 匹配（距离 < 40）：图例色板与地图填充一致时使用，置信度 = 采样占比
+//  2. 色相回退：图例与地图配色不一致时（实测 2026-09-18：图例浅色系、地图饱和红），
+//     按色系（绿/蓝/黄/橙/红）匹配，容忍饱和度与明度差异，置信度打折并给出告警
+//
+// 无论哪一段，都要求采样占比 ≥ 0.6（标签跨在色块边界上时留空）。
 const (
 	DatasetNodePricePeak   = "node_price_peak"
 	DatasetNodePriceValley = "node_price_valley"
@@ -78,7 +81,7 @@ func SampleMapBuckets(img image.Image, lines []OCRLine) ([]CityBucket, []string)
 	}
 
 	var out []CityBucket
-	unmatched := 0
+	unmatched, viaHue := 0, 0
 	for _, line := range cities {
 		color, share := dominantFillColor(img, line)
 		if color == nil || share < 0.6 {
@@ -86,20 +89,35 @@ func SampleMapBuckets(img image.Image, lines []OCRLine) ([]CityBucket, []string)
 			continue
 		}
 		idx, dist := nearestBucket(palette, *color)
-		if idx < 0 || dist > 40 {
-			unmatched++
+		if idx >= 0 && dist <= 40 {
+			out = append(out, CityBucket{
+				City:   normalizeCity(line.Text),
+				Bucket: idx + 1,
+				Label:  palette[idx].Label,
+				Conf:   math.Round(share*100) / 100,
+			})
 			continue
 		}
-		out = append(out, CityBucket{
-			City:   normalizeCity(line.Text),
-			Bucket: idx + 1,
-			Label:  palette[idx].Label,
-			Conf:   math.Round(share*100) / 100,
-		})
+		// 图例与地图配色不一致：退化为色相（色系）匹配，置信度打折
+		if idx, hueDist := nearestBucketByHue(palette, *color); idx >= 0 && hueDist <= 40 {
+			viaHue++
+			out = append(out, CityBucket{
+				City:   normalizeCity(line.Text),
+				Bucket: idx + 1,
+				Label:  palette[idx].Label,
+				Conf:   math.Round(share*70) / 100,
+			})
+			continue
+		}
+		unmatched++
+	}
+	if viaHue > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"该图填充色与图例色板不一致，%d 个地市档位由色系推断（低置信，已标记待人工确认）", viaHue))
 	}
 	if unmatched > 0 {
 		warnings = append(warnings, fmt.Sprintf(
-			"地图上有 %d 个地市未能判定档位（配色与图例不一致或标签跨越色块），已留空待人工填写", unmatched))
+			"地图上有 %d 个地市未能判定档位（标签跨越色块边界），已留空", unmatched))
 	}
 	return out, warnings
 }
@@ -245,6 +263,55 @@ func nearestBucket(palette []bucketColor, c rgb) (int, float64) {
 		}
 	}
 	return bestIdx, bestDist
+}
+
+// nearestBucketByHue 按色相（色系）匹配档位：图例与地图配色不一致时的回退。
+// 绿/蓝/黄/橙/红 五个色系在两套配色里一致，只有饱和度与明度不同。
+func nearestBucketByHue(palette []bucketColor, c rgb) (int, float64) {
+	target := rgbHue(c)
+	bestIdx, bestDist := -1, math.MaxFloat64
+	for i, p := range palette {
+		d := hueDistance(target, rgbHue(rgb{p.R, p.G, p.B}))
+		if d < bestDist {
+			bestIdx, bestDist = i, d
+		}
+	}
+	return bestIdx, bestDist
+}
+
+// rgbHue 返回色相角（0..360）；灰度像素返回 -1
+func rgbHue(c rgb) float64 {
+	r, g, b := float64(c.R)/255, float64(c.G)/255, float64(c.B)/255
+	max, min := math.Max(r, math.Max(g, b)), math.Min(r, math.Min(g, b))
+	delta := max - min
+	if delta == 0 {
+		return -1
+	}
+	var h float64
+	switch max {
+	case r:
+		h = math.Mod((g-b)/delta, 6)
+	case g:
+		h = (b-r)/delta + 2
+	default:
+		h = (r-g)/delta + 4
+	}
+	h *= 60
+	if h < 0 {
+		h += 360
+	}
+	return h
+}
+
+func hueDistance(a, b float64) float64 {
+	if a < 0 || b < 0 {
+		return math.MaxFloat64
+	}
+	d := math.Abs(a - b)
+	if d > 180 {
+		d = 360 - d
+	}
+	return d
 }
 
 func legendVerticalRange(lines []OCRLine, pageHeight float64) (float64, float64) {
