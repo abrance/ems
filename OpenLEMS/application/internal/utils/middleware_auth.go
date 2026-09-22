@@ -3,13 +3,49 @@ package utils
 import (
 	v1 "application/api/auth/v1"
 	"common/c_enum"
+	"os"
 	"strings"
 
 	"github.com/gogf/gf/v2/net/ghttp"
 )
 
+// EnvAuthBypassRole 临时放开鉴权的环境变量，取值 admin 或 user。
+//
+// 非空时所有 API 请求跳过登录校验，直接以该角色放行；前端也会注入
+// 对应的 localStorage 会话。仅用于内网调试/临时演示，用完必须撤销：
+// 该开关会让任何能访问服务的人都拿到同样的角色权限。
+const EnvAuthBypassRole = "AUTH_BYPASS_ROLE"
+
+// AuthBypassRole 返回归一化后的鉴权绕过角色：admin、user，或空字符串（未开启）。
+func AuthBypassRole() string {
+	role := strings.ToLower(strings.TrimSpace(os.Getenv(EnvAuthBypassRole)))
+	if role == string(c_enum.EUserRoleAdmin) || role == string(c_enum.EUserRoleUser) {
+		return role
+	}
+	return ""
+}
+
 // MiddlewareAuth 认证与授权中间件
 func MiddlewareAuth(r *ghttp.Request) {
+	// 临时放开鉴权：跳过登录校验，按 AUTH_BYPASS_ROLE 指定的角色放行。
+	// bypass=admin 时不再做任何角色校验；bypass=user 时保留角色校验，
+	// 于是读写分离仍然生效：GET 类接口放行，管理类（POST/PUT/DELETE）依旧 403。
+	if bypass := AuthBypassRole(); bypass != "" {
+		r.Session.Set("role", bypass)
+		r.SetCtxVar("userRole", bypass)
+		if bypass != string(c_enum.EUserRoleAdmin) {
+			if handler := r.GetServeHandler(); handler != nil {
+				required := requiredRole(r, handler.GetMetaTag("role"))
+				if !checkRolePermission(bypass, required) {
+					r.Response.WriteJson(ghttp.DefaultHandlerResponse{Code: 403, Message: "权限不足"})
+					return
+				}
+			}
+		}
+		r.Middleware.Next()
+		return
+	}
+
 	handler := r.GetServeHandler()
 
 	// 支持通过 Authorization 头传递会话ID（Bearer <token> 或 直接 <token>）
@@ -40,14 +76,7 @@ func MiddlewareAuth(r *ghttp.Request) {
 
 	// 检查角色要求：若未标注role，按方法推断(GET=user，其它=admin)
 	if handler != nil {
-		required := handler.GetMetaTag("role")
-		if required == "" {
-			if r.Method == "GET" {
-				required = string(c_enum.EUserRoleUser)
-			} else {
-				required = string(c_enum.EUserRoleAdmin)
-			}
-		}
+		required := requiredRole(r, handler.GetMetaTag("role"))
 		if required != "" && !checkRolePermission(role, required) {
 			r.Response.WriteJson(ghttp.DefaultHandlerResponse{Code: 403, Message: "权限不足"})
 			return
@@ -61,6 +90,17 @@ func MiddlewareAuth(r *ghttp.Request) {
 	r.SetCtxVar("userRole", role)
 
 	r.Middleware.Next()
+}
+
+// requiredRole 返回接口要求的角色：未显式标注时按方法推断（GET=user，其它=admin）。
+func requiredRole(r *ghttp.Request, metaRole string) string {
+	if metaRole != "" {
+		return metaRole
+	}
+	if r.Method == "GET" {
+		return string(c_enum.EUserRoleUser)
+	}
+	return string(c_enum.EUserRoleAdmin)
 }
 
 // checkRolePermission 角色包含关系：admin ⊇ user
