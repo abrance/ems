@@ -199,3 +199,35 @@ gd_spot_extract_run(     -- 每次解析的运行记录
 
 - `map_extract.go`：`SampleMapBuckets(img, lines) ([]CityBucket, []string)`，纯函数，输入图像 + OCR 行
 - `map_extract_test.go`：用**合成图**（自绘 5 档色块 + 4 个地市色块 + 图例行）做确定性测试，覆盖：正常识别 4 个地市档位、配色不一致时拒绝预填并告警、无图例时不预填、档位倒挂告警。不引入大体积图片 fixture
+
+# 批量重跑解析
+
+解析器或映射逻辑升级后，历史日报不会自动更新（实测教训：v1.0.16 的 origin 映射缺陷
+只影响当时已入库的日报，v1.0.17 修好后必须重跑才生效）。因此提供按区间批量重跑。
+
+## 形态
+
+- `POST /api/spot-report/extract/batch {from, to}`（admin）：**后台任务**，立即返回任务 id。
+  每篇要跑 4 页 OCR（约 6-10 秒）+ 地图采样，同步执行会顶着 HTTP 超时
+- `GET /api/spot-report/extract/batch/status?id=`（admin）：查进度（留空取最近一次）
+- 串行执行：OCR 服务只有 2 个并发槽，并发重跑会把宿主机 CPU 打满并拖慢 lems 自身
+- 内存任务表保留最近 5 个任务；同一时刻只允许一个批量任务
+
+## 进度字段
+
+total / done / succeeded / failed / current / errors / **overwritten** / startedAt / finishedAt
+
+`overwritten` 是本次重跑覆盖掉的人工值条数 —— 语义仍是「以 OCR 为准」（按使用者选择），
+但覆盖前逐条写审计（`overwritten_by_extract`），批量任务在结束时把条数报给使用者，
+并在启动前的确认弹窗里明确提示「已人工确认或修订的值会被覆盖」。
+
+## 前端
+
+「信息管理」头部新增「批量重跑解析」：范围默认取已采集的最早/最新日报日，
+确认后启动任务并每 2.5 秒轮询，进度显示在标题旁的胶囊里（`重跑 1/3（2026-09-19）`），
+完成后弹窗汇总成功/失败/覆盖条数。
+
+## 覆盖计数的实现教训
+
+告警前缀「重跑覆盖人工修订」最初用 `w[:7]`（字节切片）判断，中文被切断 → 永远匹配不上，
+覆盖数恒为 0。现改为共享常量 `OverwriteWarningPrefix` + `strings.HasPrefix`，并有单测锚定。
