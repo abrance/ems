@@ -153,6 +153,19 @@ func SelectReportImages(images []ParsedImage) []ParsedImage {
 			return reports
 		}
 	}
+	// 正文 DOM 里常出现重复的页眉/页脚图片：它们不在 picturePageInfoList 中，
+	// 拿不到宽高，会让 allSized 判定为 false。只要已带尺寸的竖版长图够 4 张，
+	// 就直接采用，避免落到下面按张数切片的兜底分支——切出来的张数不等于 4 时
+	// ParseArticle 会误报「文章中没有识别到日报图片」。
+	var portrait []ParsedImage
+	for _, img := range images {
+		if img.Width > 0 && img.Width >= 1500 && img.Height > img.Width {
+			portrait = append(portrait, img)
+		}
+	}
+	if len(portrait) >= 4 {
+		return portrait[:4]
+	}
 	if len(images) >= 6 {
 		return images[1 : len(images)-1]
 	}
