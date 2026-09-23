@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
+
+	"common/c_log"
 
 	v1 "application/api/spotreport/v1"
 	"s_db"
@@ -107,7 +111,27 @@ func Collect(ctx context.Context, rawURL string) (*v1.SpotReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	scheduleAutoExtract(parsed.Date)
 	return ToDTO(saved), nil
+}
+
+// scheduleAutoExtract 采集成功后异步触发解析（OCR + 模板提取 + 地图采样）。
+//
+// 4 页 OCR 约 6-10 秒，不能挂在采集请求上；用独立 context 是因为请求结束后 ctx 会被取消。
+// 失败只影响数据视图（首页会提示去解析），不影响已采集的图片档案。
+func scheduleAutoExtract(runDate string) {
+	if !autoExtractEnabled() {
+		c_log.Infof(context.Background(), "自动解析已关闭（%s=off），跳过 %s", EnvAutoExtract, runDate)
+		return
+	}
+	go func() {
+		ctx := context.Background()
+		if _, err := ExtractReport(ctx, runDate); err != nil {
+			c_log.Warningf(ctx, "采集后自动解析失败（%s）：%v；可在信息管理里手动重跑", runDate, err)
+			return
+		}
+		c_log.Infof(ctx, "采集后自动解析完成：%s", runDate)
+	}()
 }
 
 func fetchHTML(ctx context.Context, pageURL string) (string, error) {
@@ -153,4 +177,15 @@ func downloadImage(ctx context.Context, imageURL string) ([]byte, error) {
 		return nil, fmt.Errorf("下载图片失败：HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+}
+
+// EnvAutoExtract 关闭自动解析的开关：设为 off/false/0 时，采集后不自动解析
+const EnvAutoExtract = "SPOT_AUTO_EXTRACT"
+
+func autoExtractEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvAutoExtract))) {
+	case "off", "false", "0", "no":
+		return false
+	}
+	return true
 }
