@@ -574,7 +574,10 @@
     if (document.getElementById(CARD_ID)) return;
     const row = cat.querySelector(".arco-row") || cat.querySelector("[class*='arco-row']") || cat.lastElementChild;
     if (!row) return;
-    const col = el("div", { id: COL_ID, class: row.firstElementChild ? row.firstElementChild.className : "" });
+    const sibling = row.firstElementChild;
+    const col = el("div", { id: COL_ID, class: sibling ? sibling.className : "" });
+    // 兄弟卡片用内联 grid-column/arco-col 定宽，className 里没有，必须一起复制
+    if (sibling && sibling.getAttribute("style")) col.setAttribute("style", sibling.getAttribute("style"));
     const card = el("div", { id: CARD_ID, class: "spot-info-card", onClick: openInfoPage }, [
       el("div", { class: "spot-info-card-icon", text: "讯" }),
       el("div", { class: "spot-info-card-name", text: "信息管理" }),
