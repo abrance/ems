@@ -571,13 +571,15 @@
     if (!isAdmin()) return;
     const cat = document.getElementById("cat-Config");
     if (!cat) return;
-    if (document.getElementById(CARD_ID)) return;
     const row = cat.querySelector(".arco-row") || cat.querySelector("[class*='arco-row']") || cat.lastElementChild;
     if (!row) return;
+    // 兄弟卡片用内联 grid-column/arco-col 定宽，且 Vue 是首帧之后才补上，
+    // 所以创建时抄一次、之后每次 sync 再补同步，直到抄到为止。
     const sibling = row.firstElementChild;
-    const col = el("div", { id: COL_ID, class: sibling ? sibling.className : "" });
-    // 兄弟卡片用内联 grid-column/arco-col 定宽，className 里没有，必须一起复制
-    if (sibling && sibling.getAttribute("style")) col.setAttribute("style", sibling.getAttribute("style"));
+    const widthStyle = sibling && sibling.getAttribute("style");
+    const col = document.getElementById(COL_ID) || el("div", { id: COL_ID, class: sibling ? sibling.className : "" });
+    if (widthStyle && sibling !== col) col.setAttribute("style", widthStyle);
+    if (document.getElementById(CARD_ID)) return;
     const card = el("div", { id: CARD_ID, class: "spot-info-card", onClick: openInfoPage }, [
       el("div", { class: "spot-info-card-icon", text: "讯" }),
       el("div", { class: "spot-info-card-name", text: "信息管理" }),
