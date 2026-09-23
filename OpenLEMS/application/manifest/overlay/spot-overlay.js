@@ -129,6 +129,12 @@
       return m.origin === "cv";
     }).length;
 
+    const today = new Date();
+    const yst = new Date(today.getTime() - 86400000);
+    const ystText = yst.getFullYear() + "-" + String(yst.getMonth() + 1).padStart(2, "0") + "-" +
+      String(yst.getDate()).padStart(2, "0");
+    const isStale = homeState.date && homeState.date !== ystText;
+
     const tabData = el("button", { class: "spot-tab" + (homeState.mode === "data" ? " active" : ""), text: "数据",
       onClick: function () { switchHomeMode("data"); } });
     const tabImages = el("button", { class: "spot-tab" + (homeState.mode === "images" ? " active" : ""), text: "原图",
@@ -136,6 +142,10 @@
     const headRight = [
       el("div", { class: "spot-tabs" }, [tabData, tabImages])
     ];
+    if (isStale) {
+      headRight.push(el("span", { class: "spot-stale-badge", text: "非最新：数据截至 " + homeState.date,
+        title: "默认展示昨天的运行日；当前不是昨天（可能尚未发布或未采集）" }));
+    }
     if (pendingCount) {
       headRight.push(el("span", { class: "spot-pending-badge",
         text: "待确认 " + pendingCount + " 项",
@@ -593,7 +603,9 @@
           body: JSON.stringify({ url: input.value })
         });
         closeModal();
+        invalidateHomeData("");
         await refreshList();
+        window.alert("采集完成。正在后台解析（OCR + 地图采样，约 6-10 秒），稍后可在首页「数据」视图查看并确认。");
       } catch (err) {
         error.textContent = err.message || "采集失败";
       } finally {
@@ -850,6 +862,12 @@
     let active = "pages";
     const body = el("div", { class: "spot-detail-body" });
     const tabPages = el("button", { class: "spot-tab active", text: "原图", onClick: function () { switchTab("pages"); } });
+    const today = new Date();
+    const yst = new Date(today.getTime() - 86400000);
+    const ystText = yst.getFullYear() + "-" + String(yst.getMonth() + 1).padStart(2, "0") + "-" +
+      String(yst.getDate()).padStart(2, "0");
+    const isStale = homeState.date && homeState.date !== ystText;
+
     const tabData = el("button", { class: "spot-tab", text: "数据", onClick: function () { switchTab("data"); } });
 
     const pagesView = el("div", { class: "spot-detail-pages" }, (report.pages || []).map(function (page) {
