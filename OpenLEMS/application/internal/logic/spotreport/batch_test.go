@@ -17,3 +17,22 @@ func TestCountOverwritten(t *testing.T) {
 		t.Fatalf("空告警应为 0，实际 %d", got)
 	}
 }
+
+// 批量重跑默认跳过「已全部人工复核」的日报（cv=0 且 manual>0）：
+// 待确认预填说明还没复核完；完全没有人工状态的日报可以随意重跑。
+func TestSkipConfirmedReport(t *testing.T) {
+	cases := []struct {
+		cv, manual int
+		want       bool
+	}{
+		{cv: 0, manual: 24, want: true},  // 全部复核完 → 跳过
+		{cv: 5, manual: 20, want: false}, // 还有待确认 → 重跑
+		{cv: 0, manual: 0, want: false},  // 未解析或只有 ocr → 重跑
+		{cv: 10, manual: 0, want: false}, // 全新预填 → 重跑
+	}
+	for _, c := range cases {
+		if got := skipConfirmedReport(c.cv, c.manual); got != c.want {
+			t.Fatalf("cv=%d manual=%d 期望 %v，实际 %v", c.cv, c.manual, c.want, got)
+		}
+	}
+}

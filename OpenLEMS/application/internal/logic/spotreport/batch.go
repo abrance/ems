@@ -32,6 +32,7 @@ type batchJob struct {
 	Succeeded   int
 	Failed      int
 	Overwritten int
+	Skipped     []string
 	Current     string
 	Errors      []string
 	StartedAt   time.Time
@@ -46,14 +47,31 @@ type batchRegistry struct {
 
 var batchJobs = &batchRegistry{jobs: map[string]*batchJob{}}
 
-// StartBatchExtract 起一个后台批量重跑任务
-func StartBatchExtract(ctx context.Context, from, to string) (*v1.BatchExtractRes, error) {
-	dates, err := collectedDatesInRange(ctx, from, to)
+// StartBatchExtract 起一个后台批量重跑任务。
+//
+// 默认跳过「已全部人工复核」的日报：批量重跑的本意是解析器升级后回填历史，
+// 顺手清掉别人已复核的状态是意外副作用（实测发生过：一次批量重置了 24 项确认，
+// 值虽未变但复核状态丢失）。需要覆盖时显式传 IncludeConfirmed。
+func StartBatchExtract(ctx context.Context, from, to string, includeConfirmed, dryRun bool) (*v1.BatchExtractRes, error) {
+	all, err := collectedDatesInRange(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
-	if len(dates) == 0 {
+	if len(all) == 0 {
 		return nil, fmt.Errorf("指定区间内没有已采集的日报")
+	}
+	dates, skipped, err := planBatch(ctx, all, includeConfirmed)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		return &v1.BatchExtractRes{
+			Total: len(dates), Status: "planned",
+			Dates: dates, SkippedConfirmed: skipped,
+		}, nil
+	}
+	if len(dates) == 0 {
+		return nil, fmt.Errorf("区间内 %d 篇日报都已人工复核；如需强制覆盖请勾选「包含已复核」", len(skipped))
 	}
 
 	batchJobs.mu.Lock()
@@ -67,7 +85,7 @@ func StartBatchExtract(ctx context.Context, from, to string) (*v1.BatchExtractRe
 		}
 	}
 	id := fmt.Sprintf("batch-%d", time.Now().Unix())
-	job := &batchJob{Id: id, Status: "running", Total: len(dates), StartedAt: time.Now()}
+	job := &batchJob{Id: id, Status: "running", Total: len(dates), Skipped: skipped, StartedAt: time.Now()}
 	batchJobs.jobs[id] = job
 	batchJobs.last = id
 	batchJobs.trimLocked()
@@ -76,7 +94,8 @@ func StartBatchExtract(ctx context.Context, from, to string) (*v1.BatchExtractRe
 	// 与 HTTP 请求解耦：请求返回后任务继续跑
 	go runBatchJob(job, dates)
 
-	return &v1.BatchExtractRes{Id: id, Total: len(dates), Status: job.Status}, nil
+	return &v1.BatchExtractRes{Id: id, Total: len(dates), Status: job.Status,
+		Dates: dates, SkippedConfirmed: skipped}, nil
 }
 
 // GetBatchExtract 查询任务进度；id 为空时返回最近一次任务
@@ -96,7 +115,8 @@ func GetBatchExtract(id string) (*v1.BatchExtractStatusRes, error) {
 		Id: job.Id, Status: job.Status, Total: job.Total, Done: job.Done,
 		Succeeded: job.Succeeded, Failed: job.Failed, Overwritten: job.Overwritten,
 		Current: job.Current, Errors: nonNilStrings(append([]string{}, job.Errors...)),
-		StartedAt: job.StartedAt.In(shanghaiLocation()).Format(time.RFC3339),
+		SkippedConfirmed: nonNilStrings(append([]string{}, job.Skipped...)),
+		StartedAt:        job.StartedAt.In(shanghaiLocation()).Format(time.RFC3339),
 	}
 	if !job.FinishedAt.IsZero() {
 		res.FinishedAt = job.FinishedAt.In(shanghaiLocation()).Format(time.RFC3339)
@@ -144,6 +164,43 @@ func countOverwritten(warnings []string) int {
 		}
 	}
 	return count
+}
+
+// planBatch 把已采集日期分成「本次重跑」与「跳过（已全部人工复核）」
+func planBatch(ctx context.Context, all []string, includeConfirmed bool) (dates, skipped []string, err error) {
+	dates = make([]string, 0, len(all))
+	skipped = make([]string, 0)
+	for _, date := range all {
+		if includeConfirmed {
+			dates = append(dates, date)
+			continue
+		}
+		metrics, err := s_db.GetSpotExtractService().ListMetrics(ctx, date)
+		if err != nil {
+			return nil, nil, err
+		}
+		cv, manual := 0, 0
+		for _, m := range metrics {
+			switch m.Origin {
+			case "cv":
+				cv++
+			case "manual":
+				manual++
+			}
+		}
+		if skipConfirmedReport(cv, manual) {
+			skipped = append(skipped, date)
+			continue
+		}
+		dates = append(dates, date)
+	}
+	return dates, skipped, nil
+}
+
+// skipConfirmedReport 是否跳过：有待确认预填说明还有人没复核完，不算已复核；
+// 全无人工状态（未解析或只有 ocr 值）没有可丢失的复核状态，可以重跑。
+func skipConfirmedReport(cv, manual int) bool {
+	return cv == 0 && manual > 0
 }
 
 // collectedDatesInRange 取区间内已采集的日报日（升序）；from/to 为空表示不限
