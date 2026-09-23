@@ -920,17 +920,48 @@
     if (from === null) return;
     const to = window.prompt("结束日报日（留空表示最新 " + defTo + "）", defTo);
     if (to === null) return;
-    if (!window.confirm("将对 " + (from || defFrom) + " ~ " + (to || defTo) + " 的日报逐篇重跑解析。\n" +
-      "每篇约 6-10 秒，会串行执行；本次重跑以 OCR/采样结果为准，" +
-      "已人工确认或修订的值会被覆盖（覆盖前写审计，结束时给出条数）。确定继续？")) return;
+    const range = { from: from || "", to: to || "" };
+    // 先预览计划：列出将重跑的日报与会被跳过（已人工复核）的日报
     api("/api/spot-report/extract/batch", {
       method: "POST",
-      body: JSON.stringify({ from: from || "", to: to || "" })
-    }).then(function (res) {
-      window.alert("已启动批量任务 " + res.id + "，共 " + res.total + " 篇。\n进度会显示在「信息管理」标题旁，请勿关闭页面。");
-      pollBatch(res.id);
+      body: JSON.stringify(Object.assign({ dryRun: true }, range))
+    }).then(function (plan) {
+      const willRun = (plan && plan.dates) || [];
+      const skipped = (plan && plan.skippedConfirmed) || [];
+      if (!willRun.length && !skipped.length) {
+        window.alert("区间内没有已采集的日报");
+        return;
+      }
+      const lines = [
+        "将重跑 " + willRun.length + " 篇：" + (willRun.join("、") || "无"),
+        skipped.length ? "已跳过 " + skipped.length + " 篇已人工复核的日报：" + skipped.join("、") : null,
+        "每篇约 6-10 秒，串行执行；重跑以 OCR/采样结果为准，未复核的预填会被覆盖。"
+      ].filter(Boolean);
+      let includeConfirmed = false;
+      if (skipped.length) {
+        // 需要覆盖时二次确认；确认即强制包含已复核的日报
+        includeConfirmed = window.confirm(lines.join("\n") +
+          "\n\n是否连已复核的 " + skipped.length + " 篇一起重跑？\n（会清掉这些日报的「已复核」状态，值不变也需重新确认；覆盖前写审计）");
+      } else if (!window.confirm(lines.join("\n") + "\n\n确定继续？")) {
+        return;
+      }
+      if (!willRun.length && !includeConfirmed) {
+        window.alert("没有需要重跑的日报（都已人工复核）");
+        return;
+      }
+      api("/api/spot-report/extract/batch", {
+        method: "POST",
+        body: JSON.stringify(Object.assign({ includeConfirmed: includeConfirmed }, range))
+      }).then(function (res) {
+        window.alert("已启动批量任务 " + res.id + "，共 " + res.total + " 篇" +
+          (res.skippedConfirmed && res.skippedConfirmed.length ? "（跳过已复核 " + res.skippedConfirmed.length + " 篇）" : "") +
+          "。\n进度会显示在「信息管理」标题旁，请勿关闭页面。");
+        pollBatch(res.id);
+      }).catch(function (err) {
+        window.alert("启动失败：" + (err.message || "未知错误"));
+      });
     }).catch(function (err) {
-      window.alert("启动失败：" + (err.message || "未知错误"));
+      window.alert("预览失败：" + (err.message || "未知错误"));
     });
   }
 
@@ -947,10 +978,12 @@
         await refreshList();
         const lines = [
           "批量解析完成：" + st.succeeded + "/" + st.total + " 成功" + (st.failed ? "，" + st.failed + " 失败" : ""),
+          st.skippedConfirmed && st.skippedConfirmed.length
+            ? "跳过已复核 " + st.skippedConfirmed.length + " 篇：" + st.skippedConfirmed.join("、") : null,
           st.overwritten ? "覆盖人工值 " + st.overwritten + " 条（已写审计，可在「变更记录」查看）" : "未覆盖任何人工值"
         ];
         if (st.errors && st.errors.length) lines.push("错误：" + st.errors.slice(0, 5).join("；"));
-        window.alert(lines.join("\n"));
+        window.alert(lines.filter(Boolean).join("\n"));
       } catch (err) {
         renderBatchProgress(null);
       }

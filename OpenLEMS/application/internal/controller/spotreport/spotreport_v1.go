@@ -157,7 +157,7 @@ func (c *ControllerV1) BatchExtractSpotReport(ctx context.Context, req *v1.Batch
 			return nil, gerror.NewCode(gcode.CodeInvalidParameter, "日报日格式无效")
 		}
 	}
-	res, err := logic.StartBatchExtract(ctx, req.From, req.To)
+	res, err := logic.StartBatchExtract(ctx, req.From, req.To, req.IncludeConfirmed, req.DryRun)
 	if err != nil {
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
 	}
