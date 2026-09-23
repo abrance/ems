@@ -173,3 +173,26 @@ func TestSampleMapBucketsFallsBackToHue(t *testing.T) {
 		t.Fatalf("色相回退应给出「由色系推断」告警：%v", warnings)
 	}
 }
+
+// OCR 会把图例连字符识别成 Unicode 变体（实测 2026-09-16：U+2212、U+2013），
+// 括号也可能是全角；不归一化就会「图例未识别」而整篇不预填。
+func TestNormalizeLegendText(t *testing.T) {
+	cases := []string{
+		"[−inf,200)", // U+2212 minus
+		"[–inf,200)", // U+2013 en dash
+		"[—inf,200)", // U+2014 em dash
+		"[-inf,200)", // ASCII
+		"［-inf,200］", // 全角方括号
+		"（-inf,200）", // 全角圆括号
+		"[ -inf , 200 )",
+	}
+	for _, in := range cases {
+		got := normalizeLegendText(in)
+		if !reLegendItem.MatchString(got) {
+			t.Fatalf("%q 归一化后仍不匹配图例正则：%q", in, got)
+		}
+	}
+	if got := normalizeLegendText("[800,+inf)"); got != "[800,+inf)" {
+		t.Fatalf("ASCII 图例不应被改动：%q", got)
+	}
+}

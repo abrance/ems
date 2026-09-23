@@ -33,6 +33,12 @@ const (
 
 var (
 	reLegendItem = regexp.MustCompile(`(?i)^[\[(]\s*(?:-?inf|\d+)\s*,\s*(?:\d+|\+?inf)\s*[\])]$`)
+	// OCR 会把图例里的连字符识别成各种 Unicode 变体（实测 2026-09-16 那篇是 U+2212 / U+2013），
+	// 括号也可能变成全角；不归一化就会「图例未识别」而整篇不预填
+	legendTextReplacer = strings.NewReplacer(
+		"\u2212", "-", "\u2013", "-", "\u2014", "-", "\uFF0D", "-", "\u2010", "-", "\uFE63", "-",
+		"（", "(", "）", ")", "［", "[", "］", "]", "【", "[", "】", "]",
+	)
 	// GuangdongCities 广东省 21 个地级市，用于从 OCR 结果里挑出地图标签
 	GuangdongCities = []string{
 		"广州", "深圳", "珠海", "汕头", "佛山", "韶关", "湛江", "肇庆", "江门", "茂名",
@@ -128,7 +134,7 @@ func legendPalette(img image.Image, lines []OCRLine) []bucketColor {
 	w, h := float64(bounds.Dx()), float64(bounds.Dy())
 	var items []legendItem
 	for _, l := range lines {
-		text := strings.Join(strings.Fields(l.Text), "")
+		text := normalizeLegendText(l.Text)
 		if !reLegendItem.MatchString(text) {
 			continue
 		}
@@ -314,10 +320,15 @@ func hueDistance(a, b float64) float64 {
 	return d
 }
 
+// normalizeLegendText 归一化图例文本：去空白 + 统一连字符/括号变体，便于正则匹配
+func normalizeLegendText(text string) string {
+	return legendTextReplacer.Replace(strings.Join(strings.Fields(text), ""))
+}
+
 func legendVerticalRange(lines []OCRLine, pageHeight float64) (float64, float64) {
 	var tops, bottoms []float64
 	for _, l := range lines {
-		if reLegendItem.MatchString(strings.Join(strings.Fields(l.Text), "")) {
+		if reLegendItem.MatchString(normalizeLegendText(l.Text)) {
 			tops = append(tops, l.BBox.Top)
 			bottoms = append(bottoms, l.BBox.Top+l.BBox.Height)
 		}
