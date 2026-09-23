@@ -4,7 +4,26 @@
   const PAGE_ID = "spot-info-page";
   const COL_ID = "spot-info-col";
 
-  let homeState = { dates: [], date: "", report: null, page: 0, empty: true };
+  let homeState = {
+    dates: [], date: "", report: null, page: 0, empty: true,
+    mode: "data",            // data=结构化数据（默认） / images=原图
+    data: null,              // 当前日期已加载的结构化数据
+    dataDate: "",            // data 对应的日期
+    dataAttempted: "",       // 已尝试加载过的日期：防止渲染循环里反复重试同一个失败请求
+    dataError: "",
+    dataLoading: false
+  };
+
+  // 数据变更（解析/确认/修订）后让首页重新拉一次
+  function invalidateHomeData(date) {
+    if (!date || date === homeState.dataAttempted) {
+      homeState.dataAttempted = "";
+      homeState.data = null;
+      homeState.dataDate = "";
+    }
+  }
+  // 地图档位配色（与日报图例一致：浅绿/浅蓝/浅黄/浅橙/浅红）
+  const BUCKET_COLORS = ["#b7d6a3", "#adcdea", "#ffff7e", "#ffe07e", "#ff7e7e"];
 
   // 结构化数据的展示配置：数据集 → 展示名与列（列 = [指标名, 单位]）
   const DATASET_ORDER = ["summary", "day_ahead_trade", "realtime_trade", "day_ahead_decl",
@@ -106,6 +125,27 @@
     if (idx < 0 || idx >= homeState.dates.length - 1) nextDate.disabled = true;
 
     const report = homeState.report || {};
+    const pendingCount = (homeState.data && homeState.data.metrics || []).filter(function (m) {
+      return m.origin === "cv";
+    }).length;
+
+    const tabData = el("button", { class: "spot-tab" + (homeState.mode === "data" ? " active" : ""), text: "数据",
+      onClick: function () { switchHomeMode("data"); } });
+    const tabImages = el("button", { class: "spot-tab" + (homeState.mode === "images" ? " active" : ""), text: "原图",
+      onClick: function () { switchHomeMode("images"); } });
+    const headRight = [
+      el("div", { class: "spot-tabs" }, [tabData, tabImages])
+    ];
+    if (pendingCount) {
+      headRight.push(el("span", { class: "spot-pending-badge",
+        text: "待确认 " + pendingCount + " 项",
+        title: "图像采样预填，尚未人工复核" }));
+      if (isAdmin()) {
+        headRight.push(el("button", { class: "spot-btn spot-confirm-btn", text: "去确认",
+          onClick: gotoInfoManagement }));
+      }
+    }
+
     root.appendChild(el("div", { class: "spot-home-head" }, [
       el("div", { class: "spot-home-heading" }, [
         el("div", { class: "spot-home-title", text: "电力现货" }),
@@ -115,7 +155,8 @@
         prevDate,
         el("div", { class: "spot-date-label", text: homeState.date || "暂无日报" }),
         nextDate
-      ])
+      ]),
+      el("div", { class: "spot-home-tools" }, headRight)
     ]));
 
     if (homeState.empty || !pages.length) {
@@ -127,8 +168,42 @@
       return;
     }
 
+    if (homeState.mode === "images") {
+      root.appendChild(buildHomeImages(pages));
+      return;
+    }
+    const dataBody = el("div", { class: "spot-home-data" });
+    root.appendChild(dataBody);
+    renderHomeData(dataBody, report);
+    if (homeState.dataAttempted !== homeState.date) {
+      loadHomeData(homeState.date);
+    }
+
+  }
+
+  // ---- 首页数据视图：KPI + 图表（当日快照；不把不同运行日混在同一张图里） ----
+
+  function metricMap(metrics) {
+    const index = {};
+    (metrics || []).forEach(function (m) {
+      index[m.dataset + "|" + m.source + "|" + m.scope + "|" + m.metric] = m;
+    });
+    return index;
+  }
+
+  function firstMetric(metrics, dataset, scope, metric, source) {
+    for (let i = 0; i < (metrics || []).length; i++) {
+      const m = metrics[i];
+      if (m.dataset !== dataset || m.scope !== scope || m.metric !== metric) continue;
+      if (source && m.source !== source) continue;
+      return m;
+    }
+    return null;
+  }
+
+  function buildHomeImages(pages) {
     // 四页并排：图片按原始比例铺满各自列宽，一眼看全 4 页；点击任一张放大查看
-    root.appendChild(el("div", { class: "spot-grid" }, pages.map(function (item, index) {
+    return el("div", { class: "spot-grid" }, pages.map(function (item, index) {
       return el("button", {
         class: "spot-cell",
         type: "button",
@@ -141,7 +216,235 @@
           el("div", { class: "spot-cell-label", text: item.label })
         ])
       ]);
-    })));
+    }));
+  }
+
+  function switchHomeMode(mode) {
+    homeState.mode = mode;
+    renderHome();
+  }
+
+  function gotoInfoManagement() {
+    history.pushState({}, "", "/infoManagement");
+    sync();
+  }
+
+  async function loadHomeData(date) {
+    // 同一日期只加载一次：失败时也只记一次，避免每轮渲染都重试（曾因此打出无限请求）
+    if (!date || homeState.dataLoading || homeState.dataAttempted === date) return;
+    homeState.dataLoading = true;
+    try {
+      homeState.data = await api("/api/spot-report/data?date=" + encodeURIComponent(date));
+      homeState.dataDate = date;
+      homeState.dataError = "";
+    } catch (err) {
+      homeState.data = null;
+      homeState.dataDate = "";
+      homeState.dataError = err.message || "加载失败";
+    } finally {
+      homeState.dataLoading = false;
+      homeState.dataAttempted = date;
+      if (homeState.mode === "data") renderHome();
+    }
+  }
+
+  // KPI 条：正文摘要的 5 个标量 + 对应的环比
+  function buildHomeKpi(metrics, pending) {
+    const spec = [
+      ["日前加权均价", "日前加权平均电价", "发电侧"],
+      ["燃煤均价", "燃煤均价", "燃煤"],
+      ["燃气均价", "燃气均价", "燃气"],
+      ["日前成交最高", "日前成交最高价", null],
+      ["日前成交最低", "日前成交最低价", null]
+    ];
+    const bar = el("div", { class: "spot-kpi-bar" });
+    spec.forEach(function (item) {
+      const m = firstMetric(metrics, "summary", "市场", item[1]);
+      if (!m) return;
+      // 环比优先取「电价环比」行，缺失时回落到该类型平均电价自带的 momPct
+      let momValue = null;
+      if (item[2]) {
+        const momRow = firstMetric(metrics, "day_ahead_trade", item[2], "电价环比", "表1(二)");
+        if (momRow) {
+          momValue = momRow.value;
+        } else {
+          const avgRow = firstMetric(metrics, "day_ahead_trade", item[2], "平均电价", "表1(二)");
+          if (avgRow && avgRow.momPct !== null && avgRow.momPct !== undefined) momValue = avgRow.momPct;
+        }
+      }
+      bar.appendChild(el("div", { class: "spot-kpi" }, [
+        el("div", { class: "spot-kpi-label", text: item[0] }),
+        el("div", { class: "spot-kpi-value" }, [
+          el("span", { text: fmtNum(m.value) }),
+          el("span", { class: "spot-kpi-unit", text: m.unit || "" }),
+          momBadge(momValue)
+        ])
+      ]));
+    });
+    if (pending) bar.className += " spot-pending";
+    return bar;
+  }
+
+  // 分类型均价柱状（同一运行日、同一来源，避免把 T 与 T-2 混在一起）
+  function buildTradeChart(metrics, dataset, source, title) {
+    const scopes = ["发电侧", "燃煤", "燃气", "新能源"];
+    const rows = [];
+    scopes.forEach(function (scope) {
+      const avg = firstMetric(metrics, dataset, scope, "平均电价", source);
+      const hi = firstMetric(metrics, dataset, scope, "最高电价", source);
+      const lo = firstMetric(metrics, dataset, scope, "最低电价", source);
+      if (avg) rows.push({ scope: scope, avg: avg.value, hi: hi ? hi.value : null, lo: lo ? lo.value : null });
+    });
+    if (!rows.length) return null;
+    const max = Math.max.apply(null, rows.map(function (r) { return r.hi !== null ? Math.max(r.hi, r.avg) : r.avg; }));
+    const min = Math.min.apply(null, rows.map(function (r) { return r.lo !== null ? r.lo : r.avg; }));
+    const span = Math.max(1, max - min);
+    const chart = el("div", { class: "spot-chart" }, [
+      el("div", { class: "spot-chart-title", text: title })
+    ]);
+    const body = el("div", { class: "spot-bars" });
+    rows.forEach(function (r) {
+      const height = Math.max(4, Math.round((r.avg - min) / span * 100));
+      body.appendChild(el("div", { class: "spot-bar-col" }, [
+        el("div", { class: "spot-bar-track" }, [
+          el("div", { class: "spot-bar", style: "height:" + height + "%",
+            title: r.scope + " 均价 " + fmtNum(r.avg) + " 元/兆瓦时" })
+        ]),
+        el("div", { class: "spot-bar-value", text: fmtNum(r.avg) }),
+        el("div", { class: "spot-bar-label", text: r.scope })
+      ]));
+    });
+    chart.appendChild(body);
+    return chart;
+  }
+
+  // 申报容量结构：两行（零价及以下 / 报价600以上）× 四类容量占比
+  function buildDeclChart(metrics) {
+    const rows = ["零价及以下", "报价600以上"];
+    const kinds = ["申报容量", "煤机容量", "气机容量", "新能源容量"];
+    const colors = { "申报容量": "#c9d7f0", "煤机容量": "#8fb6e8", "气机容量": "#ffd28a", "新能源容量": "#a8dfa0" };
+    const has = rows.some(function (row) { return kinds.some(function (k) { return firstMetric(metrics, "day_ahead_decl", row, k); }); });
+    if (!has) return null;
+    const chart = el("div", { class: "spot-chart" }, [
+      el("div", { class: "spot-chart-title", text: "日前申报容量结构（占市场比例）" })
+    ]);
+    rows.forEach(function (row) {
+      const items = kinds.map(function (k) { return firstMetric(metrics, "day_ahead_decl", row, k); }).filter(Boolean);
+      if (!items.length) return;
+      const track = el("div", { class: "spot-stack" });
+      items.forEach(function (m) {
+        const pct = m.sharePct === null || m.sharePct === undefined ? 0 : m.sharePct;
+        track.appendChild(el("div", { class: "spot-stack-seg",
+          style: "width:" + pct + "%;background:" + (colors[m.metric] || "#ccc"),
+          title: row + " " + m.metric + " " + fmtNum(m.value) + " MW（占 " + fmtNum(pct) + "%）",
+          text: pct >= 6 ? fmtNum(pct) + "%" : "" }));
+      });
+      chart.appendChild(el("div", { class: "spot-stack-row" }, [
+        el("div", { class: "spot-stack-label", text: row }),
+        track
+      ]));
+    });
+    const legend = el("div", { class: "spot-legend" });
+    kinds.forEach(function (k) {
+      legend.appendChild(el("span", { class: "spot-legend-item" }, [
+        el("span", { class: "spot-legend-dot", style: "background:" + (colors[k] || "#ccc") }),
+        el("span", { text: k })
+      ]));
+    });
+    chart.appendChild(legend);
+    return chart;
+  }
+
+  // 地市节点电价档位：色块网格（高峰/低谷并排），未判定留空
+  function buildBucketGrid(metrics, dataset, title) {
+    const rows = (metrics || []).filter(function (m) { return m.dataset === dataset; });
+    if (!rows.length) return null;
+    const chart = el("div", { class: "spot-chart" }, [
+      el("div", { class: "spot-chart-title", text: title })
+    ]);
+    const grid = el("div", { class: "spot-bucket-grid" });
+    rows.slice().sort(function (a, b) { return b.value - a.value || a.scope.localeCompare(b.scope); })
+      .forEach(function (m) {
+        const color = BUCKET_COLORS[Math.min(BUCKET_COLORS.length, Math.max(1, m.value)) - 1];
+        grid.appendChild(el("div", { class: "spot-bucket-cell",
+          style: "background:" + color,
+          title: m.scope + " " + m.value + " 档 " + (m.textValue || "") + (m.origin === "cv" ? "（待确认）" : ""),
+          text: m.scope }));
+      });
+    chart.appendChild(grid);
+    return chart;
+  }
+
+  function buildBucketLegend() {
+    const legend = el("div", { class: "spot-legend" });
+    BUCKET_LABELS.forEach(function (label, i) {
+      legend.appendChild(el("span", { class: "spot-legend-item" }, [
+        el("span", { class: "spot-legend-dot", style: "background:" + BUCKET_COLORS[i] }),
+        el("span", { text: (i + 1) + " 档 " + label })
+      ]));
+    });
+    return legend;
+  }
+
+  function renderHomeData(container, report) {
+    container.innerHTML = "";
+    if (homeState.dataLoading && !homeState.data) {
+      container.appendChild(el("div", { class: "spot-empty", text: "加载数据中…" }));
+      return;
+    }
+    if (homeState.dataError && !homeState.data) {
+      container.appendChild(el("div", { class: "spot-home-empty" }, [
+        el("div", { class: "spot-home-empty-icon", text: "!" }),
+        el("div", { class: "spot-empty", text: "数据加载失败：" + homeState.dataError }),
+        el("button", { class: "spot-btn", text: "重试", onClick: function () {
+          invalidateHomeData(homeState.date);
+          renderHome();
+        } })
+      ]));
+      return;
+    }
+    const data = homeState.data;
+    const metrics = (data && data.metrics) || [];
+    if (!metrics.length) {
+      container.appendChild(el("div", { class: "spot-home-empty" }, [
+        el("div", { class: "spot-home-empty-icon", text: "数" }),
+        el("div", { class: "spot-empty", text: "该日报还没有结构化数据" }),
+        el("div", { class: "spot-empty-hint",
+          text: isAdmin() ? "去管理界面执行「解析数据」后，这里会展示 KPI 与图表" : "等待管理员解析" }),
+        isAdmin() ? el("button", { class: "spot-btn primary", text: "去解析", onClick: gotoInfoManagement }) : null
+      ]));
+      return;
+    }
+    const pending = metrics.filter(function (m) { return m.origin === "cv"; }).length;
+    container.appendChild(buildHomeKpi(metrics, pending));
+
+    const charts = el("div", { class: "spot-chart-row" });
+    const dayAhead = buildTradeChart(metrics, "day_ahead_trade", "表1(二)", "日前成交均价（运行日 " + report.date + "）");
+    if (dayAhead) charts.appendChild(dayAhead);
+    const realtime = buildTradeChart(metrics, "realtime_trade", "表2(二)",
+      "实时成交均价" + (data.tradeDate ? "（运行日 " + data.tradeDate + "）" : ""));
+    if (realtime) charts.appendChild(realtime);
+    const decl = buildDeclChart(metrics);
+    if (decl) charts.appendChild(decl);
+    container.appendChild(charts);
+
+    const buckets = el("div", { class: "spot-chart-row" });
+    const peak = buildBucketGrid(metrics, "node_price_peak", "地市节点电价档位 · 高峰");
+    const valley = buildBucketGrid(metrics, "node_price_valley", "地市节点电价档位 · 低谷");
+    if (peak) buckets.appendChild(peak);
+    if (valley) buckets.appendChild(valley);
+    if (peak || valley) {
+      const holder = el("div", { class: "spot-chart" }, [
+        el("div", { class: "spot-chart-title", text: "档位说明" }),
+        buildBucketLegend()
+      ]);
+      buckets.appendChild(holder);
+      container.appendChild(buckets);
+    }
+    if (pending) {
+      container.appendChild(el("div", { class: "spot-data-note",
+        text: "含 " + pending + " 项图像采样预填（未人工复核），结论性字段仅供参考" }));
+    }
   }
 
   let viewerIndex = -1;
@@ -213,6 +516,7 @@
 
   async function loadHomeDate(date) {
     closeViewer();
+    homeState.dataAttempted = "";
     try {
       const data = await api("/api/spot-report/detail?date=" + encodeURIComponent(date));
       homeState.date = date;
@@ -354,6 +658,7 @@
       metric.value = value;
       metric.origin = "manual";
       if (isBucket) metric.textValue = BUCKET_LABELS[value - 1];
+      invalidateHomeData(report.date);
       renderDataTab(container, report);
     }).catch(function (err) {
       window.alert("修订失败：" + (err.message || "未知错误"));
@@ -370,6 +675,7 @@
       method: "POST",
       body: JSON.stringify(payload)
     }).then(function (res) {
+      invalidateHomeData(report.date);
       renderDataTab(container, report);
       if (res && res.confirmed) {
         window.alert("已确认 " + res.confirmed + " 项，可在「变更记录」中查看");
@@ -619,6 +925,7 @@
           setTimeout(tick, 2500);
           return;
         }
+        invalidateHomeData("");
         await refreshList();
         const lines = [
           "批量解析完成：" + st.succeeded + "/" + st.total + " 成功" + (st.failed ? "，" + st.failed + " 失败" : ""),
@@ -668,6 +975,7 @@
         warnings.length ? "告警：" + warnings.join("；") : "校验无告警"
       ].filter(Boolean);
       window.alert(lines.join("\n"));
+      invalidateHomeData(item.date);
       await refreshList();
     } catch (err) {
       window.alert("解析失败：" + (err.message || "未知错误"));
