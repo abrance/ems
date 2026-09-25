@@ -29,6 +29,10 @@ const (
 	MetricPriceBucket      = "价格档位"
 	// OriginCV 表示该值由图像采样预填，仍需人工确认
 	OriginCV = "cv"
+	// OriginOCR 表示 OCR/模板直接提取的值；同样要人工复核后才算「已确认」
+	OriginOCR = "ocr"
+	// OriginManual 表示已确认：一键确认或单值修订过（记录 edited_by）
+	OriginManual = "manual"
 )
 
 var (

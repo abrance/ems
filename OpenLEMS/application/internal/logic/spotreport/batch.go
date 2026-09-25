@@ -51,7 +51,8 @@ var batchJobs = &batchRegistry{jobs: map[string]*batchJob{}}
 //
 // 默认跳过「已全部人工复核」的日报：批量重跑的本意是解析器升级后回填历史，
 // 顺手清掉别人已复核的状态是意外副作用（实测发生过：一次批量重置了 24 项确认，
-// 值虽未变但复核状态丢失）。需要覆盖时显式传 IncludeConfirmed。
+// 值虽未变但复核状态丢失）。需要覆盖时显式传 IncludeConfirmed——它同时也是
+// 单篇解析的 force：只有它才允许覆盖已确认值。
 func StartBatchExtract(ctx context.Context, from, to string, includeConfirmed, dryRun bool) (*v1.BatchExtractRes, error) {
 	all, err := collectedDatesInRange(ctx, from, to)
 	if err != nil {
@@ -92,7 +93,7 @@ func StartBatchExtract(ctx context.Context, from, to string, includeConfirmed, d
 	batchJobs.mu.Unlock()
 
 	// 与 HTTP 请求解耦：请求返回后任务继续跑
-	go runBatchJob(job, dates)
+	go runBatchJob(job, dates, includeConfirmed)
 
 	return &v1.BatchExtractRes{Id: id, Total: len(dates), Status: job.Status,
 		Dates: dates, SkippedConfirmed: skipped}, nil
@@ -124,14 +125,14 @@ func GetBatchExtract(id string) (*v1.BatchExtractStatusRes, error) {
 	return res, nil
 }
 
-func runBatchJob(job *batchJob, dates []string) {
+func runBatchJob(job *batchJob, dates []string, includeConfirmed bool) {
 	ctx := context.Background()
 	for _, date := range dates {
 		job.mu.Lock()
 		job.Current = date
 		job.mu.Unlock()
 
-		res, err := ExtractReport(ctx, date)
+		res, err := ExtractReport(ctx, date, includeConfirmed)
 		job.mu.Lock()
 		job.Done++
 		if err != nil {
@@ -179,16 +180,8 @@ func planBatch(ctx context.Context, all []string, includeConfirmed bool) (dates,
 		if err != nil {
 			return nil, nil, err
 		}
-		cv, manual := 0, 0
-		for _, m := range metrics {
-			switch m.Origin {
-			case "cv":
-				cv++
-			case "manual":
-				manual++
-			}
-		}
-		if skipConfirmedReport(cv, manual) {
+		pending, confirmed := CountReview(metrics)
+		if skipConfirmedReport(pending, confirmed) {
 			skipped = append(skipped, date)
 			continue
 		}
@@ -197,10 +190,17 @@ func planBatch(ctx context.Context, all []string, includeConfirmed bool) (dates,
 	return dates, skipped, nil
 }
 
-// skipConfirmedReport 是否跳过：有待确认预填说明还有人没复核完，不算已复核；
-// 全无人工状态（未解析或只有 ocr 值）没有可丢失的复核状态，可以重跑。
-func skipConfirmedReport(cv, manual int) bool {
-	return cv == 0 && manual > 0
+// skipConfirmedReport 是否跳过：只有「全部已确认」才跳过。
+// 只要还有未复核项（ocr 或 cv）就说明没复核完，不算已复核；
+// 全无人工确认状态（未解析）也没有可丢失的复核状态，可以重跑。
+//
+// 这里不能用「没有 cv 就算复核完」——把 ocr 也算作未复核后，
+// 一篇 58 项 ocr + 24 项 manual 的日报会被误判为已复核而跳过重跑。
+//
+// 注：ReplaceMetrics 现在默认就不覆盖已确认行，这里的跳过是第二道护栏——
+// 全部确认的日报连 OCR 都不必重跑，也避免给已确认值产生无意义的重算告警。
+func skipConfirmedReport(pending, confirmed int) bool {
+	return pending == 0 && confirmed > 0
 }
 
 // collectedDatesInRange 取区间内已采集的日报日（升序）；from/to 为空表示不限

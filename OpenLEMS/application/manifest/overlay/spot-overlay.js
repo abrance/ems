@@ -49,6 +49,11 @@
   let listState = [];
   let lastPath = "";
 
+  // 复核状态：origin=manual 为已确认，ocr/cv（以及老库遗留空值）均为未复核
+  // 口径只留这一处，首页徽标 / 数据页提示 / 状态列共用，避免三处各写一遍
+  function isPending(m) { return m.origin !== "manual"; }
+  function pendingOf(rows) { return (rows || []).filter(isPending); }
+
   function token() {
     return localStorage.getItem("ems:user:token") || "";
   }
@@ -125,9 +130,7 @@
     if (idx < 0 || idx >= homeState.dates.length - 1) nextDate.disabled = true;
 
     const report = homeState.report || {};
-    const pendingCount = (homeState.data && homeState.data.metrics || []).filter(function (m) {
-      return m.origin === "cv";
-    }).length;
+    const pendingCount = pendingOf(homeState.data && homeState.data.metrics).length;
 
     const today = new Date();
     const yst = new Date(today.getTime() - 86400000);
@@ -149,7 +152,7 @@
     if (pendingCount) {
       headRight.push(el("span", { class: "spot-pending-badge",
         text: "待确认 " + pendingCount + " 项",
-        title: "图像采样预填，尚未人工复核" }));
+        title: "OCR 提取 + 图像采样预填，尚未人工复核" }));
       if (isAdmin()) {
         headRight.push(el("button", { class: "spot-btn spot-confirm-btn", text: "去确认",
           onClick: gotoInfoManagement }));
@@ -378,7 +381,7 @@
         const color = BUCKET_COLORS[Math.min(BUCKET_COLORS.length, Math.max(1, m.value)) - 1];
         grid.appendChild(el("div", { class: "spot-bucket-cell",
           style: "background:" + color,
-          title: m.scope + " " + m.value + " 档 " + (m.textValue || "") + (m.origin === "cv" ? "（待确认）" : ""),
+          title: m.scope + " " + m.value + " 档 " + (m.textValue || "") + (isPending(m) ? "（待确认）" : "（已确认）"),
           text: m.scope }));
       });
     chart.appendChild(grid);
@@ -425,7 +428,7 @@
       ]));
       return;
     }
-    const pending = metrics.filter(function (m) { return m.origin === "cv"; }).length;
+    const pending = pendingOf(metrics).length;
     container.appendChild(buildHomeKpi(metrics, pending));
 
     const charts = el("div", { class: "spot-chart-row" });
@@ -453,7 +456,7 @@
     }
     if (pending) {
       container.appendChild(el("div", { class: "spot-data-note",
-        text: "含 " + pending + " 项图像采样预填（未人工复核），结论性字段仅供参考" }));
+        text: "含 " + pending + " 项未人工复核（OCR 提取 + 图像采样预填），结论性字段仅供参考" }));
     }
   }
 
@@ -682,10 +685,10 @@
     });
   }
 
-  // 一键确认预填：origin=cv → manual（人工复核，不是逐项重填）
+  // 一键确认：把该日报未复核项（ocr + cv）标记为已确认（origin=manual），值不变
   function confirmPrefill(container, report, pending, dataset) {
     const scopeText = dataset ? "（仅 " + (DATASET_LABELS[dataset] || dataset) + "）" : "（该日报全部数据集）";
-    if (!window.confirm("确认将 " + pending + " 项预填值标记为已人工复核" + scopeText + "？\n（数值不变；如需修正请先点击对应字段修改）")) return;
+    if (!window.confirm("确认将 " + pending + " 项未复核值（OCR 提取 + 图像预填）标记为已人工复核" + scopeText + "？\n（数值不变；如需修正请先点击对应字段修改）")) return;
     const payload = { date: report.date };
     if (dataset) payload.dataset = dataset;
     api("/api/spot-report/confirm", {
@@ -774,10 +777,10 @@
         container.appendChild(el("div", { class: "spot-data-note",
           text: "注：日报里的表2 承载滞后运行日 " + data.tradeDate + " 的日前/实时成交电价" }));
       }
-      const pending = metrics.filter(function (m) { return m.origin === "cv"; }).length;
+      const pending = pendingOf(metrics).length;
       if (pending) {
         const note = el("div", { class: "spot-data-note" }, [
-          el("span", { text: "其中 " + pending + " 项为图像采样预填（标记「预填」）。可整篇确认，也可只确认某一张表；核对无误后一次点击即可，无需逐项修改。" }),
+          el("span", { text: "其中 " + pending + " 项尚未人工复核（表格/正文为 OCR 提取，地图档位为图像采样预填，后者标「预填」）。可整篇确认，也可只确认某一张表；核对无误后一次点击即可，无需逐项修改。" }),
           isAdmin() ? el("button", { class: "spot-btn primary spot-confirm-btn", text: "确认全部 " + pending + " 项",
             onClick: function () { confirmPrefill(container, report, pending, ""); } }) : null
         ]);
@@ -795,7 +798,7 @@
         rows.forEach(function (m) { if (scopes.indexOf(m.scope) < 0) scopes.push(m.scope); });
         const title = DATASET_LABELS[dataset] || dataset;
         const runDates = rows.map(function (m) { return m.runDate; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
-        const datasetPending = rows.filter(function (m) { return m.origin === "cv"; }).length;
+        const datasetPending = pendingOf(rows).length;
         const titleRow = el("div", { class: "spot-data-title-row" }, [
           el("div", { class: "spot-data-title",
             text: title + (runDates.length === 1 && runDates[0] !== report.date ? "（运行日 " + runDates[0] + "）" : "") }),
@@ -835,14 +838,16 @@
             } else {
               cellChildren.push(el("div", { class: "spot-data-value", text: valueText }));
             }
-            if (hit.origin === "manual") {
-              cellChildren.push(el("span", { class: "spot-origin-manual",
-                text: "人工" + (hit.editedBy ? "·" + hit.editedBy : ""),
-                title: "人工修订" + (hit.editedAt ? "于 " + hit.editedAt.slice(0, 19).replace("T", " ") : "") }));
-            } else if (hit.origin === "cv") {
+            if (hit.origin === "cv") {
               cellChildren.push(el("span", { class: "spot-origin-cv", text: "预填",
-                title: "图像颜色采样预填，请人工确认" }));
+                title: "图像颜色采样预填，待人工确认" }));
+            } else if (!isPending(hit)) {
+              cellChildren.push(el("span", { class: "spot-origin-manual",
+                text: "已确认" + (hit.editedBy ? "·" + hit.editedBy : ""),
+                title: "人工确认或修订" + (hit.editedAt ? "于 " + hit.editedAt.slice(0, 19).replace("T", " ") : "") }));
             }
+            // OCR 提取值不逐格打标（整表几十格，噪声大于信息量），
+            // 未复核状态在数据集标题行与顶部提示里体现
             if (hit.atTime) cellChildren.push(el("div", { class: "spot-data-time", text: "@" + hit.atTime }));
             const badge = momBadge(hit.momPct);
             if (badge) cellChildren.push(badge);
@@ -862,18 +867,19 @@
     });
   }
 
-  function showDetail(report) {
+  function showDetail(report, initialTab) {
     closeModal();
-    let active = "pages";
+    const startTab = initialTab === "data" ? "data" : "pages";
+    let active = startTab;
     const body = el("div", { class: "spot-detail-body" });
-    const tabPages = el("button", { class: "spot-tab active", text: "原图", onClick: function () { switchTab("pages"); } });
+    const tabPages = el("button", { class: "spot-tab" + (startTab === "pages" ? " active" : ""), text: "原图", onClick: function () { switchTab("pages"); } });
     const today = new Date();
     const yst = new Date(today.getTime() - 86400000);
     const ystText = yst.getFullYear() + "-" + String(yst.getMonth() + 1).padStart(2, "0") + "-" +
       String(yst.getDate()).padStart(2, "0");
     const isStale = homeState.date && homeState.date !== ystText;
 
-    const tabData = el("button", { class: "spot-tab", text: "数据", onClick: function () { switchTab("data"); } });
+    const tabData = el("button", { class: "spot-tab" + (startTab === "data" ? " active" : ""), text: "数据", onClick: function () { switchTab("data"); } });
 
     const pagesView = el("div", { class: "spot-detail-pages" }, (report.pages || []).map(function (page) {
       return el("figure", {}, [
@@ -912,7 +918,7 @@
       ])
     ]);
     document.body.appendChild(mask);
-    switchTab("pages");
+    switchTab(startTab);
   }
 
   // 批量重跑解析：解析器升级后回填历史日报（后台任务 + 进度轮询）
@@ -939,14 +945,14 @@
       }
       const lines = [
         "将重跑 " + willRun.length + " 篇：" + (willRun.join("、") || "无"),
-        skipped.length ? "已跳过 " + skipped.length + " 篇已人工复核的日报：" + skipped.join("、") : null,
-        "每篇约 6-10 秒，串行执行；重跑以 OCR/采样结果为准，未复核的预填会被覆盖。"
+        skipped.length ? "已跳过 " + skipped.length + " 篇已全部复核的日报：" + skipped.join("、") : null,
+        "每篇约 6-10 秒，串行执行；未复核项会被新解析结果覆盖，已确认项默认保留。"
       ].filter(Boolean);
       let includeConfirmed = false;
       if (skipped.length) {
-        // 需要覆盖时二次确认；确认即强制包含已复核的日报
+        // 需要覆盖时二次确认；确认即强制包含已复核的日报，同时也是「覆盖已确认值」的开关
         includeConfirmed = window.confirm(lines.join("\n") +
-          "\n\n是否连已复核的 " + skipped.length + " 篇一起重跑？\n（会清掉这些日报的「已复核」状态，值不变也需重新确认；覆盖前写审计）");
+          "\n\n是否连已复核的 " + skipped.length + " 篇一起重跑？\n（会以 OCR 为准覆盖这些日报的已确认值，值不变也需重新确认；覆盖前写审计）");
       } else if (!window.confirm(lines.join("\n") + "\n\n确定继续？")) {
         return;
       }
@@ -985,7 +991,7 @@
           "批量解析完成：" + st.succeeded + "/" + st.total + " 成功" + (st.failed ? "，" + st.failed + " 失败" : ""),
           st.skippedConfirmed && st.skippedConfirmed.length
             ? "跳过已复核 " + st.skippedConfirmed.length + " 篇：" + st.skippedConfirmed.join("、") : null,
-          st.overwritten ? "覆盖人工值 " + st.overwritten + " 条（已写审计，可在「变更记录」查看）" : "未覆盖任何人工值"
+          st.overwritten ? "覆盖已确认值 " + st.overwritten + " 条（已写审计，可在「变更记录」查看）" : "未覆盖任何已确认值"
         ];
         if (st.errors && st.errors.length) lines.push("错误：" + st.errors.slice(0, 5).join("；"));
         window.alert(lines.filter(Boolean).join("\n"));
@@ -1015,7 +1021,10 @@
 
   async function extractData(item) {
     if (!item || !item.date) return;
-    const confirmed = window.confirm("对 " + item.date + " 的日报执行 OCR 解析？4 页识别约需 6-10 秒。");
+    const confirmedNote = item.confirmedCount
+      ? "\n已有 " + item.confirmedCount + " 项人工确认，本次解析会保留它们（不覆盖）。"
+      : "";
+    const confirmed = window.confirm("对 " + item.date + " 的日报执行 OCR 解析？4 页识别约需 6-10 秒。" + confirmedNote);
     if (!confirmed) return;
     try {
       const res = await api("/api/spot-report/extract", {
@@ -1023,16 +1032,21 @@
         body: JSON.stringify({ date: item.date })
       });
       const warnings = (res && res.warnings) || [];
+      const pending = (res && res.pending) || 0;
       const lines = [
         "解析完成：" + item.date,
         "状态：" + (res && res.status),
         "指标数：" + (res && res.metricCount),
         res && res.tradeDate && res.tradeDate !== item.date ? "表2 运行日：" + res.tradeDate : null,
+        res && res.preserved ? "保留已确认 " + res.preserved + " 项（未覆盖）" : null,
+        pending ? "\n本次解析结果已记为「待确认」共 " + pending + " 项，需在数据表里审阅确认后才算已复核。" : "该日报已全部确认。",
         warnings.length ? "告警：" + warnings.join("；") : "校验无告警"
       ].filter(Boolean);
       window.alert(lines.join("\n"));
       invalidateHomeData(item.date);
       await refreshList();
+      // 解析完直接进审阅（信息管理行内不再点一次「查看」→「数据」）
+      if (pending) showDetail(item, "data");
     } catch (err) {
       window.alert("解析失败：" + (err.message || "未知错误"));
     }
@@ -1061,23 +1075,33 @@
         el("th", { text: "运行日" }),
         el("th", { text: "标题" }),
         el("th", { text: "页数" }),
+        el("th", { text: "复核状态" }),
         el("th", { text: "操作" })
       ])
     ]));
     const tbody = el("tbody");
     if (!listState.length) {
       tbody.appendChild(el("tr", {}, [
-        el("td", { colspan: "4", text: "暂无日报" })
+        el("td", { colspan: "5", text: "暂无日报" })
       ]));
     } else {
       listState.forEach(function (item) {
+        const pending = item.pendingCount || 0;
+        const confirmed = item.confirmedCount || 0;
+        const state = pending
+          ? el("span", { class: "spot-state spot-state-pending", text: "待确认 " + pending + " 项" })
+          : (confirmed
+            ? el("span", { class: "spot-state spot-state-done", text: "已确认 " + confirmed + " 项" })
+            : el("span", { class: "spot-state", text: "未解析" }));
         tbody.appendChild(el("tr", {}, [
           el("td", { text: item.date }),
           el("td", { text: item.title }),
           el("td", { text: String(item.pageCount || 0) }),
+          el("td", {}, [state]),
           el("td", {}, [
             el("button", { class: "spot-link", text: "查看", onClick: function () { showDetail(item); } }),
-            isAdmin() ? el("button", { class: "spot-link", text: "解析数据", onClick: function () { extractData(item); } }) : null
+            isAdmin() ? el("button", { class: "spot-link", text: "解析数据", onClick: function () { extractData(item); } }) : null,
+            isAdmin() && pending ? el("button", { class: "spot-link", text: "审阅", onClick: function () { showDetail(item, "data"); } }) : null
           ])
         ]));
       });

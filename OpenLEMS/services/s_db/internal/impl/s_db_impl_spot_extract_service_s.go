@@ -29,49 +29,83 @@ func GetSpotExtractService() s_db_basic.ISpotExtractService {
 
 // ReplaceMetrics 全量替换：同一日报重复提取时不会留下旧指标。
 //
-// 重跑语义为「以 OCR 为准」：人工修订行会被覆盖，但覆盖前把它们写入审计表，
-// 并作为返回值交给调用方提示（避免人工判断无声消失）。
-func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel) ([]s_db_basic.SpotMetricOverwrite, error) {
-	var overwritten []s_db_basic.SpotMetricOverwrite
+// 复核状态优先：已确认（origin=manual）行默认**不参与替换**——保留原值与原状态，
+// 本次解析重新提取到同键的值直接丢弃（结果计入 Preserved）。只有 force=true 才
+// 「以 OCR 为准」覆盖它们，覆盖前逐条写审计。
+//
+// 为什么默认不覆盖：解析器升级后跑一次解析不该静默清掉别人当天已核对过的判断
+// （实测发生过：一次重跑重置 24 项确认，值未变但复核状态丢失）。
+func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel, force bool) (*s_db_basic.SpotMetricReplaceResult, error) {
+	result := &s_db_basic.SpotMetricReplaceResult{}
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		overwritten = overwritten[:0]
 		newValues := make(map[string]*float64, len(metrics))
 		for _, m := range metrics {
 			v := m.Value
 			newValues[metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)] = &v
 		}
 
-		var manual []*s_db_model.SSpotMetricModel
+		var confirmed []*s_db_model.SSpotMetricModel
 		if err := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 			Where(s_db_model.FieldSpotMetricReportDate, reportDate).
 			Where(s_db_model.FieldSpotMetricOrigin, "manual").
-			Scan(&manual); err != nil {
+			Scan(&confirmed); err != nil {
 			return err
 		}
+
 		now := gtime.Now()
-		for _, m := range manual {
-			row := g.Map{
-				"report_date": m.ReportDate, "run_date": m.RunDate, "dataset": m.Dataset,
-				"scope": m.Scope, "metric": m.Metric, "old_value": m.Value,
-				"new_value":  newValues[metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)],
-				"old_origin": "manual", "operation": s_db_model.SpotMetricAuditOverwrite,
-				"operator": "extract", "created_at": now,
+		keptIDs := make([]int64, 0, len(confirmed))
+		if force {
+			for _, m := range confirmed {
+				newValue := newValues[metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)]
+				row := g.Map{
+					"report_date": m.ReportDate, "run_date": m.RunDate, "dataset": m.Dataset,
+					"scope": m.Scope, "metric": m.Metric, "old_value": m.Value,
+					"new_value":  newValue,
+					"old_origin": "manual", "operation": s_db_model.SpotMetricAuditOverwrite,
+					"operator": "extract", "created_at": now,
+				}
+				if _, err := tx.Model(s_db_model.TableSpotMetricAudit).Ctx(ctx).Data(row).Insert(); err != nil {
+					return err
+				}
+				result.Overwritten = append(result.Overwritten, s_db_basic.SpotMetricOverwrite{
+					Key: s_db_basic.SpotMetricKey{
+						ReportDate: m.ReportDate, RunDate: m.RunDate, Dataset: m.Dataset,
+						Scope: m.Scope, Metric: m.Metric, SourceLabel: m.Source,
+					},
+					OldValue: m.Value,
+					NewValue: newValue,
+				})
 			}
-			if _, err := tx.Model(s_db_model.TableSpotMetricAudit).Ctx(ctx).Data(row).Insert(); err != nil {
-				return err
+		} else {
+			// 留住的已确认行不能被新插入的同键行撞唯一键，所以先把这次解析到的同键值丢掉
+			keys := make(map[string]bool, len(confirmed))
+			for _, m := range confirmed {
+				key := metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)
+				keys[key] = true
+				keptIDs = append(keptIDs, m.Id)
+				// 保留归保留，但重算值不一致要说出来：否则解析器修好的提取缺陷
+				// 永远不会落到已确认行上，而没人知道那些值已经旧了
+				if newValue := newValues[key]; newValue != nil && *newValue != m.Value {
+					result.PreservedDiff = append(result.PreservedDiff, s_db_basic.SpotMetricOverwrite{
+						Key: s_db_basic.SpotMetricKey{
+							ReportDate: m.ReportDate, RunDate: m.RunDate, Dataset: m.Dataset,
+							Scope: m.Scope, Metric: m.Metric, SourceLabel: m.Source,
+						},
+						OldValue: m.Value,
+						NewValue: newValue,
+					})
+				}
 			}
-			overwritten = append(overwritten, s_db_basic.SpotMetricOverwrite{
-				Key: s_db_basic.SpotMetricKey{
-					ReportDate: m.ReportDate, RunDate: m.RunDate, Dataset: m.Dataset,
-					Scope: m.Scope, Metric: m.Metric, SourceLabel: m.Source,
-				},
-				OldValue: m.Value,
-				NewValue: newValues[metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)],
-			})
+			metrics = dropConfirmedIncoming(keys, metrics)
+			result.Preserved = len(confirmed)
 		}
 
-		if _, err := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
-			Where(s_db_model.FieldSpotMetricReportDate, reportDate).Delete(); err != nil {
+		del := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+			Where(s_db_model.FieldSpotMetricReportDate, reportDate)
+		if len(keptIDs) > 0 {
+			del = del.WhereNotIn("id", keptIDs)
+		}
+		if _, err := del.Delete(); err != nil {
 			return err
 		}
 		if len(metrics) == 0 {
@@ -108,7 +142,19 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 	if err != nil {
 		return nil, errors.Wrap(err, "保存现货指标失败")
 	}
-	return overwritten, nil
+	return result, nil
+}
+
+// dropConfirmedIncoming 丢掉与已确认行同键的新提取值（纯函数，便于单测）
+func dropConfirmedIncoming(confirmedKeys map[string]bool, incoming []*s_db_model.SSpotMetricModel) []*s_db_model.SSpotMetricModel {
+	kept := make([]*s_db_model.SSpotMetricModel, 0, len(incoming))
+	for _, m := range incoming {
+		if confirmedKeys[metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)] {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return kept
 }
 
 func metricKey(reportDate, runDate, dataset, scope, metric string) string {
@@ -162,19 +208,30 @@ func (s *sSpotExtractServiceImpl) UpdateMetricValue(ctx context.Context, key s_d
 	return model, nil
 }
 
-// ConfirmMetrics 批量确认预填：origin=cv → manual，并逐条写审计
+// ConfirmMetrics 批量确认：把该日报所有未确认项（origin != manual，即 ocr 提取值与 cv 预填值）
+// 一并标记为已确认（origin=manual）并逐条写审计。dataset 为空表示全部数据集。
+//
+// 为什么不再只认 cv：复核状态的语义是「整天解析结果经人确认」（origin=manual 即已确认），
+// 若只翻转 cv，则 ocr 行永远确认不了，整篇确认后的「已确认」状态无处存放。
 func (s *sSpotExtractServiceImpl) ConfirmMetrics(ctx context.Context, reportDate, dataset, operator string) (int, error) {
 	count := 0
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		query := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
-			Where(s_db_model.FieldSpotMetricReportDate, reportDate).
-			Where(s_db_model.FieldSpotMetricOrigin, "cv")
+			Where(s_db_model.FieldSpotMetricReportDate, reportDate)
 		if dataset != "" {
 			query = query.Where(s_db_model.FieldSpotMetricDataset, dataset)
 		}
-		var rows []*s_db_model.SSpotMetricModel
-		if err := query.Scan(&rows); err != nil {
+		// 未确认判定放在内存里做：origin 可能是空串（老库遗留行），空串同样算未确认
+		var all []*s_db_model.SSpotMetricModel
+		if err := query.Scan(&all); err != nil {
 			return err
+		}
+		rows := make([]*s_db_model.SSpotMetricModel, 0, len(all))
+		for _, r := range all {
+			if r.Origin == "manual" {
+				continue
+			}
+			rows = append(rows, r)
 		}
 		if len(rows) == 0 {
 			return nil
@@ -187,7 +244,7 @@ func (s *sSpotExtractServiceImpl) ConfirmMetrics(ctx context.Context, reportDate
 			audits = append(audits, g.Map{
 				"report_date": r.ReportDate, "run_date": r.RunDate, "dataset": r.Dataset,
 				"scope": r.Scope, "metric": r.Metric,
-				"old_value": r.Value, "new_value": r.Value, "old_origin": "cv",
+				"old_value": r.Value, "new_value": r.Value, "old_origin": r.Origin,
 				"operation": s_db_model.SpotMetricAuditConfirm, "operator": operator, "created_at": now,
 			})
 		}
@@ -208,9 +265,36 @@ func (s *sSpotExtractServiceImpl) ConfirmMetrics(ctx context.Context, reportDate
 		return nil
 	})
 	if err != nil {
-		return 0, errors.Wrap(err, "确认预填失败")
+		return 0, errors.Wrap(err, "确认指标失败")
 	}
 	return count, nil
+}
+
+// CountMetricsByReport 按日报日统计未复核/已确认条数：一次 GROUP BY，列表页不必逐篇查
+func (s *sSpotExtractServiceImpl) CountMetricsByReport(ctx context.Context) (map[string]s_db_basic.SpotMetricCounts, error) {
+	var rows []struct {
+		ReportDate string `orm:"report_date"`
+		Origin     string `orm:"origin"`
+		N          int    `orm:"n"`
+	}
+	err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+		Fields(s_db_model.FieldSpotMetricReportDate + ", " + s_db_model.FieldSpotMetricOrigin + ", count(*) as n").
+		Group(s_db_model.FieldSpotMetricReportDate + ", " + s_db_model.FieldSpotMetricOrigin).
+		Scan(&rows)
+	if err != nil {
+		return nil, errors.Wrap(err, "统计指标复核状态失败")
+	}
+	out := make(map[string]s_db_basic.SpotMetricCounts, len(rows))
+	for _, r := range rows {
+		c := out[r.ReportDate]
+		if r.Origin == "manual" {
+			c.Confirmed += r.N
+		} else {
+			c.Pending += r.N
+		}
+		out[r.ReportDate] = c
+	}
+	return out, nil
 }
 
 // ListMetricAudit 指标变更审计（人工修订 + 被解析覆盖）

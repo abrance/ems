@@ -22,7 +22,10 @@ import (
 //
 // 手动触发（信息管理 → 解析数据）；采集接口本身不依赖 OCR，因此 OCR 服务不可用时
 // 只是解析失败，不影响日报图片档案。
-func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotReportRes, error) {
+//
+// force=false（默认）：已确认（origin=manual）行原样保留，不被本次解析覆盖；
+// force=true：以 OCR 为准覆盖已确认值（覆盖前写审计，逐条回到 Warnings 里）。
+func ExtractReport(ctx context.Context, reportDate string, force bool) (*v1.ExtractSpotReportRes, error) {
 	model, err := s_db.GetSpotReportService().GetByDate(ctx, reportDate)
 	if err != nil {
 		return nil, err
@@ -81,11 +84,12 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 	extracted.Warnings = append(extracted.Warnings, crossCheckStored(ctx, extracted)...)
 
 	metrics := metricModels(reportDate, extracted.Metrics)
-	overwritten, err := s_db.GetSpotExtractService().ReplaceMetrics(ctx, reportDate, metrics)
+	replaced, err := s_db.GetSpotExtractService().ReplaceMetrics(ctx, reportDate, metrics, force)
 	if err != nil {
 		return nil, err
 	}
-	extracted.Warnings = append(extracted.Warnings, overwriteWarnings(overwritten)...)
+	extracted.Warnings = append(extracted.Warnings, overwriteWarnings(replaced.Overwritten)...)
+	extracted.Warnings = append(extracted.Warnings, preservedWarnings(replaced.PreservedDiff)...)
 
 	status := s_db_model.SpotExtractStatusOk
 	if len(metrics) == 0 {
@@ -123,7 +127,19 @@ func ExtractReport(ctx context.Context, reportDate string) (*v1.ExtractSpotRepor
 		MetricCount: len(metrics),
 		Status:      status,
 		Warnings:    nonNilStrings(extracted.Warnings),
+		Preserved:   replaced.Preserved,
+		Pending:     reviewPending(ctx, reportDate),
 	}, nil
+}
+
+// reviewPending 读库统计该日报当前未复核项（确认状态以库为准，不靠本次内存结果推算）
+func reviewPending(ctx context.Context, reportDate string) int {
+	stored, err := s_db.GetSpotExtractService().ListMetrics(ctx, reportDate)
+	if err != nil {
+		return 0
+	}
+	pending, _ := CountReview(stored)
+	return pending
 }
 
 // GetReportData 读取已落库的结构化数据
@@ -252,6 +268,27 @@ func ListMetricAudit(ctx context.Context, reportDate string, limit int) (*v1.Get
 // 避免文案改动导致覆盖数被静默算成 0（曾用字节切片判断中文前缀，直接失效）。
 const OverwriteWarningPrefix = "重跑覆盖人工修订"
 
+// PreservedWarningPrefix 「保留已确认值」告警前缀
+const PreservedWarningPrefix = "保留已确认值"
+
+// preservedWarnings 把「已确认值被保留，但本次解析算出了不同的值」转成可读告警。
+// 保留是刻意的（复核状态优先），但值不一致必须让人知道，否则解析器的修复永远不会落地。
+func preservedWarnings(diffs []s_db_basic.SpotMetricOverwrite) []string {
+	out := make([]string, 0, len(diffs))
+	for _, d := range diffs {
+		if d.NewValue == nil {
+			continue
+		}
+		source := d.Key.SourceLabel
+		if source == "" {
+			source = "-"
+		}
+		out = append(out, fmt.Sprintf(PreservedWarningPrefix+"：运行日 %s %s/%s（%s）已确认 %v，本次解析值 %v 未覆盖（如需采用请走批量重跑的「包含已复核」）",
+			d.Key.RunDate, d.Key.Scope, d.Key.Metric, source, d.OldValue, *d.NewValue))
+	}
+	return out
+}
+
 // overwriteWarnings 把「重跑覆盖了人工修订」转成可读告警。
 // 重跑语义是以 OCR 为准，但人工判断不应无声消失：审计表留痕 + 这里显式提示。
 func overwriteWarnings(overwritten []s_db_basic.SpotMetricOverwrite) []string {
@@ -310,6 +347,11 @@ func sampleNodePriceMetrics(runDate string, warnings *[]string, images map[int]i
 func metricModels(reportDate string, metrics []Metric) []*s_db_model.SSpotMetricModel {
 	out := make([]*s_db_model.SSpotMetricModel, 0, len(metrics))
 	for _, m := range metrics {
+		origin := m.Origin
+		if origin == "" {
+			// 表格/正文的模板提取值统一记 ocr（未复核），与 CV 预填区分开但又同为待确认
+			origin = OriginOCR
+		}
 		out = append(out, &s_db_model.SSpotMetricModel{
 			ReportDate:       reportDate,
 			RunDate:          m.RunDate,
@@ -324,14 +366,14 @@ func metricModels(reportDate string, metrics []Metric) []*s_db_model.SSpotMetric
 			SharePct:         m.SharePct,
 			Source:           m.Source,
 			Conf:             m.Conf,
-			Origin:           m.Origin,
+			Origin:           origin,
 			ExtractorVersion: ExtractorVersion,
 		})
 	}
 	return out
 }
 
-// ConfirmReportMetrics 一键确认某份日报的采样/OCR 预填值（人工复核）
+// ConfirmReportMetrics 一键确认某份日报的未复核值（OCR 提取 + 图像预填）
 func ConfirmReportMetrics(ctx context.Context, reportDate, dataset, operator string) (*v1.ConfirmSpotMetricRes, error) {
 	if operator == "" {
 		operator = "admin"

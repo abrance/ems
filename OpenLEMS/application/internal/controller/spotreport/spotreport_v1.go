@@ -21,8 +21,15 @@ func (c *ControllerV1) ListSpotReport(ctx context.Context, req *v1.ListSpotRepor
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取现货日报列表失败")
 	}
 	list := make([]*v1.SpotReport, 0, len(models))
+	counts, err := s_db.GetSpotExtractService().CountMetricsByReport(ctx)
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "统计复核状态失败")
+	}
 	for _, model := range models {
-		list = append(list, logic.ToDTO(model))
+		dto := logic.ToDTO(model)
+		c := counts[dto.Date]
+		dto.PendingCount, dto.ConfirmedCount = c.Pending, c.Confirmed
+		list = append(list, dto)
 	}
 	return &v1.ListSpotReportRes{List: list}, nil
 }
@@ -85,7 +92,7 @@ func (c *ControllerV1) ExtractSpotReport(ctx context.Context, req *v1.ExtractSpo
 	if !datePattern.MatchString(req.Date) {
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
 	}
-	res, err := logic.ExtractReport(ctx, req.Date)
+	res, err := logic.ExtractReport(ctx, req.Date, req.Force)
 	if err != nil {
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
 	}

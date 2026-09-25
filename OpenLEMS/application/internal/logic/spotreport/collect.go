@@ -119,6 +119,7 @@ func Collect(ctx context.Context, rawURL string) (*v1.SpotReport, error) {
 //
 // 4 页 OCR 约 6-10 秒，不能挂在采集请求上；用独立 context 是因为请求结束后 ctx 会被取消。
 // 失败只影响数据视图（首页会提示去解析），不影响已采集的图片档案。
+// force=false：覆盖采集同一天时仍保留已确认值（复核状态优先，需要覆盖走批量重跑的「包含已复核」）。
 func scheduleAutoExtract(runDate string) {
 	if !autoExtractEnabled() {
 		c_log.Infof(context.Background(), "自动解析已关闭（%s=off），跳过 %s", EnvAutoExtract, runDate)
@@ -126,7 +127,7 @@ func scheduleAutoExtract(runDate string) {
 	}
 	go func() {
 		ctx := context.Background()
-		if _, err := ExtractReport(ctx, runDate); err != nil {
+		if _, err := ExtractReport(ctx, runDate, false); err != nil {
 			c_log.Warningf(ctx, "采集后自动解析失败（%s）：%v；可在信息管理里手动重跑", runDate, err)
 			return
 		}

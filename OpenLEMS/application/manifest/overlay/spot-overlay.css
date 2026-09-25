@@ -563,6 +563,27 @@
   gap: 12px;
 }
 
+/* 信息管理列表：复核状态胶囊 */
+.spot-state {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  background: var(--color-fill-2, #f2f3f5);
+  color: var(--color-text-3, #86909c);
+}
+.spot-state-pending {
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  color: #ad6800;
+}
+.spot-state-done {
+  background: rgba(0, 180, 42, 0.12);
+  border: 1px solid rgba(0, 180, 42, 0.28);
+  color: #00802b;
+}
+
 /* 图像采样预填徽标（需人工确认） */
 .spot-origin-cv {
   display: inline-block;
