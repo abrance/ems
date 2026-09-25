@@ -62,9 +62,12 @@ func ExtractReport(ctx context.Context, reportDate string, force bool) (*v1.Extr
 		}
 		ocrMs += int(result.TimeMs)
 		linesByPage[page.Page] = result.Results
+		// 归一化用的尺寸以本次实际识别的图片为准：归档尺寸历史上信过 HTML 元数据，
+		// 可能偏小一倍（1080 vs 原图 2381），会让整页坐标定位偏移
+		width, height := imageSize(imageBytes, page.Width, page.Height)
 		inputs = append(inputs, PageInput{
-			Width:  float64(page.Width),
-			Height: float64(page.Height),
+			Width:  float64(width),
+			Height: float64(height),
 			Lines:  result.Results,
 		})
 		// 图2-1 / 图2-2 的数值只在像素里，需要图像本身做颜色采样

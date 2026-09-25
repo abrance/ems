@@ -1,9 +1,13 @@
 package spotreport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -82,13 +86,18 @@ func Collect(ctx context.Context, rawURL string) (*v1.SpotReport, error) {
 		if err != nil {
 			return nil, err
 		}
+		// 归档尺寸必须是原图实际像素，不能信 HTML 元数据：同一篇文章里微信可能
+		// 给出 1080 的展示宽度（data-w 与 picturePageInfoList 都会），而 /0 原图
+		// 仍是 2381 宽。模板提取把 OCR 坐标除以归档尺寸做归一化，尺寸错了整页
+		// 定位就偏（实测 2026-09-20 那篇第 4 页 1080 vs 实际 2381×3367）。
+		width, height := imageSize(buf, img.Width, img.Height)
 		pages = append(pages, &v1.SpotPage{
 			Page:   img.Page,
 			Label:  img.Label,
 			URL:    publicURL,
 			Key:    key,
-			Width:  img.Width,
-			Height: img.Height,
+			Width:  width,
+			Height: height,
 		})
 	}
 	pagesJSON, err := json.Marshal(pages)
@@ -133,6 +142,15 @@ func scheduleAutoExtract(runDate string) {
 		}
 		c_log.Infof(ctx, "采集后自动解析完成：%s", runDate)
 	}()
+}
+
+// imageSize 取已下载原图的真实像素尺寸，解码失败时回落到 HTML 元数据。
+func imageSize(buf []byte, fallbackWidth, fallbackHeight int) (int, int) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(buf))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return fallbackWidth, fallbackHeight
+	}
+	return cfg.Width, cfg.Height
 }
 
 func fetchHTML(ctx context.Context, pageURL string) (string, error) {
