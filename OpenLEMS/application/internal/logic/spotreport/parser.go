@@ -128,46 +128,39 @@ func ParseDateFromTitle(title string) *DateInfo {
 	}
 }
 
+// reportPageAspect 日报页的最小高宽比。实测日报页为 2381×3367（比値 1.414），
+// 页眉 1080×290（0.27）、页脚 1080×570（0.53），用比値就能把横幅卡掉。
+const reportPageAspect = 1.2
+
 func SelectReportImages(images []ParsedImage) []ParsedImage {
 	if len(images) == 0 {
 		return images
 	}
-	allSized := true
+	// 按「竖版长图」挑日报页，不用「宽度 ≥ 1500」：
+	// 同一篇文章里微信可能给出 1080 的展示宽度（data-w 与 picturePageInfoList 都会，
+	// 而 /0 原图仍是 2381 宽），用绝对宽度筛会漏掉其中几页
+	// —— 实测 2026-09-20 那篇只认到 3 页，最终报「文章中没有识别到日报图片」。
+	candidates := make([]ParsedImage, 0, len(images))
 	for _, img := range images {
-		if img.Width == 0 || img.Height == 0 {
-			allSized = false
-			break
+		if img.Width <= 0 || img.Height <= 0 {
+			continue
+		}
+		if float64(img.Height)/float64(img.Width) >= reportPageAspect {
+			candidates = append(candidates, img)
 		}
 	}
-	if allSized {
-		var reports []ParsedImage
-		for _, img := range images {
-			if img.Height > img.Width && img.Width >= 1500 {
-				reports = append(reports, img)
-			}
-		}
-		if len(reports) >= 4 {
-			return reports[:4]
-		}
-		if len(reports) > 0 {
-			return reports
-		}
+	if len(candidates) >= 4 {
+		return candidates[:4]
 	}
-	// 正文 DOM 里常出现重复的页眉/页脚图片：它们不在 picturePageInfoList 中，
-	// 拿不到宽高，会让 allSized 判定为 false。只要已带尺寸的竖版长图够 4 张，
-	// 就直接采用，避免落到下面按张数切片的兜底分支——切出来的张数不等于 4 时
-	// ParseArticle 会误报「文章中没有识别到日报图片」。
-	var portrait []ParsedImage
-	for _, img := range images {
-		if img.Width > 0 && img.Width >= 1500 && img.Height > img.Width {
-			portrait = append(portrait, img)
-		}
+	if len(candidates) > 0 {
+		// 不够 4 页时交给上层报错（比拿 5-6 张的兜底结果更准确）
+		return candidates
 	}
-	if len(portrait) >= 4 {
-		return portrait[:4]
-	}
+	// 尺寸元数据全缺失时的兜底：正文 DOM 里常见重复的页眉/页脚图，它们不在
+	// picturePageInfoList 中、拿不到宽高。这里必须固定取 4 张：旧实现取
+	// images[1:len(images)-1]，在有 7 张时得到 5 张，直接导致「识别不到日报图片」。
 	if len(images) >= 6 {
-		return images[1 : len(images)-1]
+		return images[1:5]
 	}
 	if len(images) >= 4 {
 		return images[:4]
