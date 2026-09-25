@@ -824,3 +824,76 @@
   font-size: 12px;
   line-height: 20px;
 }
+
+/* 电力现货趋势卡片：挂在现货卡下面，整行宽；图表自绘 SVG，无外部依赖 */
+.spot-trend {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-2, #fff);
+  border: 1px solid var(--color-border, #e5e6eb);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.spot-trend-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.spot-trend-range {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.spot-trend-date {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--color-text-1, #1d2129);
+  background: var(--color-bg-2, #fff);
+  border: 1px solid var(--color-border, #e5e6eb);
+  border-radius: 4px;
+}
+.spot-trend-dash {
+  color: var(--color-text-3, #86909c);
+  font-size: 12px;
+}
+.spot-trend-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #b26b00;
+  background: rgba(255, 172, 0, 0.14);
+}
+.spot-trend-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spot-trend-note {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+.spot-trend-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+.spot-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.spot-svg-grid {
+  stroke: var(--color-border, #e5e6eb);
+  stroke-width: 1;
+}
+.spot-svg-axis {
+  fill: var(--color-text-3, #86909c);
+  font-size: 10px;
+}

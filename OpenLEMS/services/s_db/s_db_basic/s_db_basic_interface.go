@@ -192,6 +192,13 @@ type ISpotExtractService interface {
 	ListMetrics(ctx context.Context, reportDate string) ([]*s_db_model.SSpotMetricModel, error)
 	// ListMetricsByRunDate 按运行日查询指标（跨日报聚合，供趋势/交叉校验用）
 	ListMetricsByRunDate(ctx context.Context, runDate string) ([]*s_db_model.SSpotMetricModel, error)
+	// ListMetricsByRunDateRange 按运行日区间查询**已确认**（origin=manual）指标，供趋势聚合用。
+	// 口径是「只看已确认」，未复核行在 SQL 里就剔除，不把几万行明细搬到应用层再过滤。
+	// 注意：同一运行日的同一指标可能有多份日报产出（表1(二) 与滞后的 表2(一)），
+	// 去重与取哪一路由调用方（logic.BuildTrend）决定。
+	ListMetricsByRunDateRange(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error)
+	// CountUnconfirmedByRunDateRange 统计区间内因未复核而被趋势排除的指标条数（前端角标提示用）
+	CountUnconfirmedByRunDateRange(ctx context.Context, from, to string) (int, error)
 	GetRun(ctx context.Context, reportDate string) (*s_db_model.SSpotExtractRunModel, error)
 	UpsertRun(ctx context.Context, model *s_db_model.SSpotExtractRunModel) error
 }
