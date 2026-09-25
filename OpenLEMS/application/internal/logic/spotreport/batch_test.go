@@ -18,21 +18,22 @@ func TestCountOverwritten(t *testing.T) {
 	}
 }
 
-// 批量重跑默认跳过「已全部人工复核」的日报（cv=0 且 manual>0）：
-// 待确认预填说明还没复核完；完全没有人工状态的日报可以随意重跑。
+// 批量重跑默认跳过「全部已确认」的日报（pending=0 且 confirmed>0）：
+// 只要还有未复核项（ocr 或 cv）就说明没复核完；完全没有确认状态的日报可以随意重跑。
 func TestSkipConfirmedReport(t *testing.T) {
 	cases := []struct {
-		cv, manual int
-		want       bool
+		pending, confirmed int
+		want               bool
 	}{
-		{cv: 0, manual: 24, want: true},  // 全部复核完 → 跳过
-		{cv: 5, manual: 20, want: false}, // 还有待确认 → 重跑
-		{cv: 0, manual: 0, want: false},  // 未解析或只有 ocr → 重跑
-		{cv: 10, manual: 0, want: false}, // 全新预填 → 重跑
+		{pending: 0, confirmed: 24, want: true},   // 全部确认 → 跳过
+		{pending: 23, confirmed: 24, want: false}, // 还有地图预填未确认 → 重跑
+		{pending: 58, confirmed: 24, want: false}, // 回归：58 项 ocr 未确认 + 24 项已确认，不能跳过
+		{pending: 0, confirmed: 0, want: false},   // 未解析 → 重跑
+		{pending: 82, confirmed: 0, want: false},  // 刚解析、全未确认 → 重跑
 	}
 	for _, c := range cases {
-		if got := skipConfirmedReport(c.cv, c.manual); got != c.want {
-			t.Fatalf("cv=%d manual=%d 期望 %v，实际 %v", c.cv, c.manual, c.want, got)
+		if got := skipConfirmedReport(c.pending, c.confirmed); got != c.want {
+			t.Fatalf("pending=%d confirmed=%d 期望 %v，实际 %v", c.pending, c.confirmed, c.want, got)
 		}
 	}
 }

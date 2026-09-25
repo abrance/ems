@@ -156,16 +156,36 @@ type SpotMetricOverwrite struct {
 	NewValue *float64 // 本次 OCR 值（为 nil 表示本次未提取到该字段）
 }
 
+// SpotMetricReplaceResult 全量替换指标的结果
+//
+// Preserved 与 Overwritten 互斥：默认「已确认优先」时是 Preserved，显式 force 时才是 Overwritten。
+type SpotMetricReplaceResult struct {
+	Overwritten []SpotMetricOverwrite // force 覆盖掉的已确认值（已写审计）
+	Preserved   int                   // 原样保留的已确认行数（未覆盖）
+	// PreservedDiff 保留下来但本次解析算出了不同值的行（OldValue=已确认值，NewValue=本次 OCR 值）。
+	// 值不变就不记，仅用于告警——否则解析器修好的 bug 永远不会落到已确认行上，而没人知道。
+	PreservedDiff []SpotMetricOverwrite
+}
+
+// SpotMetricCounts 某份日报的复核进度：pending=未复核（ocr+cv），confirmed=已确认（manual）
+type SpotMetricCounts struct {
+	Pending   int
+	Confirmed int
+}
+
 // ISpotExtractService 现货日报结构化提取结果
 type ISpotExtractService interface {
 	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）。
-	// 重跑以 OCR 为准：人工修订行会被覆盖，但覆盖前写入审计并作为返回值返回。
-	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel) ([]SpotMetricOverwrite, error)
+	// 已确认（origin=manual）行默认原样保留、不被重跑覆盖（force=false，Preserved 计数）；
+	// force=true 时才「以 OCR 为准」覆盖它们，覆盖前逐条写审计并返回 Overwritten。
+	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel, force bool) (*SpotMetricReplaceResult, error)
 	// UpdateMetricValue 人工修订单个指标值（origin 置为 manual，并写审计）
 	UpdateMetricValue(ctx context.Context, key SpotMetricKey, value float64, operator string) (*s_db_model.SSpotMetricModel, error)
-	// ConfirmMetrics 把某份日报中 origin=cv 的预填项标记为人工已确认（origin=manual），
-	// 并写审计。dataset 为空表示该日报全部数据集。返回确认条数。
+	// ConfirmMetrics 把某份日报中所有未复核项（origin != manual，即 ocr + cv 预填）
+	// 标记为人工已确认（origin=manual），并写审计。dataset 为空表示该日报全部数据集。返回确认条数。
 	ConfirmMetrics(ctx context.Context, reportDate, dataset, operator string) (int, error)
+	// CountMetricsByReport 按日报日一次性统计未复核/已确认条数（列表页用，避免 N+1）
+	CountMetricsByReport(ctx context.Context) (map[string]SpotMetricCounts, error)
 	// ListMetricAudit 查询某份日报的指标变更审计
 	ListMetricAudit(ctx context.Context, reportDate string, limit int) ([]*s_db_model.SSpotMetricAuditModel, error)
 	// ListMetrics 按日报查询指标（含该日报里滞后运行日的数据）

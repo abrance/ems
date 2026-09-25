@@ -18,6 +18,9 @@ type SpotReport struct {
 	PageCount   int         `json:"pageCount" dc:"页数"`
 	Pages       []*SpotPage `json:"pages" dc:"日报原图"`
 	CollectedAt string      `json:"collectedAt" dc:"采集时间"`
+	// 复核进度：pending=未复核（ocr+cv），confirmed=已确认（manual）；两者皆 0 表示尚未解析
+	PendingCount   int `json:"pendingCount" dc:"未复核指标数"`
+	ConfirmedCount int `json:"confirmedCount" dc:"已确认指标数"`
 }
 
 type ListSpotReportReq struct {
@@ -73,7 +76,7 @@ type SpotMetric struct {
 	SharePct  *float64 `json:"sharePct" dc:"占比%"`
 	Source    string   `json:"source" dc:"来源：表1(一)/表1(二)/表2(一)/表2(二)/正文"`
 	Conf      float64  `json:"conf" dc:"OCR 置信度"`
-	Origin    string   `json:"origin" dc:"取值来源：ocr/cv/manual"`
+	Origin    string   `json:"origin" dc:"复核状态：ocr/cv=未复核，manual=已确认"`
 	EditedBy  string   `json:"editedBy" dc:"人工修订人"`
 	EditedAt  string   `json:"editedAt" dc:"人工修订时间"`
 }
@@ -145,7 +148,7 @@ type BatchExtractStatusRes struct {
 }
 
 type ConfirmSpotMetricReq struct {
-	g.Meta   `path:"/spot-report/confirm" method:"post" tags:"现货日报" summary:"确认图像/OCR 预填值" role:"admin"`
+	g.Meta   `path:"/spot-report/confirm" method:"post" tags:"现货日报" summary:"确认未复核的提取/预填值" role:"admin"`
 	Date     string `json:"date" v:"required" dc:"日报日 YYYY-MM-DD"`
 	Dataset  string `json:"dataset" dc:"留空表示确认该日报全部数据集"`
 	Operator string `json:"operator" dc:"确认人，缺省为当前角色"`
@@ -179,6 +182,8 @@ type SpotExtractInfo struct {
 type ExtractSpotReportReq struct {
 	g.Meta `path:"/spot-report/extract" method:"post" tags:"现货日报" summary:"解析现货日报数据（OCR+模板）" role:"admin"`
 	Date   string `json:"date" v:"required" dc:"运行日 YYYY-MM-DD"`
+	// Force 为 true 时才以 OCR 为准覆盖已确认值；默认保留已确认行（复核状态优先）
+	Force bool `json:"force" dc:"是否覆盖已确认值，默认否（保留已确认，只更新未复核项）"`
 }
 
 type ExtractSpotReportRes struct {
@@ -187,6 +192,8 @@ type ExtractSpotReportRes struct {
 	MetricCount int      `json:"metricCount"`
 	Status      string   `json:"status"`
 	Warnings    []string `json:"warnings"`
+	Preserved   int      `json:"preserved" dc:"本次未覆盖、原样保留的已确认条数"`
+	Pending     int      `json:"pending" dc:"解析后该日报仍待人工确认的条数"`
 }
 
 type GetSpotReportDataReq struct {

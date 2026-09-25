@@ -32,8 +32,9 @@ func TestMetricModelsKeepsSemanticFields(t *testing.T) {
 		t.Fatalf("日报日/运行日映射错误：%+v", first)
 	}
 	second := models[1]
-	if second.Origin != "" {
-		t.Fatalf("未标注 origin 的指标应保持空（由存储层默认 ocr），实际 %q", second.Origin)
+	// 未标注 origin 的表格/正文值统一记 ocr（未复核），不再留空依赖存储层默认
+	if second.Origin != OriginOCR {
+		t.Fatalf("未标注 origin 的指标应为 %s，实际 %q", OriginOCR, second.Origin)
 	}
 	if second.MomPct == nil || *second.MomPct != mom || second.SharePct == nil || *second.SharePct != share {
 		t.Fatalf("环比/占比丢失：%+v", second)
