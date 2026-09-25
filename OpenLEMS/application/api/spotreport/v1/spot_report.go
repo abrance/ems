@@ -207,3 +207,41 @@ type GetSpotReportDataRes struct {
 	Metrics   []*SpotMetric    `json:"metrics"`
 	Extract   *SpotExtractInfo `json:"extract"`
 }
+
+// SpotTrendPoint 趋势点：一个桶内一条序列的聚合结果
+type SpotTrendPoint struct {
+	Bucket  string  `json:"bucket" dc:"桶键：2026-09-20 / 2026-W39 / 2026-09"`
+	From    string  `json:"from" dc:"桶内实际最早运行日"`
+	To      string  `json:"to" dc:"桶内实际最晚运行日"`
+	Dataset string  `json:"dataset"`
+	Scope   string  `json:"scope"`
+	Metric  string  `json:"metric"`
+	Avg     float64 `json:"avg"`
+	Max     float64 `json:"max"`
+	Min     float64 `json:"min"`
+	Sum     float64 `json:"sum"`
+	Days    int     `json:"days"`
+	Unit    string  `json:"unit"`
+	// SharePct 仅申报容量类：Σ容量 ÷ Σ申报容量 × 100（桶内重算，不是各天占比平均）
+	SharePct *float64 `json:"sharePct,omitempty"`
+	// Value / TextValue / Count 仅地市档位：档位序号、区间文本、命中该档位的城市-天数
+	Value     float64 `json:"value"`
+	TextValue string  `json:"textValue,omitempty"`
+	Count     int     `json:"count,omitempty"`
+}
+
+type GetSpotReportTrendReq struct {
+	g.Meta `path:"/spot-report/trend" method:"get" tags:"现货日报" summary:"现货指标趋势（按运行日分桶聚合）" role:"user"`
+	From   string `json:"from" dc:"起始运行日 YYYY-MM-DD，缺省为本月 1 日"`
+	To     string `json:"to" dc:"结束运行日 YYYY-MM-DD，缺省为今天"`
+	Grain  string `json:"grain" dc:"分桶粒度：day/week/month，缺省按区间跨度推断"`
+}
+
+type GetSpotReportTrendRes struct {
+	From   string            `json:"from"`
+	To     string            `json:"to"`
+	Grain  string            `json:"grain"`
+	Points []*SpotTrendPoint `json:"points"`
+	// ExcludedPending 区间内因未复核（origin != manual）被排除的指标条数
+	ExcludedPending int `json:"excludedPending"`
+}

@@ -179,3 +179,32 @@ func (c *ControllerV1) GetBatchExtractStatus(ctx context.Context, req *v1.BatchE
 	}
 	return res, nil
 }
+
+// GetSpotReportTrend 现货指标趋势：按运行日分桶（日/周/月）聚合，只看已确认值。
+// 缺省区间「本月 1 日 → 今天」，粒度按跨度推断；具体口径见 logic/spotreport/trend.go。
+func (c *ControllerV1) GetSpotReportTrend(ctx context.Context, req *v1.GetSpotReportTrendReq) (*v1.GetSpotReportTrendRes, error) {
+	from, to, err := logic.NormalizeTrendRange(req.From, req.To)
+	if err != nil {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+	}
+	grain := logic.DefaultTrendGrain(from, to)
+	if parsed, ok := logic.ParseTrendGrain(req.Grain); ok {
+		grain = parsed
+	}
+	service := s_db.GetSpotExtractService()
+	models, err := service.ListMetricsByRunDateRange(ctx, from, to)
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取趋势指标失败")
+	}
+	excluded, err := service.CountUnconfirmedByRunDateRange(ctx, from, to)
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "统计未复核指标失败")
+	}
+	return &v1.GetSpotReportTrendRes{
+		From:            from,
+		To:              to,
+		Grain:           string(grain),
+		Points:          logic.ToTrendPoints(logic.BuildTrend(models, grain)),
+		ExcludedPending: excluded,
+	}, nil
+}

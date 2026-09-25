@@ -399,6 +399,486 @@
     return legend;
   }
 
+
+  // ===== 电力现货趋势卡片（首页新增一块，与现货卡并列）=====
+  // 口径（与后端 logic/spotreport/trend.go 一一对应）：
+  //   run_date 分桶 · 日前成交只用表1(二) · 只看已确认 · 每桶 avg/max/min ·
+  //   容量占比按 Σ 重算 · 档位按「城市-天」计数。前端只做取数与画图，不算口径。
+
+  const TREND_ID = "spot-trend-block";
+  const TREND_GRAINS = [["day", "按日"], ["week", "按周"], ["month", "按月"]];
+  const TREND_COLORS = {
+    "发电侧": "#3f7fd6", "燃煤": "#e08a2e", "燃气": "#8e6bd0", "新能源": "#4fae6b",
+    "日前加权平均电价": "#3f7fd6", "燃煤均价": "#e08a2e", "燃气均价": "#8e6bd0",
+    "煤机容量": "#8fb6e8", "气机容量": "#ffd28a", "新能源容量": "#a8dfa0"
+  };
+  const TREND_CAPACITY = [["煤机容量", "#8fb6e8"], ["气机容量", "#ffd28a"], ["新能源容量", "#a8dfa0"]];
+  const TREND_DECL_ROWS = ["零价及以下", "报价600以上"];
+
+  let trendState = {
+    from: "", to: "", grain: "day", autoGrain: true,
+    points: [], excludedPending: 0,
+    key: "", loading: false, error: ""
+  };
+
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function dateStr(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function todayStr() { return dateStr(new Date()); }
+  function monthStartStr() { const d = new Date(); return dateStr(new Date(d.getFullYear(), d.getMonth(), 1)); }
+  function weekStartStr() {
+    const d = new Date();
+    const offset = (d.getDay() + 6) % 7; // 周一为一周之始，与 ISO 周桶同口径
+    return dateStr(new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset));
+  }
+  function trendKey() { return trendState.from + "|" + trendState.to + "|" + trendState.grain + "|" + (trendState.autoGrain ? "auto" : "fixed"); }
+
+  function trendQuick(kind) {
+    trendState.from = kind === "week" ? weekStartStr() : monthStartStr();
+    trendState.to = todayStr();
+    trendState.autoGrain = true;
+    loadTrend();
+  }
+
+  async function loadTrend() {
+    if (!trendState.from) trendQuick("month");
+    if (trendState.loading) return;
+    trendState.loading = true;
+    trendState.error = "";
+    renderTrend();
+    let query = "/api/spot-report/trend?from=" + trendState.from + "&to=" + trendState.to;
+    if (!trendState.autoGrain) query += "&grain=" + trendState.grain;
+    try {
+      const data = await api(query);
+      trendState.points = (data && data.points) || [];
+      trendState.excludedPending = (data && data.excludedPending) || 0;
+      if (data && data.grain) trendState.grain = data.grain;
+      if (data && data.from) { trendState.from = data.from; trendState.to = data.to; }
+      trendState.key = trendKey();
+    } catch (err) {
+      trendState.error = err.message || "加载趋势失败";
+    }
+    trendState.loading = false;
+    renderTrend();
+  }
+
+  function ensureTrend() {
+    const landscape = document.querySelector(".dashboard-landscape");
+    if (!landscape) return;
+    const home = document.getElementById(HOME_ID);
+    let block = document.getElementById(TREND_ID);
+    if (!block) {
+      block = el("div", { id: TREND_ID, class: "spot-trend" });
+      landscape.insertBefore(block, home ? home.nextSibling : landscape.firstChild);
+    }
+    if (!trendState.from) {
+      trendQuick("month");
+    } else if (trendState.key !== trendKey() && !trendState.loading) {
+      loadTrend();
+    }
+    renderTrend();
+  }
+
+  // ---------- SVG 基础 ----------
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const TREND_W = 640, TREND_H = 190, TREND_L = 52, TREND_R = 14, TREND_T = 12, TREND_B = 26;
+
+  function svgNode(tag, attrs, title) {
+    const node = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+    if (title) {
+      const t = document.createElementNS(SVG_NS, "title");
+      t.textContent = title;
+      node.appendChild(t);
+    }
+    return node;
+  }
+
+  function svgRoot(opts) {
+    const height = (opts && opts.height) || TREND_H;
+    return svgNode("svg", { viewBox: "0 0 " + TREND_W + " " + height, class: "spot-svg" });
+  }
+
+  function trendBucketLabel(bucket) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bucket)) return bucket.slice(5);
+    if (/^\d{4}-W\d{2}$/.test(bucket)) return "W" + bucket.slice(6);
+    if (/^\d{4}-\d{2}$/.test(bucket)) return bucket.slice(2) + "月";
+    return bucket;
+  }
+
+  function trendXAxis(svg, buckets, yZero) {
+    const width = TREND_W - TREND_L - TREND_R;
+    const step = Math.max(1, Math.ceil(buckets.length / 6));
+    buckets.forEach(function (bucket, i) {
+      if (i % step && i !== buckets.length - 1) return;
+      const x = buckets.length <= 1 ? TREND_L + width / 2 : TREND_L + i * width / (buckets.length - 1);
+      const anchor = i === 0 ? "start" : (i === buckets.length - 1 ? "end" : "middle");
+      const label = svgNode("text", { x: x, y: yZero + 16, class: "spot-svg-axis", "text-anchor": anchor });
+      label.textContent = trendBucketLabel(bucket);
+      svg.appendChild(label);
+    });
+  }
+
+  function trendYAxis(svg, lo, hi, yOf) {
+    for (let i = 0; i <= 3; i++) {
+      const value = lo + (hi - lo) * i / 3;
+      const y = yOf(value);
+      svg.appendChild(svgNode("line", { x1: TREND_L, y1: y, x2: TREND_W - TREND_R, y2: y, class: "spot-svg-grid" }));
+      const label = svgNode("text", { x: TREND_L - 6, y: y + 4, class: "spot-svg-axis", "text-anchor": "end" });
+      label.textContent = fmtNum(value);
+      svg.appendChild(label);
+    }
+  }
+
+  function trendScale(values) {
+    const nums = values.filter(function (v) { return v !== null && v !== undefined && isFinite(v); });
+    if (!nums.length) return null;
+    let lo = Math.min.apply(null, nums), hi = Math.max.apply(null, nums);
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.08;
+    return [lo - pad, hi + pad];
+  }
+
+  // 折线图：buckets 为横轴，series=[{name,color,values:[数值|null]}]，null 断开（不补洞）
+  function svgLines(buckets, series, unit) {
+    const svg = svgRoot();
+    const scale = trendScale([].concat.apply([], series.map(function (s) { return s.values; })));
+    if (!scale) return null;
+    const [lo, hi] = scale;
+    const width = TREND_W - TREND_L - TREND_R, height = TREND_H - TREND_T - TREND_B;
+    const xOf = function (i) { return buckets.length <= 1 ? TREND_L + width / 2 : TREND_L + i * width / (buckets.length - 1); };
+    const yOf = function (v) { return TREND_T + (hi - v) * height / (hi - lo); };
+    trendYAxis(svg, lo, hi, yOf);
+    series.forEach(function (s) {
+      let segment = [];
+      const flush = function () {
+        if (segment.length > 1) {
+          svg.appendChild(svgNode("polyline", { points: segment.join(" "), fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round" }));
+        }
+        segment = [];
+      };
+      s.values.forEach(function (v, i) {
+        if (v === null || v === undefined || !isFinite(v)) { flush(); return; }
+        segment.push(xOf(i) + "," + yOf(v));
+      });
+      flush();
+      s.values.forEach(function (v, i) {
+        if (v === null || v === undefined || !isFinite(v)) return;
+        svg.appendChild(svgNode("circle", { cx: xOf(i), cy: yOf(v), r: 2.6, fill: s.color },
+          trendBucketLabel(buckets[i]) + " " + s.name + " " + fmtNum(v) + (unit || "")));
+      });
+    });
+    trendXAxis(svg, buckets, TREND_H - TREND_B);
+    return svg;
+  }
+
+  // 均值线 + 极值带（最高/最低）
+  function svgBand(buckets, mean, high, low, unit) {
+    const svg = svgRoot();
+    const scale = trendScale([].concat(mean.values, high.values, low.values));
+    if (!scale) return null;
+    const [lo, hi] = scale;
+    const width = TREND_W - TREND_L - TREND_R, height = TREND_H - TREND_T - TREND_B;
+    const xOf = function (i) { return buckets.length <= 1 ? TREND_L + width / 2 : TREND_L + i * width / (buckets.length - 1); };
+    const yOf = function (v) { return TREND_T + (hi - v) * height / (hi - lo); };
+    trendYAxis(svg, lo, hi, yOf);
+    const upper = [], lower = [];
+    buckets.forEach(function (bucket, i) {
+      if (high.values[i] !== null) upper.push(xOf(i) + "," + yOf(high.values[i]));
+      if (low.values[i] !== null) lower.push(xOf(i) + "," + yOf(low.values[i]));
+    });
+    if (upper.length && lower.length) {
+      svg.appendChild(svgNode("polygon", {
+        points: upper.concat(lower.slice().reverse()).join(" "),
+        fill: "rgba(63,127,214,0.16)", stroke: "none"
+      }, "区间内最高/最低"));
+    }
+    svgLinesInto(svg, buckets, [high, low], xOf, yOf, unit);
+    svgLinesInto(svg, buckets, [mean], xOf, yOf, unit);
+    trendXAxis(svg, buckets, TREND_H - TREND_B);
+    return svg;
+  }
+
+  function svgLinesInto(svg, buckets, series, xOf, yOf, unit) {
+    series.forEach(function (s) {
+      let segment = [];
+      const flush = function () {
+        if (segment.length > 1) {
+          svg.appendChild(svgNode("polyline", { points: segment.join(" "), fill: "none",
+            stroke: s.color, "stroke-width": s.name === "平均电价" ? 2.4 : 1.4,
+            "stroke-dasharray": s.name === "平均电价" ? "" : "4 3" }));
+        }
+        segment = [];
+      };
+      s.values.forEach(function (v, i) {
+        if (v === null || v === undefined || !isFinite(v)) { flush(); return; }
+        segment.push(xOf(i) + "," + yOf(v));
+      });
+      flush();
+      s.values.forEach(function (v, i) {
+        if (v === null || v === undefined) return;
+        svg.appendChild(svgNode("circle", { cx: xOf(i), cy: yOf(v), r: 2.4, fill: s.color },
+          trendBucketLabel(buckets[i]) + " " + s.name + " " + fmtNum(v) + (unit || "")));
+      });
+    });
+  }
+
+  // 堆叠柱：groups=[{name, series:[{name,color,values}]}]，同一个桶里每组一根柱（如申报结构的两个行组）
+  function svgStack(buckets, groups, opts) {
+    const percent = !!(opts && opts.percent);
+    const unit = (opts && opts.unit) || "";
+    const svg = svgRoot();
+    const height = TREND_H - TREND_T - TREND_B;
+    const width = TREND_W - TREND_L - TREND_R;
+    const slot = width / Math.max(1, buckets.length);
+    const barWidth = Math.max(3, slot * 0.72 / groups.length);
+    let maxTotal = 0;
+    const totals = buckets.map(function (bucket, i) {
+      return groups.map(function (g) {
+        let sum = 0;
+        g.series.forEach(function (s) {
+          const v = s.values[i];
+          if (v !== null && v !== undefined && isFinite(v)) sum += v;
+        });
+        maxTotal = Math.max(maxTotal, sum);
+        return sum;
+      });
+    });
+    if (maxTotal <= 0) return null;
+    for (let i = 0; i <= 3; i++) {
+      const y = TREND_T + height * (1 - i / 3);
+      svg.appendChild(svgNode("line", { x1: TREND_L, y1: y, x2: TREND_W - TREND_R, y2: y, class: "spot-svg-grid" }));
+      const label = svgNode("text", { x: TREND_L - 6, y: y + 4, class: "spot-svg-axis", "text-anchor": "end" });
+      label.textContent = percent ? (i * 100 / 3).toFixed(0) + "%" : fmtNum(maxTotal * i / 3);
+      svg.appendChild(label);
+    }
+    buckets.forEach(function (bucket, i) {
+      const baseX = TREND_L + slot * i + (slot - barWidth * groups.length) / 2;
+      groups.forEach(function (g, gi) {
+        const total = totals[i][gi];
+        if (total <= 0) return;
+        let cursor = TREND_T + height;
+        g.series.forEach(function (s) {
+          const v = s.values[i];
+          if (v === null || v === undefined || !isFinite(v)) return;
+          const ratio = percent ? v / total : v / maxTotal;
+          const h = ratio * height;
+          cursor -= h;
+          svg.appendChild(svgNode("rect", {
+            x: baseX + gi * barWidth, y: cursor, width: Math.max(1.5, barWidth - 1), height: h,
+            fill: s.color
+          }, trendBucketLabel(bucket) + " " + g.name + " " + s.name + " " + fmtNum(v) + unit +
+            (percent ? "（占 " + fmtNum(v / total * 100) + "%）" : "")));
+        });
+      });
+    });
+    trendXAxis(svg, buckets, TREND_H - TREND_B);
+    return svg;
+  }
+
+  function trendChart(title, svg, legend, emptyText) {
+    const card = el("div", { class: "spot-chart" }, [el("div", { class: "spot-chart-title", text: title })]);
+    if (!svg) {
+      card.appendChild(el("div", { class: "spot-trend-empty", text: emptyText || "该区间暂无已确认数据" }));
+      return card;
+    }
+    card.appendChild(svg);
+    if (legend && legend.length) {
+      const box = el("div", { class: "spot-legend" });
+      legend.forEach(function (item) {
+        box.appendChild(el("span", { class: "spot-legend-item" }, [
+          el("span", { class: "spot-legend-dot", style: "background:" + item[1] }),
+          el("span", { text: item[0] })
+        ]));
+      });
+      card.appendChild(box);
+    }
+    return card;
+  }
+
+  // points → (bucket,dataset,scope,metric) → 点
+  function trendMap(points) {
+    const map = {};
+    points.forEach(function (p) { map[[p.bucket, p.dataset, p.scope, p.metric].join("|")] = p; });
+    return map;
+  }
+  function trendPick(map, bucket, dataset, scope, metric, field) {
+    const p = map[[bucket, dataset, scope, metric].join("|")];
+    if (!p) return null;
+    const v = p[field];
+    return v === undefined ? null : v;
+  }
+
+  function trendBuckets(points) {
+    const seen = {}, buckets = [];
+    points.forEach(function (p) {
+      if (!seen[p.bucket]) { seen[p.bucket] = true; buckets.push(p.bucket); }
+    });
+    return buckets.sort();
+  }
+
+  // specs 元素 = [图例名, scope, metric]：图的维度不总是 scope（正文摘要的 scope 固定为「市场」，
+  // 维度是 metric 本身），所以标签与取数键必须分开写
+  function trendLineCard(points, buckets, map, dataset, specs, title) {
+    const series = specs.map(function (s) {
+      return { name: s[0], color: TREND_COLORS[s[0]] || "#999", values: buckets.map(function (b) {
+        return trendPick(map, b, dataset, s[1], s[2], "avg");
+      }) };
+    });
+    const unit = points.length ? (points[0].unit || "") : "";
+    return trendChart(title, svgLines(buckets, series, unit),
+      specs.map(function (s) { return [s[0], TREND_COLORS[s[0]] || "#999"]; }));
+  }
+
+  function trendDeck(points) {
+    const buckets = trendBuckets(points);
+    const map = trendMap(points);
+    const cards = [];
+    const unit = "元/兆瓦时";
+
+    cards.push(trendLineCard(points, buckets, map, "day_ahead_trade",
+      [["发电侧", "发电侧", "平均电价"], ["燃煤", "燃煤", "平均电价"], ["燃气", "燃气", "平均电价"]], "日前成交均价"));
+
+    cards.push(trendLineCard(points, buckets, map, "realtime_trade",
+      [["发电侧", "发电侧", "平均电价"], ["燃煤", "燃煤", "平均电价"], ["燃气", "燃气", "平均电价"]], "实时成交均价"));
+
+    // 发电侧极值带
+    const meanSeries = { name: "平均电价", color: TREND_COLORS["发电侧"], values: buckets.map(function (b) { return trendPick(map, b, "day_ahead_trade", "发电侧", "平均电价", "avg"); }) };
+    const highSeries = { name: "最高电价", color: "#e08a2e", values: buckets.map(function (b) { return trendPick(map, b, "day_ahead_trade", "发电侧", "最高电价", "max"); }) };
+    const lowSeries = { name: "最低电价", color: "#4fae6b", values: buckets.map(function (b) { return trendPick(map, b, "day_ahead_trade", "发电侧", "最低电价", "min"); }) };
+    cards.push(trendChart("发电侧日前成交极值（均价线 + 最高/最低）",
+      svgBand(buckets, meanSeries, highSeries, lowSeries, unit),
+      [["平均电价", TREND_COLORS["发电侧"]], ["最高电价", "#e08a2e"], ["最低电价", "#4fae6b"]]));
+
+    // 申报容量结构：每桶每行一组 100% 堆叠
+    const declGroups = TREND_DECL_ROWS.map(function (row) {
+      return { name: row, series: TREND_CAPACITY.map(function (item) {
+        return { name: item[0], color: item[1], values: buckets.map(function (b) {
+          return trendPick(map, b, "day_ahead_decl", row, item[0], "sharePct");
+        }) };
+      }) };
+    });
+    cards.push(trendChart("申报容量结构（占申报容量比例，桶内 Σ 重算）",
+      svgStack(buckets, declGroups, { percent: true, unit: "%" }),
+      TREND_CAPACITY.map(function (item) { return [item[0], item[1]]; })));
+
+    // 正文摘要
+    cards.push(trendLineCard(points, buckets, map, "summary", [
+      ["日前加权平均电价", "市场", "日前加权平均电价"],
+      ["燃煤均价", "市场", "燃煤均价"],
+      ["燃气均价", "市场", "燃气均价"]
+    ], "正文摘要指标"));
+
+    // 地市档位分布（高峰 / 低谷各一张，纵轴为「城市-天」计数）
+    ["node_price_peak", "node_price_valley"].forEach(function (dataset) {
+      const title = dataset === "node_price_peak" ? "地市档位分布 · 高峰时刻" : "地市档位分布 · 低谷时刻";
+      const texts = [];
+      points.forEach(function (p) {
+        if (p.dataset === dataset && texts.indexOf(p.textValue) < 0) texts.push(p.textValue);
+      });
+      texts.sort();
+      const groups = [{ name: "档位", series: texts.map(function (text, idx) {
+        return { name: text, color: BUCKET_COLORS[idx % BUCKET_COLORS.length], values: buckets.map(function (b) {
+          let hit = null;
+          points.forEach(function (p) {
+            if (p.bucket === b && p.dataset === dataset && p.textValue === text) hit = p;
+          });
+          return hit ? hit.count : null;
+        }) };
+      }) }];
+      cards.push(trendChart(title, svgStack(buckets, groups, { unit: " 个城市-天" }),
+        texts.map(function (text, idx) { return [text, BUCKET_COLORS[idx % BUCKET_COLORS.length]]; })));
+    });
+    return cards;
+  }
+
+  function trendDateInput(which) {
+    const input = el("input", { class: "spot-trend-date", type: "date", value: trendState[which], max: todayStr() });
+    input.addEventListener("change", function () {
+      const value = input.value;
+      if (!value) return;
+      if (which === "from") trendState.from = value; else trendState.to = value;
+      if (trendState.from > trendState.to) {
+        // 起止颠倒就对调（UI 上两个输入框会立刻回显纠正后的值），
+        // 不能把区间压成一天 —— 那看着像查询失败
+        const swap = trendState.from;
+        trendState.from = trendState.to;
+        trendState.to = swap;
+      }
+      trendState.autoGrain = true;
+      loadTrend();
+    });
+    return input;
+  }
+
+  function renderTrend() {
+    const root = document.getElementById(TREND_ID);
+    if (!root) return;
+    const scrollY = window.scrollY;
+    root.innerHTML = "";
+
+    const quick = [["本周", "week"], ["本月", "month"]];
+    const quickBox = el("div", { class: "spot-tabs" });
+    quick.forEach(function (item) {
+      const active = trendState.from === (item[1] === "week" ? weekStartStr() : monthStartStr()) && trendState.to === todayStr();
+      quickBox.appendChild(el("button", {
+        class: "spot-tab" + (active ? " active" : ""), text: item[0],
+        onClick: function () { trendQuick(item[1]); }
+      }));
+    });
+    const grainBox = el("div", { class: "spot-tabs" });
+    TREND_GRAINS.forEach(function (item) {
+      grainBox.appendChild(el("button", {
+        class: "spot-tab" + (!trendState.autoGrain && trendState.grain === item[0] ? " active" : ""),
+        text: item[1],
+        onClick: function () {
+          trendState.grain = item[0];
+          trendState.autoGrain = false;
+          loadTrend();
+        }
+      }));
+    });
+    const headRight = [quickBox, el("div", { class: "spot-trend-range" }, [
+      trendDateInput("from"),
+      el("span", { class: "spot-trend-dash", text: "→" }),
+      trendDateInput("to")
+    ]), grainBox];
+    if (trendState.excludedPending) {
+      headRight.push(el("span", { class: "spot-trend-badge",
+        text: "已排除未复核 " + trendState.excludedPending + " 项",
+        title: "趋势只看已确认值；未复核（ocr/cv）的指标不计入，需在信息管理里确认" }));
+    }
+
+    root.appendChild(el("div", { class: "spot-home-head" }, [
+      el("div", { class: "spot-home-heading" }, [
+        el("div", { class: "spot-home-title", text: "电力现货趋势" }),
+        el("div", { class: "spot-home-sub", text: "按运行日聚合 · " + trendState.from + " ~ " + trendState.to +
+          " · " + (trendState.autoGrain ? "粒度自动" : "") })
+      ]),
+      el("div", { class: "spot-trend-toolbar" }, headRight)
+    ]));
+
+    if (trendState.error) {
+      root.appendChild(el("div", { class: "spot-error", text: trendState.error }));
+      window.scrollTo(0, scrollY);
+      return;
+    }
+    if (!trendState.points.length) {
+      root.appendChild(el("div", { class: "spot-trend-empty",
+        text: trendState.loading ? "加载中…" : "该区间内没有已确认数据（新采的日报需先在信息管理里「确认全部」）" }));
+      window.scrollTo(0, scrollY);
+      return;
+    }
+    const buckets = trendBuckets(trendState.points);
+    const body = el("div", { class: "spot-trend-body" });
+    body.appendChild(el("div", { class: "spot-chart-row" }, trendDeck(trendState.points)));
+    if (buckets.length < 2) {
+      body.appendChild(el("div", { class: "spot-trend-note",
+        text: "区间内只有 " + buckets.length + " 个桶（" + buckets.join("、") + "），切到更细的粒度或扩大时间范围才有走势" }));
+    }
+    root.appendChild(body);
+    window.scrollTo(0, scrollY);
+  }
+
   function renderHomeData(container, report) {
     container.innerHTML = "";
     if (homeState.dataLoading && !homeState.data) {
@@ -1140,6 +1620,7 @@
     if (path === "/") {
       hideInfoPage();
       ensureHome();
+      ensureTrend();
     } else if (path === "/programs") {
       hideInfoPage();
       ensureCard();
@@ -1171,6 +1652,7 @@
       return;
     }
     if (pathName() === "/" && !document.getElementById(HOME_ID)) ensureHome();
+    if (pathName() === "/" && !document.getElementById(TREND_ID)) ensureTrend();
     if (pathName() === "/programs" && isAdmin() && !document.getElementById(CARD_ID)) ensureCard();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });

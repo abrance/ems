@@ -15,6 +15,10 @@ import (
 
 type sSpotExtractServiceImpl struct{}
 
+// spotOriginManual 已确认（人工确认或修订过）的 origin 值。
+// 口径：origin=manual 才算已确认，ocr/cv 以及老库空串都是未复核。
+const spotOriginManual = "manual"
+
 var (
 	spotExtractServiceInstance s_db_basic.ISpotExtractService
 	spotExtractServiceOnce     sync.Once
@@ -339,6 +343,36 @@ func (s *sSpotExtractServiceImpl) ListMetricsByRunDate(ctx context.Context, runD
 		return nil, errors.Wrap(err, "按运行日查询现货指标失败")
 	}
 	return list, nil
+}
+
+func (s *sSpotExtractServiceImpl) ListMetricsByRunDateRange(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error) {
+	var list []*s_db_model.SSpotMetricModel
+	err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+		WhereGTE(s_db_model.FieldSpotMetricRunDate, from).
+		WhereLTE(s_db_model.FieldSpotMetricRunDate, to).
+		Where(s_db_model.FieldSpotMetricOrigin, spotOriginManual).
+		OrderAsc(s_db_model.FieldSpotMetricRunDate).
+		OrderAsc(s_db_model.FieldSpotMetricDataset).
+		OrderAsc(s_db_model.FieldSpotMetricScope).
+		Scan(&list)
+	if err != nil {
+		return nil, errors.Wrap(err, "按运行日区间查询现货指标失败")
+	}
+	return list, nil
+}
+
+func (s *sSpotExtractServiceImpl) CountUnconfirmedByRunDateRange(ctx context.Context, from, to string) (int, error) {
+	count, err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+		WhereGTE(s_db_model.FieldSpotMetricRunDate, from).
+		WhereLTE(s_db_model.FieldSpotMetricRunDate, to).
+		// 老库可能有 origin 为 NULL 的行：SQL 里 NULL <> 'manual' 是 NULL（不算命中），
+		// 会漏统计，所以显式带上 IS NULL（与 ConfirmMetrics 的内存判定口径一致）
+		Where("("+s_db_model.FieldSpotMetricOrigin+" IS NULL OR "+s_db_model.FieldSpotMetricOrigin+" <> ?)", spotOriginManual).
+		Count()
+	if err != nil {
+		return 0, errors.Wrap(err, "统计未复核现货指标失败")
+	}
+	return count, nil
 }
 
 func (s *sSpotExtractServiceImpl) GetRun(ctx context.Context, reportDate string) (*s_db_model.SSpotExtractRunModel, error) {
