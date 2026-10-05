@@ -8,6 +8,11 @@ type SPolicyMircogridConfig struct {
 	ChargeEfficiency    float64 `json:"chargeEfficiency" name:"充电效率" desc:"充电效率" ct:"number" vt:"float" min:"0" max:"1" default:"0.95"`
 	DischargeEfficiency float64 `json:"dischargeEfficiency" name:"放电效率" desc:"放电效率" ct:"number" vt:"float" min:"0" max:"1" default:"0.95"`
 
+	// 峰谷套利参数
+	EssDevices          []string `json:"essDevices" name:"储能设备列表" desc:"参与策略的储能设备ID列表" ct:"multiSelect"`
+	ChargePowerRatio    float64  `json:"chargePowerRatio" name:"充电功率比例" desc:"充电功率占额定功率的比例" ct:"number" vt:"float" min:"0" max:"1" default:"1"`
+	DischargePowerRatio float64  `json:"dischargePowerRatio" name:"放电功率比例" desc:"放电功率占额定功率的比例" ct:"number" vt:"float" min:"0" max:"1" default:"1"`
+
 	// 需量控制参数， 优先降低功率
 	EnableDemandControl bool `json:"enableDemandControl" name:"启动需量控制模式" desc:"启动需量控制模式" ct:"switch" vt:"bool" default:"false"`
 	// TODO 需量控制目标值（在控制周期内，平均功率不能超过目标值）

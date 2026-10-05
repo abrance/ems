@@ -35,12 +35,19 @@ func ExecuteStrategy(ctx context.Context, targetPower int32, essDeviceIds []stri
 			soc = float64(*socPtr)
 		}
 
-		// 2.3 设置目标功率（通过设备控制接口）
-		// TODO: 实现具体的功率控制逻辑
-		c_log.Infof(ctx, "设备 %s 目标功率设置为: %dW", device.GetConfig().Name, targetPower)
+		// 2.3 下发目标功率（IPcs.SetPower，正=充 负=放，单位 kW）
+		pcs, ok := device.(c_type.IPcs)
+		if !ok {
+			c_log.Warningf(ctx, "设备 %s 不支持功率控制，跳过", device.GetConfig().Name)
+			continue
+		}
+		if err := pcs.SetPower(targetPower); err != nil {
+			c_log.Errorf(ctx, "设备 %s 下发目标功率失败: %v", device.GetConfig().Name, err)
+			continue
+		}
 
 		// 2.4 日志输出
-		c_log.Infof(ctx, "策略执行 - 设备: %s, 当前SOC: %.2f%%, 目标功率: %dW",
+		c_log.Infof(ctx, "策略执行 - 设备: %s, 当前SOC: %.2f%%, 目标功率: %dkW",
 			device.GetConfig().Name, soc, targetPower)
 	}
 
