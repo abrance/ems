@@ -892,6 +892,12 @@
     return metricState.from + "|" + metricState.to + "|" + metricState.date;
   }
 
+  // 已渲染的状态指纹：避免 setInterval 每 1.2s 触发的 sync 重建 DOM，
+  // 否则日期选择器会被反复销毁而无法编辑。
+  let metricRenderedKey = null;
+  let metricRenderedLoading = null;
+  let metricRenderedError = null;
+
   function addDaysStr(date, n) {
     const d = new Date(date + "T00:00:00");
     d.setDate(d.getDate() + n);
@@ -953,23 +959,31 @@
     if (!landscape) return;
     const home = document.getElementById(HOME_ID);
     let block = document.getElementById(METRIC_ID);
+    let created = false;
     if (!block) {
       block = el("div", { id: METRIC_ID, class: "spot-trend gd-metric" });
       landscape.insertBefore(block, home ? home.nextSibling : landscape.firstChild);
+      created = true;
     } else if (home && block.previousSibling !== home) {
       landscape.insertBefore(block, home.nextSibling);
     }
-    if (!metricState.key && !metricState.loading) metricQuick("30");
-    else renderMetric();
+    if (!metricState.key && !metricState.loading) {
+      metricQuick("30");
+      return;
+    }
+    // 新建的空块需要强制渲染，否则指纹相同会被跳过而留白
+    if (created || block.childNodes.length === 0) metricRenderedKey = null;
+    renderMetric();
   }
 
   function metricDateInput() {
     const input = el("input", {
       class: "spot-trend-date", type: "date",
-      value: metricState.date,
       min: metricState.days.length ? metricState.days[0].date : "",
       max: metricState.latestDate || ""
     });
+    // 用属性赋值而非 el() 的 setAttribute，保证日期控件能正确回显与编辑
+    input.value = metricState.date || "";
     input.addEventListener("change", function () {
       let next = input.value;
       if (metricState.latestDate && next > metricState.latestDate) next = metricState.latestDate;
@@ -990,6 +1004,15 @@
   function renderMetric() {
     const root = document.getElementById(METRIC_ID);
     if (!root) return;
+    // 状态未变则不重建：既省开销，也避免把正在编辑的日期控件冲掉
+    const key = metricKey();
+    if (key === metricRenderedKey && metricState.loading === metricRenderedLoading &&
+        metricState.error === metricRenderedError) {
+      return;
+    }
+    metricRenderedKey = key;
+    metricRenderedLoading = metricState.loading;
+    metricRenderedError = metricState.error;
     const scrollY = window.scrollY;
     root.innerHTML = "";
     const quick = [["近30天", "30"], ["近90天", "90"], ["本年", "year"]];
@@ -1063,8 +1086,8 @@
 
     const body = el("div", { class: "spot-trend-body" });
     body.appendChild(kpi);
-    body.appendChild(el("div", { class: "spot-chart-row" }, [loadChart, priceChart]));
 
+    // 当日 15 分钟曲线优先展示，日粒度聚合放后
     const curve = metricState.curve;
     if (curve) {
       const loadTimes = (curve.load || []).map(function (s) { return s.time; });
@@ -1082,6 +1105,8 @@
         ], " 元/兆瓦时"), [["日前电价", "#e08a2e"], ["实时电价", "#8e6bd0"]]);
       body.appendChild(el("div", { class: "spot-chart-row" }, [intraLoad, intraPrice]));
     }
+
+    body.appendChild(el("div", { class: "spot-chart-row" }, [loadChart, priceChart]));
     root.appendChild(body);
     window.scrollTo(0, scrollY);
   }
