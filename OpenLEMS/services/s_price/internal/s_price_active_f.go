@@ -56,28 +56,25 @@ func GetCurrentActivePrice(ctx context.Context) (*SPriceInfo, error) {
 
 // GetCurrentPriceSegment 获取当前时间对应的电价时段
 func GetCurrentPriceSegment(ctx context.Context) (*SPriceSegment, error) {
-	activePrice, err := GetCurrentActivePrice(ctx)
+	return PriceAt(ctx, time.Now())
+}
+
+// PriceAt 返回指定时间对应的电价时段；无激活电价或无匹配时段时返回 nil。
+func PriceAt(ctx context.Context, targetTime time.Time) (*SPriceSegment, error) {
+	activePrice, err := GetActivePriceAtTime(ctx, targetTime)
 	if err != nil {
 		return nil, err
 	}
-
 	if activePrice == nil {
 		return nil, nil
 	}
 
-	now := time.Now()
-	currentTime := now.Format("15:04")
-
-	// 查找当前时间对应的电价时段
+	clock := targetTime.Format("15:04")
 	for _, segment := range activePrice.PriceSegments {
-		if isTimeInRange(currentTime, segment.StartTime, segment.EndTime) {
-			c_log.Debugf(ctx, "当前电价时段 - 类型: %s, 价格: %.4f",
-				segment.PriceType, segment.Price)
+		if isTimeInRange(clock, segment.StartTime, segment.EndTime) {
 			return segment, nil
 		}
 	}
-
-	c_log.Debugf(ctx, "当前时间 %s 没有匹配的电价时段", currentTime)
 	return nil, nil
 }
 

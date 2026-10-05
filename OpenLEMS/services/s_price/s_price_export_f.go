@@ -4,6 +4,7 @@ import (
 	"common"
 	"context"
 	"s_price/internal"
+	"time"
 )
 
 // 导出内部类型
@@ -26,6 +27,11 @@ func GetCurrentActivePrice(ctx context.Context) (*SPriceInfo, error) {
 // GetCurrentPriceSegment 获取当前时间对应的电价时段
 func GetCurrentPriceSegment(ctx context.Context) (*SPriceSegment, error) {
 	return internal.GetCurrentPriceSegment(ctx)
+}
+
+// PriceAt 获取指定时间对应的电价时段（无匹配时返回 nil）
+func PriceAt(ctx context.Context, targetTime time.Time) (*SPriceSegment, error) {
+	return internal.PriceAt(ctx, targetTime)
 }
 
 // RefreshPriceCache 刷新电价缓存

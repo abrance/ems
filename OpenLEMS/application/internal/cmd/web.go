@@ -8,6 +8,7 @@ import (
 	"application/internal/controller/control"
 	"application/internal/controller/device"
 	"application/internal/controller/driver"
+	"application/internal/controller/effect"
 	"application/internal/controller/log"
 	"application/internal/controller/network"
 	"application/internal/controller/policy"
@@ -143,6 +144,7 @@ func setupAPIRoutes(s *ghttp.Server) {
 		group.Bind(automation.NewV1())
 		group.Bind(remote.NewV1())
 		group.Bind(spotreport.NewV1())
+		group.Bind(effect.NewV1())
 	})
 }
 
