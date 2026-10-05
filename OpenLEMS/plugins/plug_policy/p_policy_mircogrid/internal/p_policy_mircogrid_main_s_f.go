@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"s_db"
+	"s_forecast"
 	"s_policy"
 	"s_price"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -20,6 +22,11 @@ type sPolicyMircogrid struct {
 	policyName string
 	config     *SPolicyMircogridConfig
 	ctx        context.Context
+
+	// 负荷预测（TimesFM）客户端与缓存
+	forecastClient s_forecast.IClient
+	forecastPowers []float64 // 最近的关口功率预测（kW）
+	forecastAt     time.Time // 上次预测更新时间
 }
 
 // NewPolicyMircogrid 创建微电网策略实例
@@ -52,6 +59,12 @@ func (s *sPolicyMircogrid) Init(ctx context.Context) error {
 
 	s.applyDefaults()
 
+	// 按需初始化预测客户端
+	if s.config.EnableLoadForecast {
+		s.forecastClient = s_forecast.NewClient(s.config.ForecastBaseUrl, 30*time.Second)
+		c_log.Infof(ctx, "已启用负荷预测，服务地址: %s", s.config.ForecastBaseUrl)
+	}
+
 	c_log.Infof(ctx, "微电网策略初始化成功")
 	return nil
 }
@@ -70,6 +83,15 @@ func (s *sPolicyMircogrid) applyDefaults() {
 	}
 	if s.config.DischargePowerRatio <= 0 {
 		s.config.DischargePowerRatio = 1
+	}
+	if s.config.ForecastBaseUrl == "" {
+		s.config.ForecastBaseUrl = "https://forecast.xiaoyxq.top"
+	}
+	if s.config.ForecastHorizon <= 0 {
+		s.config.ForecastHorizon = 4
+	}
+	if s.config.ForecastRefreshMin <= 0 {
+		s.config.ForecastRefreshMin = 15
 	}
 }
 
@@ -123,14 +145,15 @@ func (s *sPolicyMircogrid) Run(ctx context.Context) error {
 
 	// 4. 决策（规则版实现 IDecisionMaker，可叠加需量约束，后续可替换为优化器）
 	decision := s.newDecider().Decide(SDecisionInput{
-		PriceType:    segment.PriceType,
-		Price:        segment.Price,
-		Soc:          soc,
-		SocMin:       s.config.SocMinRatio * 100,
-		SocMax:       s.config.SocMaxRatio * 100,
-		GridPower:    gridPower,
-		DemandTarget: s.config.DemandTarget,
-		RatedPowerKW: ratedPower,
+		PriceType:           segment.PriceType,
+		Price:               segment.Price,
+		Soc:                 soc,
+		SocMin:              s.config.SocMinRatio * 100,
+		SocMax:              s.config.SocMaxRatio * 100,
+		GridPower:           gridPower,
+		DemandTarget:        s.config.DemandTarget,
+		RatedPowerKW:        ratedPower,
+		ForecastedGridPower: s.forecastedGridPower(ctx),
 	})
 
 	// 5. 换算目标功率（kW，正=充 负=放）
@@ -154,6 +177,31 @@ func (s *sPolicyMircogrid) newDecider() IDecisionMaker {
 		d = &SDemandLimitRule{Base: d}
 	}
 	return d
+}
+
+// forecastedGridPower 返回关口功率的近期预测（按刷新间隔缓存）。
+// 未启用预测、无关口设备或预测失败时返回 nil（退回实时需量控制）。
+//
+// 注意：关口功率已包含储能自身的作用，直接预测存在反馈回路。
+// 若现场具备独立的负荷计量点，宜将 GridDeviceId 指向该点，或将关口表数据
+// 扣除储能功率后再输入。现场只有关口表时，仍可工作（受 SOC 下限保护约束）。
+func (s *sPolicyMircogrid) forecastedGridPower(ctx context.Context) []float64 {
+	if !s.config.EnableLoadForecast || s.config.GridDeviceId == "" || s.forecastClient == nil {
+		return nil
+	}
+	if s.forecastPowers != nil && time.Since(s.forecastAt) < time.Duration(s.config.ForecastRefreshMin)*time.Minute {
+		return s.forecastPowers
+	}
+
+	item, err := s_forecast.ForecastLoad(ctx, s.forecastClient, s.config.GridDeviceId, 0, s.config.ForecastHorizon, []float64{0.5})
+	if err != nil {
+		c_log.Warningf(ctx, "负荷预测失败，退回实时需量控制: %v", err)
+		return s.forecastPowers
+	}
+	s.forecastPowers = item.Point
+	s.forecastAt = time.Now()
+	c_log.Debugf(ctx, "负荷预测已更新，未来 %d 点: %v", len(item.Point), item.Point)
+	return s.forecastPowers
 }
 
 // readGridPower 读取关口功率（kW，正=从电网取电）。

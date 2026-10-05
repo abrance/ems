@@ -14,3 +14,8 @@ func GetStorageInstance() c_base.IStorage {
 	}
 	return storageInstance
 }
+
+// GetStorageInstanceOrNil 安全获取存储实例，未初始化时返回 nil（供可不依赖存储的可选功能使用）。
+func GetStorageInstanceOrNil() c_base.IStorage {
+	return storageInstance
+}
