@@ -56,6 +56,7 @@ func toDTO(s *effectlogic.SSummary) *v1.EffectSummary {
 		Start:             s.Start.Format(time.DateTime),
 		End:               s.End.Format(time.DateTime),
 		Points:            s.Points,
+		Algorithm:         s.Algorithm,
 		GridDeviceId:      s.GridDeviceId,
 		EssDeviceIds:      s.EssDeviceIds,
 		DemandPrice:       s.DemandPrice,
