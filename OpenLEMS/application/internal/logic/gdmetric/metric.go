@@ -59,15 +59,17 @@ type DayCurve struct {
 }
 
 type Snapshot struct {
-	LatestDate string    `json:"latestDate"`
-	From       string    `json:"from"`
-	To         string    `json:"to"`
-	Date       string    `json:"date"`
-	Source     string    `json:"source"`
-	UpdatedAt  string    `json:"updatedAt"`
-	Latest     *DayRow   `json:"latest"`
-	Days       []DayRow  `json:"days"`
-	Curve      *DayCurve `json:"curve"`
+	LatestDate string `json:"latestDate"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Date       string `json:"date"`
+	Source     string `json:"source"`
+	UpdatedAt  string `json:"updatedAt"`
+	// AvailableDays 为 CSV 内有数据的全部运行日（升序），供前端日历灰显无数据日期
+	AvailableDays []string  `json:"availableDays"`
+	Latest        *DayRow   `json:"latest"`
+	Days          []DayRow  `json:"days"`
+	Curve         *DayCurve `json:"curve"`
 }
 
 type cacheFile struct {
@@ -262,7 +264,7 @@ func (s *store) snapshot(from, to, date string) (*Snapshot, error) {
 	if len(s.days) == 0 {
 		url := s.url
 		s.mu.RUnlock()
-		return &Snapshot{Source: url, Days: []DayRow{}}, nil
+		return &Snapshot{Source: url, Days: []DayRow{}, AvailableDays: []string{}}, nil
 	}
 	latest := s.days[len(s.days)-1].Date
 	from, to = clampRange(from, to, s.days[0].Date, latest)
@@ -279,6 +281,10 @@ func (s *store) snapshot(from, to, date string) (*Snapshot, error) {
 		UpdatedAt:  s.fetchedAt.In(shanghaiLocation()).Format(time.RFC3339),
 		Latest:     cloneDay(s.days[len(s.days)-1]),
 		Days:       make([]DayRow, 0),
+	}
+	out.AvailableDays = make([]string, 0, len(s.days))
+	for i := range s.days {
+		out.AvailableDays = append(out.AvailableDays, s.days[i].Date)
 	}
 	for _, row := range s.days {
 		if row.Date < from || row.Date > to {
