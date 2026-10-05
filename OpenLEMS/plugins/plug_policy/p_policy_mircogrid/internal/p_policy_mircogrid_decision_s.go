@@ -36,6 +36,13 @@ type SDecisionInput struct {
 	Soc    float64 // 当前 SOC，单位：百分比 0-100
 	SocMin float64 // SOC 下限，单位：百分比 0-100
 	SocMax float64 // SOC 上限，单位：百分比 0-100
+
+	// 需量控制输入
+	// GridPower 为当前关口功率 kW（正=从电网取电，负=反送）；
+	// 在每个采样周期内将其限制在目标值以下，即可保证 15 分钟均值不超限。
+	GridPower    float64
+	DemandTarget float64 // 需量目标 kW，<=0 表示未启用
+	RatedPowerKW float64 // 储能额定功率 kW，用于将绝对功率换算为功率比例
 }
 
 // SDecision 决策输出。
@@ -97,4 +104,71 @@ func (r *STouRule) Decide(in SDecisionInput) SDecision {
 	default:
 		return SDecision{Action: EActionIdle, Reason: "平电待机"}
 	}
+}
+
+// SDemandLimitRule 需量限制决策器。
+// 包装一个基础决策器（如峰谷套利），在关口功率逼近/超过需量目标时：
+//   - 限制充电功率，避免把关口推过目标；
+//   - 待机/放电时按需追加放电，把关口压回目标以内。
+//
+// 组合式设计：Base 可为任意 IDecisionMaker，便于后续叠加更多约束。
+type SDemandLimitRule struct {
+	Base IDecisionMaker
+}
+
+var _ IDecisionMaker = (*SDemandLimitRule)(nil)
+
+// Decide 在基础决策之上叠加需量约束。
+func (r *SDemandLimitRule) Decide(in SDecisionInput) SDecision {
+	base := r.Base.Decide(in)
+
+	// 未启用需量控制或额定功率未知，直接透传
+	if in.DemandTarget <= 0 || in.RatedPowerKW <= 0 {
+		return base
+	}
+
+	need := in.GridPower - in.DemandTarget // 需削减的关口功率 kW
+
+	if base.Action == EActionCharge {
+		if need > 0 {
+			// 关口已超目标，禁止充电，改为按需放电
+			return r.demandDischarge(in, need, "关口超需量目标，改为放电")
+		}
+		// 限制充电功率，避免把关口推过目标
+		allowed := in.DemandTarget - in.GridPower
+		if base.PowerRatio*in.RatedPowerKW <= allowed {
+			return base
+		}
+		ratio := allowed / in.RatedPowerKW
+		if ratio <= 0 {
+			return SDecision{Action: EActionIdle, Reason: "需量受限，暂停充电"}
+		}
+		return SDecision{Action: EActionCharge, PowerRatio: ratio, Reason: "需量受限，降功率充电"}
+	}
+
+	// 待机 / 放电：不足则补放电
+	baseKW := 0.0
+	if base.Action == EActionDischarge {
+		baseKW = base.PowerRatio * in.RatedPowerKW
+	}
+	target := math.Max(baseKW, need)
+	if target <= 0 {
+		return base
+	}
+	return r.demandDischarge(in, target, "需量控制放电")
+}
+
+// demandDischarge 以指定功率放电，含 SOC 下限保护与功率比例限幅。
+func (r *SDemandLimitRule) demandDischarge(in SDecisionInput, kw float64, reason string) SDecision {
+	if in.Soc <= in.SocMin {
+		return SDecision{Action: EActionIdle, Reason: reason + "（SOC 已达下限）"}
+	}
+	ratio := kw / in.RatedPowerKW
+	if ratio > 1 {
+		ratio = 1
+	}
+	if ratio <= 0 {
+		return SDecision{Action: EActionIdle, Reason: reason}
+	}
+	return SDecision{Action: EActionDischarge, PowerRatio: ratio, Reason: reason}
 }
