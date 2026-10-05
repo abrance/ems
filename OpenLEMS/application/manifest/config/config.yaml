@@ -58,6 +58,13 @@ qiniu:
   domain: "http://file.xiaoyxq.top"
   zone: "z2"
 
+# 广东电网 15 分钟负荷 / 日前电价 / 实时电价。首页「电网日指标」卡片读取此 CSV。
+gd_metric:
+  url: "https://file.xiaoyxq.top/gd_metric.csv"
+  cache_path: "out/gd_metric.csv"
+  refresh_hours: 6
+  max_size: "32MB"
+
 # PID文件配置
 pid:
   file: "out/ems.pid"  # PID文件路径，支持相对路径和绝对路径

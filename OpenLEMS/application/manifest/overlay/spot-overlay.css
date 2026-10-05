@@ -897,3 +897,7 @@
   fill: var(--color-text-3, #86909c);
   font-size: 10px;
 }
+
+.gd-metric .spot-kpi-bar {
+  margin-bottom: 4px;
+}
