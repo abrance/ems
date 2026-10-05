@@ -3,7 +3,6 @@ package gdmetric
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -18,8 +17,12 @@ const sampleCSV = "\ufeff时间戳,日期,时间,typeId,类型,单位,数值,sou
 	"2026-08-31 24:00:00,2026-08-31,24:00,22,实时电价,元/兆瓦时,40,9\n" +
 	"2026-08-31 24:00:00,2026-08-31,24:00,23,负荷,MW,800,9\n"
 
-func TestParseCSVDailyStats(t *testing.T) {
-	days, curves, err := ParseCSV(strings.NewReader(sampleCSV))
+func TestIngestDailyStats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gd_metric.csv")
+	if err := os.WriteFile(path, []byte(sampleCSV), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	days, offsets, err := ingestFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +45,10 @@ func TestParseCSVDailyStats(t *testing.T) {
 	if days[1].Date != "2026-08-31" || days[1].Load.Last != 800 {
 		t.Fatalf("24:00 should stay on 08-31: %+v", days[1])
 	}
-	curve := curves["2026-08-30"]
+	curve, err := readDayCurve(path, offsets["2026-08-30"], "2026-08-30")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(curve.Load) != 2 || curve.Load[0].Time != "00:15" || curve.Load[1].Value != 1500 {
 		t.Fatalf("curve=%+v", curve.Load)
 	}

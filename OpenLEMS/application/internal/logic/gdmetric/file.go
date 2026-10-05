@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 func ingestFile(path string) ([]DayRow, map[string]int64, error) {
@@ -158,4 +159,15 @@ func finishDays(accs map[string]*dayAcc) []DayRow {
 		})
 	}
 	return days
+}
+
+func stripBOM(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	if r == '\ufeff' {
+		return s[size:]
+	}
+	return s
 }

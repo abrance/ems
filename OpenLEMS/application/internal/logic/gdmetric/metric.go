@@ -1,9 +1,7 @@
 package gdmetric
 
 import (
-	"bufio"
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,12 +9,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"common/c_log"
 
@@ -76,12 +71,12 @@ type Snapshot struct {
 }
 
 type cacheFile struct {
-	URL          string              `json:"url"`
-	ETag         string              `json:"etag"`
-	LastModified string              `json:"lastModified"`
-	FetchedAt    string              `json:"fetchedAt"`
-	Days         []DayRow            `json:"days"`
-	Offsets      map[string]int64    `json:"offsets"`
+	URL          string           `json:"url"`
+	ETag         string           `json:"etag"`
+	LastModified string           `json:"lastModified"`
+	FetchedAt    string           `json:"fetchedAt"`
+	Days         []DayRow         `json:"days"`
+	Offsets      map[string]int64 `json:"offsets"`
 }
 
 type store struct {
@@ -96,7 +91,6 @@ type store struct {
 	lastModified string
 	fetchedAt    time.Time
 	days         []DayRow
-	index        map[string]int
 	offsets      map[string]int64
 	curves       *curveLRU
 }
@@ -336,14 +330,6 @@ func addDays(date string, n int) string {
 	return t.AddDate(0, 0, n).Format(dateLayout)
 }
 
-func indexDays(days []DayRow) map[string]int {
-	idx := make(map[string]int, len(days))
-	for i, row := range days {
-		idx[row.Date] = i
-	}
-	return idx
-}
-
 func (s *store) loadDisk() error {
 	if s.metaPath == "" {
 		return nil
@@ -364,7 +350,6 @@ func (s *store) loadDisk() error {
 	if s.offsets == nil {
 		s.offsets = map[string]int64{}
 	}
-	s.index = indexDays(s.days)
 	s.etag = file.ETag
 	s.lastModified = file.LastModified
 	s.url = firstNonEmpty(file.URL, s.url)
@@ -445,7 +430,6 @@ func (s *store) loadLocal(ctx context.Context) error {
 	s.mu.Lock()
 	s.days = days
 	s.offsets = offsets
-	s.index = indexDays(days)
 	s.curves = newCurveLRU(s.maxSize)
 	if s.fetchedAt.IsZero() {
 		if info, statErr := os.Stat(s.cachePath); statErr == nil {
@@ -604,102 +588,4 @@ func (d *dayAcc) bucket(typeID int) *acc {
 	default:
 		return nil
 	}
-}
-
-func ParseCSV(r io.Reader) ([]DayRow, map[string]DayCurve, error) {
-	br := bufio.NewReader(r)
-	bom, err := br.Peek(3)
-	if err == nil && len(bom) >= 3 && bom[0] == 0xef && bom[1] == 0xbb && bom[2] == 0xbf {
-		_, _ = br.Discard(3)
-	}
-	reader := csv.NewReader(br)
-	reader.ReuseRecord = false
-	reader.FieldsPerRecord = -1
-
-	header, err := reader.Read()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(header) > 0 {
-		header[0] = stripBOM(header[0])
-	}
-
-	accs := map[string]*dayAcc{}
-	for {
-		rec, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		if len(rec) < 8 {
-			continue
-		}
-		date := strings.TrimSpace(rec[1])
-		clock := strings.TrimSpace(rec[2])
-		typeID, err := strconv.Atoi(strings.TrimSpace(rec[3]))
-		if err != nil {
-			continue
-		}
-		unit := strings.TrimSpace(rec[5])
-		value, err := strconv.ParseFloat(strings.TrimSpace(rec[6]), 64)
-		if err != nil {
-			continue
-		}
-		if date == "" {
-			continue
-		}
-		day := accs[date]
-		if day == nil {
-			day = &dayAcc{}
-			accs[date] = day
-		}
-		bucket := day.bucket(typeID)
-		if bucket == nil {
-			continue
-		}
-		bucket.add(clock, value, unit, true)
-	}
-
-	dates := make([]string, 0, len(accs))
-	for date := range accs {
-		dates = append(dates, date)
-	}
-	sort.Strings(dates)
-
-	days := make([]DayRow, 0, len(dates))
-	curves := make(map[string]DayCurve, len(dates))
-	for _, date := range dates {
-		d := accs[date]
-		days = append(days, DayRow{
-			Date:     date,
-			Load:     d.load.stat(),
-			DayAhead: d.da.stat(),
-			Realtime: d.rt.stat(),
-		})
-		curve := DayCurve{Date: date}
-		if d.load != nil {
-			curve.Load = d.load.samples
-		}
-		if d.da != nil {
-			curve.DayAhead = d.da.samples
-		}
-		if d.rt != nil {
-			curve.Realtime = d.rt.samples
-		}
-		curves[date] = curve
-	}
-	return days, curves, nil
-}
-
-func stripBOM(s string) string {
-	if s == "" {
-		return s
-	}
-	r, size := utf8.DecodeRuneInString(s)
-	if r == '\ufeff' {
-		return s[size:]
-	}
-	return s
 }
