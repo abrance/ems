@@ -1,11 +1,15 @@
 package internal
 
 import (
+	"common"
 	"common/c_base"
 	"common/c_log"
+	"common/c_type"
 	"context"
 	"encoding/json"
 	"s_db"
+	"s_policy"
+	"s_price"
 
 	"github.com/pkg/errors"
 )
@@ -46,28 +50,148 @@ func (s *sPolicyMircogrid) Init(ctx context.Context) error {
 		return errors.Wrap(err, "解析微电网策略配置失败")
 	}
 
+	s.applyDefaults()
+
 	c_log.Infof(ctx, "微电网策略初始化成功")
 	return nil
 }
 
+// applyDefaults 为缺失或非法的可选配置填充默认值，
+// 避免因配置字段缺失导致策略静默不动作。
+func (s *sPolicyMircogrid) applyDefaults() {
+	if s.config.SocMaxRatio <= 0 || s.config.SocMaxRatio > 1 {
+		s.config.SocMaxRatio = 0.95
+	}
+	if s.config.SocMinRatio <= 0 || s.config.SocMinRatio >= 1 {
+		s.config.SocMinRatio = 0.1
+	}
+	if s.config.ChargePowerRatio <= 0 {
+		s.config.ChargePowerRatio = 1
+	}
+	if s.config.DischargePowerRatio <= 0 {
+		s.config.DischargePowerRatio = 1
+	}
+}
+
 // Run 执行策略（每分钟调用一次）
+//
+// 峰谷套利规则版最小闭环：
+//  1. 取当前电价时段
+//  2. 取储能设备当前 SOC（多台取平均）
+//  3. 交决策器给出动作（谷充/峰放/平待机，含 SOC 边界保护）
+//  4. 换算为带符号目标功率
+//  5. 下发
 func (s *sPolicyMircogrid) Run(ctx context.Context) error {
 	// 配置为空时不执行
 	if s.config == nil {
 		c_log.Debug(ctx, "微电网策略配置为空，跳过执行")
 		return nil
 	}
+	if len(s.config.EssDevices) == 0 {
+		c_log.Debug(ctx, "微电网策略未配置储能设备，跳过执行")
+		return nil
+	}
 
-	c_log.Debug(ctx, "微电网策略开始执行...")
+	// 1. 当前电价时段
+	segment, err := s_price.GetCurrentPriceSegment(ctx)
+	if err != nil {
+		return errors.Wrap(err, "获取当前电价时段失败")
+	}
+	if segment == nil {
+		c_log.Debug(ctx, "当前无匹配的电价时段，策略待机")
+		return nil
+	}
 
-	// TODO: 实现具体业务逻辑
-	// 1. 获取当前激活的储能定时任务
-	// 2. 获取设备数据（电网、光伏、负荷、储能等）
-	// 3. 执行优化算法
-	// 4. 下发控制指令
+	// 2. 储能设备与当前 SOC（多台取平均，单位：百分比）
+	devices := getEssDevices(s.config.EssDevices)
+	if len(devices) == 0 {
+		c_log.Warning(ctx, "未找到有效的储能设备，跳过执行")
+		return nil
+	}
+	soc, ok := averageSoc(devices)
+	if !ok {
+		c_log.Warning(ctx, "无法获取储能 SOC，跳过执行")
+		return nil
+	}
 
-	c_log.Debug(ctx, "微电网策略执行完成")
-	return nil
+	// 3. 决策（规则版实现 IDecisionMaker，后续可替换为优化器）
+	decision := s.newDecider().Decide(SDecisionInput{
+		PriceType: segment.PriceType,
+		Price:     segment.Price,
+		Soc:       soc,
+		SocMin:    s.config.SocMinRatio * 100,
+		SocMax:    s.config.SocMaxRatio * 100,
+	})
+
+	// 4. 换算目标功率（kW，正=充 负=放）
+	targetPower := decision.TargetPower(averageRatedPower(devices))
+
+	// 5. 下发
+	c_log.Infof(ctx, "微电网策略 - 电价类型: %s, 电价: %.4f, SOC: %.2f%%, 动作: %s, 目标功率: %dkW",
+		segment.PriceType, segment.Price, soc, decision.Action, targetPower)
+
+	return s_policy.ExecuteStrategy(ctx, targetPower, s.config.EssDevices)
+}
+
+// newDecider 构造决策器。当前为峰谷套利规则版；
+// 后续接入需量控制 / 负荷预测优化器时，在此返回新的 IDecisionMaker 实现即可。
+func (s *sPolicyMircogrid) newDecider() IDecisionMaker {
+	return &STouRule{
+		ChargeRatio:    s.config.ChargePowerRatio,
+		DischargeRatio: s.config.DischargePowerRatio,
+	}
+}
+
+// getEssDevices 按设备ID获取储能设备实例（过滤非储能设备）
+func getEssDevices(ids []string) []c_type.IEnergyStore {
+	mgr := common.GetDeviceManager()
+	devices := make([]c_type.IEnergyStore, 0, len(ids))
+	for _, id := range ids {
+		dev := mgr.GetDeviceById(id)
+		if dev == nil {
+			continue
+		}
+		if ess, ok := dev.(c_type.IEnergyStore); ok {
+			devices = append(devices, ess)
+		}
+	}
+	return devices
+}
+
+// averageSoc 计算多台储能设备的平均 SOC（百分比）
+func averageSoc(devices []c_type.IEnergyStore) (float64, bool) {
+	var sum float64
+	var n int
+	for _, dev := range devices {
+		soc, err := dev.GetSoc()
+		if err != nil || soc == nil {
+			continue
+		}
+		sum += float64(*soc)
+		n++
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / float64(n), true
+}
+
+// averageRatedPower 计算多台储能设备的平均额定功率（kW）
+func averageRatedPower(devices []c_type.IEnergyStore) float64 {
+	var sum float64
+	var n int
+	for _, dev := range devices {
+		p, err := dev.GetRatedPower()
+		if err != nil || p == nil {
+			continue
+		}
+		sum += float64(*p)
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
 }
 
 // Shutdown 关闭策略
