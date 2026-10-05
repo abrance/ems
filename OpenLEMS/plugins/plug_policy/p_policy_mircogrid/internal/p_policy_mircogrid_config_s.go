@@ -19,6 +19,12 @@ type SPolicyMircogridConfig struct {
 	DemandTarget        float64 `json:"demandTarget" name:"需量目标值" desc:"关口功率上限(kW)，0 表示不限制" ct:"number" vt:"float" min:"0" default:"0"`
 	DemandControlPeriod int     `json:"demandControlPeriod" name:"需量控制周期" desc:"需量控制周期(分钟)" ct:"number" vt:"int" min:"1" default:"15"`
 
+	// 负荷预测（TimesFM），用于预测型需量控制
+	EnableLoadForecast bool   `json:"enableLoadForecast" name:"启用负荷预测" desc:"启用 TimesFM 负荷预测，提前削峰" ct:"switch" vt:"bool" default:"false"`
+	ForecastBaseUrl    string `json:"forecastBaseUrl" name:"预测服务地址" desc:"TimesFM 预测服务地址" ct:"text" default:"https://forecast.xiaoyxq.top"`
+	ForecastHorizon    int    `json:"forecastHorizon" name:"预测步数" desc:"预测未来点数（15分钟/点）" ct:"number" vt:"int" min:"1" max:"512" default:"4"`
+	ForecastRefreshMin int    `json:"forecastRefreshMinutes" name:"预测刷新间隔(分钟)" desc:"负荷预测刷新间隔" ct:"number" vt:"int" min:"1" default:"15"`
+
 	// 充电桩参数
 	AllowPileReduce bool `json:"allowPileReduce" name:"允许充电桩降功率" desc:"不允许充电桩降功率（无充电桩）" ct:"switch" vt:"bool" default:"false"`
 

@@ -32,6 +32,7 @@ use (
 
 	./services/s_export_modbus
 	./services/s_export_mqtt
+	./services/s_forecast
 	./services/s_policy
 	./services/s_price
 	./services/s_storage

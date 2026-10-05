@@ -71,3 +71,47 @@ func TestSDemandLimitRuleDecide(t *testing.T) {
 		})
 	}
 }
+
+func TestSDemandLimitRuleWithForecast(t *testing.T) {
+	base := &STouRule{ChargeRatio: 1.0, DischargeRatio: 0.5}
+	rule := &SDemandLimitRule{Base: base}
+	const rated = 100.0
+
+	tests := []struct {
+		name      string
+		priceType c_enum.EPriceType
+		soc       float64
+		grid      float64
+		forecast  []float64
+		target    float64
+		wantAct   EAction
+		wantRatio float64
+	}{
+		{"待机+预测峰值超目标→提前放电", c_enum.EPriceTypeFlat, 50, 150, []float64{160, 250, 180}, 200, EActionDischarge, 0.5},
+		{"待机+预测全部安全→待机", c_enum.EPriceTypeFlat, 50, 150, []float64{160, 180, 190}, 200, EActionIdle, 0},
+		{"放电+预测峰值更大→加大放电", c_enum.EPriceTypePeak, 50, 220, []float64{300}, 200, EActionDischarge, 1.0},
+		{"充电+当前安全+预测超目标→仍按当前限充", c_enum.EPriceTypeValley, 50, 150, []float64{300}, 200, EActionCharge, 0.5},
+		{"预测峰值但SOC达下限→放电被拦", c_enum.EPriceTypeFlat, 10, 150, []float64{300}, 200, EActionIdle, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rule.Decide(SDecisionInput{
+				PriceType:           tt.priceType,
+				Soc:                 tt.soc,
+				SocMin:              10,
+				SocMax:              95,
+				GridPower:           tt.grid,
+				ForecastedGridPower: tt.forecast,
+				DemandTarget:        tt.target,
+				RatedPowerKW:        rated,
+			})
+			if got.Action != tt.wantAct {
+				t.Errorf("Action = %v, want %v (reason: %s)", got.Action, tt.wantAct, got.Reason)
+			}
+			if !almostEqual(got.PowerRatio, tt.wantRatio) {
+				t.Errorf("PowerRatio = %v, want %v", got.PowerRatio, tt.wantRatio)
+			}
+		})
+	}
+}

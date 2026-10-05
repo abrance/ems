@@ -43,6 +43,10 @@ type SDecisionInput struct {
 	GridPower    float64
 	DemandTarget float64 // 需量目标 kW，<=0 表示未启用
 	RatedPowerKW float64 // 储能额定功率 kW，用于将绝对功率换算为功率比例
+
+	// ForecastedGridPower 关口功率的近期预测（kW，可为空）。
+	// 有值时用于提前削峰，避免预测到的峰值到来时才被动响应。
+	ForecastedGridPower []float64
 }
 
 // SDecision 决策输出。
@@ -127,14 +131,21 @@ func (r *SDemandLimitRule) Decide(in SDecisionInput) SDecision {
 		return base
 	}
 
-	need := in.GridPower - in.DemandTarget // 需削减的关口功率 kW
+	// 考虑近期预测，以当前与预测的峰值作为削峰依据（提前削峰）
+	peak := in.GridPower
+	for _, p := range in.ForecastedGridPower {
+		if p > peak {
+			peak = p
+		}
+	}
+	need := peak - in.DemandTarget // 需削减的关口功率 kW
 
 	if base.Action == EActionCharge {
-		if need > 0 {
+		if in.GridPower > in.DemandTarget {
 			// 关口已超目标，禁止充电，改为按需放电
-			return r.demandDischarge(in, need, "关口超需量目标，改为放电")
+			return r.demandDischarge(in, in.GridPower-in.DemandTarget, "关口超需量目标，改为放电")
 		}
-		// 限制充电功率，避免把关口推过目标
+		// 限制充电功率，避免把关口推过目标（以当前功率为准）
 		allowed := in.DemandTarget - in.GridPower
 		if base.PowerRatio*in.RatedPowerKW <= allowed {
 			return base
