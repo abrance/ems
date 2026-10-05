@@ -113,33 +113,70 @@ func (s *sPolicyMircogrid) Run(ctx context.Context) error {
 		c_log.Warning(ctx, "无法获取储能 SOC，跳过执行")
 		return nil
 	}
+	ratedPower := averageRatedPower(devices)
 
-	// 3. 决策（规则版实现 IDecisionMaker，后续可替换为优化器）
+	// 3. 关口功率（需量控制启用时读取）
+	gridPower := 0.0
+	if s.config.EnableDemandControl {
+		gridPower = readGridPower(s.config.GridDeviceId)
+	}
+
+	// 4. 决策（规则版实现 IDecisionMaker，可叠加需量约束，后续可替换为优化器）
 	decision := s.newDecider().Decide(SDecisionInput{
-		PriceType: segment.PriceType,
-		Price:     segment.Price,
-		Soc:       soc,
-		SocMin:    s.config.SocMinRatio * 100,
-		SocMax:    s.config.SocMaxRatio * 100,
+		PriceType:    segment.PriceType,
+		Price:        segment.Price,
+		Soc:          soc,
+		SocMin:       s.config.SocMinRatio * 100,
+		SocMax:       s.config.SocMaxRatio * 100,
+		GridPower:    gridPower,
+		DemandTarget: s.config.DemandTarget,
+		RatedPowerKW: ratedPower,
 	})
 
-	// 4. 换算目标功率（kW，正=充 负=放）
-	targetPower := decision.TargetPower(averageRatedPower(devices))
+	// 5. 换算目标功率（kW，正=充 负=放）
+	targetPower := decision.TargetPower(ratedPower)
 
-	// 5. 下发
-	c_log.Infof(ctx, "微电网策略 - 电价类型: %s, 电价: %.4f, SOC: %.2f%%, 动作: %s, 目标功率: %dkW",
-		segment.PriceType, segment.Price, soc, decision.Action, targetPower)
+	// 6. 下发
+	c_log.Infof(ctx, "微电网策略 - 电价类型: %s, 电价: %.4f, SOC: %.2f%%, 关口: %.1fkW, 动作: %s, 目标功率: %dkW",
+		segment.PriceType, segment.Price, soc, gridPower, decision.Action, targetPower)
 
 	return s_policy.ExecuteStrategy(ctx, targetPower, s.config.EssDevices)
 }
 
-// newDecider 构造决策器。当前为峰谷套利规则版；
-// 后续接入需量控制 / 负荷预测优化器时，在此返回新的 IDecisionMaker 实现即可。
+// newDecider 构造决策器。基础为峰谷套利规则版；启用需量控制时叠加需量约束层。
+// 后续接入负荷预测优化器时，在此返回新的 IDecisionMaker 实现即可。
 func (s *sPolicyMircogrid) newDecider() IDecisionMaker {
-	return &STouRule{
+	var d IDecisionMaker = &STouRule{
 		ChargeRatio:    s.config.ChargePowerRatio,
 		DischargeRatio: s.config.DischargePowerRatio,
 	}
+	if s.config.EnableDemandControl {
+		d = &SDemandLimitRule{Base: d}
+	}
+	return d
+}
+
+// readGridPower 读取关口功率（kW，正=从电网取电）。
+// 优先使用站入口设备，回退到电表；读取失败返回 0（不干预）。
+func readGridPower(deviceId string) float64 {
+	if deviceId == "" {
+		return 0
+	}
+	dev := common.GetDeviceManager().GetDeviceById(deviceId)
+	if dev == nil {
+		return 0
+	}
+	if entrance, ok := dev.(c_type.IStationEntrance); ok {
+		if p, err := entrance.GetPower(); err == nil && p != nil {
+			return *p
+		}
+	}
+	if meter, ok := dev.(c_type.IAmmeter); ok {
+		if p, err := meter.GetPTotal(); err == nil && p != nil {
+			return float64(*p)
+		}
+	}
+	return 0
 }
 
 // getEssDevices 按设备ID获取储能设备实例（过滤非储能设备）

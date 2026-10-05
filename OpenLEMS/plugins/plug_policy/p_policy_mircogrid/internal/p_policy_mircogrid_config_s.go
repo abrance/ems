@@ -14,9 +14,10 @@ type SPolicyMircogridConfig struct {
 	DischargePowerRatio float64  `json:"dischargePowerRatio" name:"放电功率比例" desc:"放电功率占额定功率的比例" ct:"number" vt:"float" min:"0" max:"1" default:"1"`
 
 	// 需量控制参数， 优先降低功率
-	EnableDemandControl bool `json:"enableDemandControl" name:"启动需量控制模式" desc:"启动需量控制模式" ct:"switch" vt:"bool" default:"false"`
-	// TODO 需量控制目标值（在控制周期内，平均功率不能超过目标值）
-	// TODO 需量控制周期（15分钟）
+	EnableDemandControl bool    `json:"enableDemandControl" name:"启动需量控制模式" desc:"启动需量控制模式" ct:"switch" vt:"bool" default:"false"`
+	GridDeviceId        string  `json:"gridDeviceId" name:"关口电表设备ID" desc:"用于读取关口功率的设备ID" ct:"singleSelect"`
+	DemandTarget        float64 `json:"demandTarget" name:"需量目标值" desc:"关口功率上限(kW)，0 表示不限制" ct:"number" vt:"float" min:"0" default:"0"`
+	DemandControlPeriod int     `json:"demandControlPeriod" name:"需量控制周期" desc:"需量控制周期(分钟)" ct:"number" vt:"int" min:"1" default:"15"`
 
 	// 充电桩参数
 	AllowPileReduce bool `json:"allowPileReduce" name:"允许充电桩降功率" desc:"不允许充电桩降功率（无充电桩）" ct:"switch" vt:"bool" default:"false"`
