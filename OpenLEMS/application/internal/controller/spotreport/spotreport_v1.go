@@ -5,6 +5,7 @@ import (
 	"regexp"
 
 	v1 "application/api/spotreport/v1"
+	"application/internal/logic/gdmetric"
 	logic "application/internal/logic/spotreport"
 	"s_db"
 
@@ -207,4 +208,20 @@ func (c *ControllerV1) GetSpotReportTrend(ctx context.Context, req *v1.GetSpotRe
 		Points:          logic.ToTrendPoints(logic.BuildTrend(models, grain)),
 		ExcludedPending: excluded,
 	}, nil
+}
+
+func (c *ControllerV1) GetGdMetric(ctx context.Context, req *v1.GetGdMetricReq) (*v1.GetGdMetricRes, error) {
+	if req.Date != "" && !datePattern.MatchString(req.Date) {
+		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "运行日格式无效")
+	}
+	for _, d := range []string{req.From, req.To} {
+		if d != "" && !datePattern.MatchString(d) {
+			return nil, gerror.NewCode(gcode.CodeInvalidParameter, "日期格式无效")
+		}
+	}
+	snap, err := gdmetric.GetSnapshot(ctx, req.From, req.To, req.Date)
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "加载电网日指标失败")
+	}
+	return &v1.GetGdMetricRes{Snapshot: snap}, nil
 }

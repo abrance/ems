@@ -468,7 +468,9 @@
     let block = document.getElementById(TREND_ID);
     if (!block) {
       block = el("div", { id: TREND_ID, class: "spot-trend" });
-      landscape.insertBefore(block, home ? home.nextSibling : landscape.firstChild);
+      const metric = document.getElementById(METRIC_ID);
+      const anchor = metric || home;
+      landscape.insertBefore(block, anchor ? anchor.nextSibling : landscape.firstChild);
     }
     if (!trendState.from) {
       trendQuick("month");
@@ -877,6 +879,221 @@
     }
     root.appendChild(body);
     window.scrollTo(0, scrollY);
+  }
+
+  const METRIC_ID = "gd-metric-block";
+  let metricState = {
+    from: "", to: "", date: "", latestDate: "",
+    days: [], latest: null, curve: null,
+    key: "", loading: false, error: "", rangeKind: "30"
+  };
+
+  function metricKey() {
+    return metricState.from + "|" + metricState.to + "|" + metricState.date;
+  }
+
+  function addDaysStr(date, n) {
+    const d = new Date(date + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    return dateStr(d);
+  }
+
+  function statVal(stat, field) {
+    if (!stat || !stat.count) return null;
+    const v = stat[field];
+    return v === undefined || v === null ? null : v;
+  }
+
+  function metricQuick(kind) {
+    metricState.rangeKind = kind;
+    const latest = metricState.latestDate;
+    if (!latest) {
+      metricState.from = "";
+      metricState.to = "";
+      loadMetric();
+      return;
+    }
+    metricState.to = latest;
+    if (kind === "90") metricState.from = addDaysStr(latest, -89);
+    else if (kind === "year") metricState.from = latest.slice(0, 4) + "-01-01";
+    else metricState.from = addDaysStr(latest, -29);
+    if (!metricState.date) metricState.date = latest;
+    loadMetric();
+  }
+
+  async function loadMetric() {
+    if (metricState.loading) return;
+    metricState.loading = true;
+    metricState.error = "";
+    renderMetric();
+    const params = [];
+    if (metricState.from) params.push("from=" + encodeURIComponent(metricState.from));
+    if (metricState.to) params.push("to=" + encodeURIComponent(metricState.to));
+    if (metricState.date) params.push("date=" + encodeURIComponent(metricState.date));
+    const query = "/api/gd-metric" + (params.length ? "?" + params.join("&") : "");
+    try {
+      const data = await api(query);
+      metricState.days = (data && data.days) || [];
+      metricState.latest = data && data.latest;
+      metricState.curve = data && data.curve;
+      if (data && data.latestDate) metricState.latestDate = data.latestDate;
+      if (data && data.from) metricState.from = data.from;
+      if (data && data.to) metricState.to = data.to;
+      if (data && data.date) metricState.date = data.date;
+      metricState.key = metricKey();
+    } catch (err) {
+      metricState.error = err.message || "加载电网日指标失败";
+    }
+    metricState.loading = false;
+    renderMetric();
+  }
+
+  function ensureMetric() {
+    const landscape = document.querySelector(".dashboard-landscape");
+    if (!landscape) return;
+    const home = document.getElementById(HOME_ID);
+    let block = document.getElementById(METRIC_ID);
+    if (!block) {
+      block = el("div", { id: METRIC_ID, class: "spot-trend gd-metric" });
+      landscape.insertBefore(block, home ? home.nextSibling : landscape.firstChild);
+    } else if (home && block.previousSibling !== home) {
+      landscape.insertBefore(block, home.nextSibling);
+    }
+    if (!metricState.key && !metricState.loading) metricQuick("30");
+    else renderMetric();
+  }
+
+  function metricDateInput() {
+    const input = el("input", {
+      class: "spot-trend-date", type: "date",
+      value: metricState.date,
+      min: metricState.days.length ? metricState.days[0].date : "",
+      max: metricState.latestDate || ""
+    });
+    input.addEventListener("change", function () {
+      let next = input.value;
+      if (metricState.latestDate && next > metricState.latestDate) next = metricState.latestDate;
+      metricState.date = next;
+      loadMetric();
+    });
+    return input;
+  }
+
+  function selectedDay() {
+    const days = metricState.days || [];
+    for (let i = 0; i < days.length; i++) {
+      if (days[i].date === metricState.date) return days[i];
+    }
+    return metricState.latest;
+  }
+
+  function renderMetric() {
+    const root = document.getElementById(METRIC_ID);
+    if (!root) return;
+    const scrollY = window.scrollY;
+    root.innerHTML = "";
+    const quick = [["近30天", "30"], ["近90天", "90"], ["本年", "year"]];
+    const quickBox = el("div", { class: "spot-tabs" });
+    quick.forEach(function (item) {
+      quickBox.appendChild(el("button", {
+        class: "spot-tab" + (metricState.rangeKind === item[1] ? " active" : ""),
+        text: item[0],
+        onClick: function () { metricQuick(item[1]); }
+      }));
+    });
+    const tools = [
+      quickBox,
+      el("div", { class: "spot-trend-range" }, [
+        el("span", { class: "spot-trend-dash", text: "当日" }),
+        metricDateInput()
+      ])
+    ];
+    if (metricState.latestDate) {
+      tools.push(el("span", { class: "spot-trend-badge",
+        text: "数据截至 " + metricState.latestDate,
+        title: "CSV 最新运行日" }));
+    }
+    root.appendChild(el("div", { class: "spot-home-head" }, [
+      el("div", { class: "spot-home-heading" }, [
+        el("div", { class: "spot-home-title", text: "电网日指标" }),
+        el("div", { class: "spot-home-sub",
+          text: "负荷 / 日前电价 / 实时电价 · 15 分钟采样按日聚合" })
+      ]),
+      el("div", { class: "spot-trend-toolbar" }, tools)
+    ]));
+
+    if (metricState.error) {
+      root.appendChild(el("div", { class: "spot-error", text: metricState.error }));
+      window.scrollTo(0, scrollY);
+      return;
+    }
+    if (metricState.loading && !metricState.days.length) {
+      root.appendChild(el("div", { class: "spot-trend-empty", text: "正在拉取电网日指标…" }));
+      window.scrollTo(0, scrollY);
+      return;
+    }
+    if (!metricState.days.length) {
+      root.appendChild(el("div", { class: "spot-trend-empty", text: "暂无电网日指标" }));
+      window.scrollTo(0, scrollY);
+      return;
+    }
+
+    const day = selectedDay() || {};
+    const spread = (statVal(day.realtime, "avg") !== null && statVal(day.dayAhead, "avg") !== null)
+      ? day.realtime.avg - day.dayAhead.avg : null;
+    const kpi = el("div", { class: "spot-kpi-bar" }, [
+      metricKpi("负荷峰值", statVal(day.load, "max"), "MW"),
+      metricKpi("负荷均", statVal(day.load, "avg"), "MW"),
+      metricKpi("日前均价", statVal(day.dayAhead, "avg"), "元/兆瓦时"),
+      metricKpi("实时均价", statVal(day.realtime, "avg"), "元/兆瓦时"),
+      metricKpi("实时-日前", spread, "元/兆瓦时")
+    ]);
+
+    const buckets = metricState.days.map(function (d) { return d.date; });
+    const loadChart = trendChart("日负荷", svgBand(buckets,
+      { name: "均负荷", color: "#3f7fd6", values: metricState.days.map(function (d) { return statVal(d.load, "avg"); }) },
+      { name: "峰值", color: "#7aa8e8", values: metricState.days.map(function (d) { return statVal(d.load, "max"); }) },
+      { name: "谷值", color: "#9bb8d9", values: metricState.days.map(function (d) { return statVal(d.load, "min"); }) },
+      " MW"
+    ), [["均负荷", "#3f7fd6"], ["峰值", "#7aa8e8"], ["谷值", "#9bb8d9"]]);
+    const priceChart = trendChart("日均电价", svgLines(buckets, [
+      { name: "日前均价", color: "#e08a2e", values: metricState.days.map(function (d) { return statVal(d.dayAhead, "avg"); }) },
+      { name: "实时均价", color: "#8e6bd0", values: metricState.days.map(function (d) { return statVal(d.realtime, "avg"); }) }
+    ], " 元/兆瓦时"), [["日前均价", "#e08a2e"], ["实时均价", "#8e6bd0"]]);
+
+    const body = el("div", { class: "spot-trend-body" });
+    body.appendChild(kpi);
+    body.appendChild(el("div", { class: "spot-chart-row" }, [loadChart, priceChart]));
+
+    const curve = metricState.curve;
+    if (curve) {
+      const loadTimes = (curve.load || []).map(function (s) { return s.time; });
+      const daTimes = (curve.dayAhead || []).map(function (s) { return s.time; });
+      const times = loadTimes.length ? loadTimes : daTimes;
+      const intraLoad = trendChart("当日负荷曲线 · " + (curve.date || ""),
+        svgLines(times, [{
+          name: "负荷", color: "#3f7fd6",
+          values: (curve.load || []).map(function (s) { return s.value; })
+        }], " MW"), [["负荷", "#3f7fd6"]]);
+      const intraPrice = trendChart("当日电价曲线 · " + (curve.date || ""),
+        svgLines(daTimes.length ? daTimes : times, [
+          { name: "日前电价", color: "#e08a2e", values: (curve.dayAhead || []).map(function (s) { return s.value; }) },
+          { name: "实时电价", color: "#8e6bd0", values: (curve.realtime || []).map(function (s) { return s.value; }) }
+        ], " 元/兆瓦时"), [["日前电价", "#e08a2e"], ["实时电价", "#8e6bd0"]]);
+      body.appendChild(el("div", { class: "spot-chart-row" }, [intraLoad, intraPrice]));
+    }
+    root.appendChild(body);
+    window.scrollTo(0, scrollY);
+  }
+
+  function metricKpi(label, value, unit) {
+    return el("div", { class: "spot-kpi" }, [
+      el("div", { class: "spot-kpi-label", text: label }),
+      el("div", { class: "spot-kpi-value" }, [
+        el("span", { text: fmtNum(value) }),
+        el("span", { class: "spot-kpi-unit", text: unit || "" })
+      ])
+    ]);
   }
 
   function renderHomeData(container, report) {
@@ -1620,6 +1837,7 @@
     if (path === "/") {
       hideInfoPage();
       ensureHome();
+      ensureMetric();
       ensureTrend();
     } else if (path === "/programs") {
       hideInfoPage();
@@ -1652,6 +1870,7 @@
       return;
     }
     if (pathName() === "/" && !document.getElementById(HOME_ID)) ensureHome();
+    if (pathName() === "/" && !document.getElementById(METRIC_ID)) ensureMetric();
     if (pathName() === "/" && !document.getElementById(TREND_ID)) ensureTrend();
     if (pathName() === "/programs" && isAdmin() && !document.getElementById(CARD_ID)) ensureCard();
   });
