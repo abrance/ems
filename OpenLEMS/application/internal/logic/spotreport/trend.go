@@ -72,18 +72,26 @@ type TrendPoint struct {
 	Count     int     `json:"count,omitempty"`
 }
 
-// NormalizeTrendRange 兜底并校验趋势区间：缺省与非法值落到「本月 1 日 → 今天」，
+// NormalizeTrendRange 兜底并校验趋势区间：缺省值落到「本月 1 日 → 今天」，
+// 单边非法值时以另一侧为锚（非法 from 落到 to 所在月 1 日），两侧都非法则回落到本月；
 // 起止颠倒直接报错（静默对调会让人以为查的是另一段时间），跨度上限 TrendMaxRangeDays。
 func NormalizeTrendRange(from, to string) (string, string, error) {
 	loc := shanghaiLocation()
 	today := time.Now().In(loc).Format(trendDateLayout)
-	fromT, err := time.ParseInLocation(trendDateLayout, strings.TrimSpace(from), loc)
-	if err != nil {
-		from = today[:8] + "01"
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	fromT, errFrom := time.ParseInLocation(trendDateLayout, from, loc)
+	toT, errTo := time.ParseInLocation(trendDateLayout, to, loc)
+	// 非法 from：以有效 to 所在月 1 日为锚，否则回落到本月 1 日
+	if errFrom != nil {
+		anchor := today
+		if errTo == nil {
+			anchor = to
+		}
+		from = anchor[:8] + "01"
 		fromT, _ = time.ParseInLocation(trendDateLayout, from, loc)
 	}
-	toT, err := time.ParseInLocation(trendDateLayout, strings.TrimSpace(to), loc)
-	if err != nil {
+	if errTo != nil {
 		to = today
 		toT, _ = time.ParseInLocation(trendDateLayout, to, loc)
 	}

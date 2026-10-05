@@ -1,7 +1,6 @@
 package spotreport
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -190,10 +189,11 @@ func TestNormalizeTrendRange(t *testing.T) {
 	if _, _, err := NormalizeTrendRange("2026-01-01", "2029-01-01"); err == nil {
 		t.Fatal("超过 730 天应报错")
 	}
-	// 非法值单边兜底，另一边保留
-	from, to, err = NormalizeTrendRange("bad-date", "2026-09-10")
-	if err != nil || to != "2026-09-10" || !strings.HasSuffix(from, "-01") {
-		t.Fatalf("非法起始应兜底为本月 1 日：%s~%s err=%v", from, to, err)
+	// 非法值单边兜底，另一边保留：锚点取有效 to 所在月 1 日，避免随时间推移 to 落到更早月份而误报
+	prevMonth := time.Now().In(shanghaiLocation()).AddDate(0, -1, 0).Format(trendDateLayout)[:7]
+	from, to, err = NormalizeTrendRange("bad-date", prevMonth+"-10")
+	if err != nil || to != prevMonth+"-10" || from != prevMonth+"-01" {
+		t.Fatalf("非法起始应兜底为 to 所在月 1 日：%s~%s err=%v", from, to, err)
 	}
 }
 
