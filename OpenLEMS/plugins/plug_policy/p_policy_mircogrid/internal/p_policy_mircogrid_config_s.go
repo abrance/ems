@@ -18,6 +18,7 @@ type SPolicyMircogridConfig struct {
 	GridDeviceId        string  `json:"gridDeviceId" name:"关口电表设备ID" desc:"用于读取关口功率的设备ID" ct:"singleSelect"`
 	DemandTarget        float64 `json:"demandTarget" name:"需量目标值" desc:"关口功率上限(kW)，0 表示不限制" ct:"number" vt:"float" min:"0" default:"0"`
 	DemandControlPeriod int     `json:"demandControlPeriod" name:"需量控制周期" desc:"需量控制周期(分钟)" ct:"number" vt:"int" min:"1" default:"15"`
+	DemandPrice         float64 `json:"demandPrice" name:"需量电价" desc:"需量电价(元/kW·月)，用于效果测算" ct:"number" vt:"float" min:"0" default:"0"`
 
 	// 负荷预测（TimesFM），用于预测型需量控制
 	EnableLoadForecast bool   `json:"enableLoadForecast" name:"启用负荷预测" desc:"启用 TimesFM 负荷预测，提前削峰" ct:"switch" vt:"bool" default:"false"`
