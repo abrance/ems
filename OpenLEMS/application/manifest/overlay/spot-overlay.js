@@ -885,6 +885,7 @@
   let metricState = {
     from: "", to: "", date: "", latestDate: "",
     days: [], latest: null, curve: null,
+    availableDays: [], availableSet: null, calendarMonth: "",
     key: "", loading: false, error: "", rangeKind: "30"
   };
 
@@ -941,6 +942,8 @@
       const data = await api(query);
       metricState.days = (data && data.days) || [];
       metricState.latest = data && data.latest;
+      metricState.availableDays = (data && data.availableDays) || [];
+      metricState.availableSet = null; // 惰性重建索引
       metricState.curve = data && data.curve;
       if (data && data.latestDate) metricState.latestDate = data.latestDate;
       if (data && data.from) metricState.from = data.from;
@@ -976,21 +979,143 @@
     renderMetric();
   }
 
-  function metricDateInput() {
-    const input = el("input", {
-      class: "spot-trend-date", type: "date",
-      min: metricState.days.length ? metricState.days[0].date : "",
-      max: metricState.latestDate || ""
+  // ── 日期选择器：触发按钮 + 弹出日历 ──────────────────────────
+
+  const CAL_MASK_CLASS = "spot-cal-mask";
+  const CAL_WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+
+  function metricAvailableSet() {
+    if (!metricState.availableSet) {
+      const set = new Set();
+      (metricState.availableDays || []).forEach(function (d) { set.add(d); });
+      metricState.availableSet = set;
+    }
+    return metricState.availableSet;
+  }
+
+  function metricTrigger() {
+    const label = metricState.date || "选择日期";
+    const btn = el("button", {
+      class: "spot-trend-date spot-cal-trigger",
+      type: "button",
+      title: "选择运行日",
+      onClick: function () { openMetricCalendar(); }
+    }, [
+      el("span", { text: label }),
+      el("span", { class: "spot-cal-caret", text: "▾" })
+    ]);
+    return btn;
+  }
+
+  function closeMetricCalendar() {
+    document.querySelectorAll("." + CAL_MASK_CLASS).forEach(function (node) { node.remove(); });
+    document.removeEventListener("keydown", metricCalendarKeyHandler);
+  }
+
+  function metricCalendarKeyHandler(ev) {
+    if (ev.key === "Escape") closeMetricCalendar();
+  }
+
+  function openMetricCalendar() {
+    closeMetricCalendar();
+    const base = metricState.date || metricState.latestDate || todayStr();
+    const month = (metricState.calendarMonth || base).slice(0, 7);
+    const mask = el("div", { class: "spot-modal-mask " + CAL_MASK_CLASS });
+    mask.addEventListener("click", function (ev) {
+      if (ev.target === mask) closeMetricCalendar();
     });
-    // 用属性赋值而非 el() 的 setAttribute，保证日期控件能正确回显与编辑
-    input.value = metricState.date || "";
-    input.addEventListener("change", function () {
-      let next = input.value;
-      if (metricState.latestDate && next > metricState.latestDate) next = metricState.latestDate;
-      metricState.date = next;
-      loadMetric();
+    const panel = el("div", { class: "spot-cal-panel" });
+    mask.appendChild(panel);
+    metricCalendar(month, panel);
+    document.body.appendChild(mask);
+    document.addEventListener("keydown", metricCalendarKeyHandler);
+    return mask;
+  }
+
+  function metricCalendar(month, panel) {
+    const [y, m] = month.split("-").map(Number);
+    const first = new Date(y, m - 1, 1);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const lead = (first.getDay() + 6) % 7; // 周一为首列
+    const avail = metricAvailableSet();
+    const latest = metricState.latestDate;
+    const earliest = metricState.availableDays.length ? metricState.availableDays[0] : "";
+
+    const canPrev = month > (earliest || month).slice(0, 7);
+    const canNext = latest ? month < latest.slice(0, 7) : false;
+
+    const head = el("div", { class: "spot-cal-head" }, [
+      el("button", {
+        class: "spot-cal-nav", type: "button", text: "‹",
+        disabled: canPrev ? null : "disabled",
+        onClick: function () { shiftMetricMonth(month, -1, panel); }
+      }),
+      el("div", { class: "spot-cal-title", text: y + " 年 " + m + " 月" }),
+      el("button", {
+        class: "spot-cal-nav", type: "button", text: "›",
+        disabled: canNext ? null : "disabled",
+        onClick: function () { shiftMetricMonth(month, 1, panel); }
+      })
+    ]);
+
+    const grid = el("div", { class: "spot-cal-grid" });
+    CAL_WEEKDAYS.forEach(function (w) {
+      grid.appendChild(el("div", { class: "spot-cal-week", text: w }));
     });
-    return input;
+    for (let i = 0; i < lead; i++) {
+      grid.appendChild(el("div", { class: "spot-cal-day empty" }));
+    }
+    const today = todayStr();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = month + "-" + String(d).padStart(2, "0");
+      const has = avail.has(ds);
+      const cls = ["spot-cal-day"];
+      if (has) cls.push("has");
+      else cls.push("off");
+      if (ds === metricState.date) cls.push("active");
+      if (ds === today) cls.push("today");
+      const cell = el("button", {
+        class: cls.join(" "),
+        type: "button",
+        text: String(d),
+        disabled: has ? null : "disabled",
+        onClick: has ? function () { pickMetricDate(ds); } : null
+      });
+      grid.appendChild(cell);
+    }
+
+    const foot = el("div", { class: "spot-cal-foot" }, [
+      el("button", { class: "spot-cal-link", type: "button", text: "近30天",
+        onClick: function () { closeMetricCalendar(); metricQuick("30"); } }),
+      el("button", { class: "spot-cal-link", type: "button", text: "近90天",
+        onClick: function () { closeMetricCalendar(); metricQuick("90"); } }),
+      el("button", { class: "spot-cal-link", type: "button", text: "本年",
+        onClick: function () { closeMetricCalendar(); metricQuick("year"); } }),
+      el("button", { class: "spot-cal-link latest", type: "button",
+        text: "最新" + (latest ? " " + latest : ""),
+        onClick: latest ? function () { pickMetricDate(latest); } : null })
+    ]);
+
+    panel.innerHTML = "";
+    panel.appendChild(head);
+    panel.appendChild(grid);
+    panel.appendChild(foot);
+    return panel;
+  }
+
+  function shiftMetricMonth(month, delta, panel) {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    metricState.calendarMonth = dateStr(d).slice(0, 7);
+    metricCalendar(metricState.calendarMonth, panel);
+  }
+
+  function pickMetricDate(ds) {
+    closeMetricCalendar();
+    if (!ds || ds === metricState.date) return;
+    metricState.date = ds;
+    metricState.calendarMonth = ds.slice(0, 7);
+    loadMetric();
   }
 
   function selectedDay() {
@@ -1028,7 +1153,7 @@
       quickBox,
       el("div", { class: "spot-trend-range" }, [
         el("span", { class: "spot-trend-dash", text: "当日" }),
-        metricDateInput()
+        metricTrigger()
       ])
     ];
     if (metricState.latestDate) {

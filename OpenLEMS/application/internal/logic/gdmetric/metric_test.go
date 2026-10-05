@@ -155,3 +155,29 @@ func TestIngestFileAndReloadDay(t *testing.T) {
 		t.Fatal("reloaded day should be cached")
 	}
 }
+
+func TestSnapshotAvailableDays(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gd_metric.csv")
+	if err := os.WriteFile(path, []byte(sampleCSV), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	days, offsets, err := ingestFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &store{
+		url:       "http://example.test/gd_metric.csv",
+		cachePath: path,
+		maxSize:   1 << 20,
+		days:      days,
+		offsets:   offsets,
+		curves:    newCurveLRU(1 << 20),
+	}
+	snap, err := s.snapshot("2026-08-01", "2026-08-31", "2026-08-30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.AvailableDays) != 2 || snap.AvailableDays[0] != "2026-08-30" || snap.AvailableDays[1] != "2026-08-31" {
+		t.Fatalf("availableDays=%v", snap.AvailableDays)
+	}
+}
