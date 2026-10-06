@@ -14,6 +14,14 @@ func NewPolicyMircogrid() c_base.IPolicy {
 // 算法回测：在历史负荷/电价序列上对比内置算法的省电费效果
 // =================================================================================
 
+// SConfigField 配置字段的表单元数据（反射 struct tag 得到，struct 是唯一真源）
+type SConfigField = internal.SConfigField
+
+// ConfigFields 返回储能/微电网策略配置的表单字段元数据（含分组、上下限、单位）
+func ConfigFields() []*SConfigField {
+	return internal.ConfigFields()
+}
+
 type (
 	SBacktestBattery = internal.SBacktestBattery
 	SBacktestConfig  = internal.SBacktestConfig

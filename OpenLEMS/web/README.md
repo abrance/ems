@@ -48,18 +48,39 @@ src/
 ## 两个刻意的决定
 
 1. **顶栏不放流量 / CPU / 时钟**（设计稿 §2 原则 6）。这些属于「配置 · 系统信息」页。
-2. **不注册 Arco 全局组件**。量过：`import ArcoVue` + `arco.css` 会让 CSS 从
-   **8KB 涨到 404KB**、JS 从 **108KB 涨到 872KB**，而 P0 一个 Arco 组件都没用到。
-   依赖仍声明在 `package.json`（下一批表单 / 表格页会用到），
-   `styles/arco-override.css` 已经把 Arco 变量对齐到本项目色板，届时只需在用到组件的地方按需引入。
+2. **不注册 Arco 全局组件**（手动控制页验证下来仍然成立）。量过：全量
+   `import ArcoVue` + `arco.css` 会让 CSS 从 **8KB 涨到 404KB**、JS 从 **108KB 涨到 872KB**。
+   按需引入单组件样式（`es/<comp>/style/index.css`）可以把 CSS 控制在百 KB 内，
+   但本项目自己的 tokens + 手写控件已经覆盖了「输入、下拉、开关、卡片」这些形态，
+   且对比度是算过的；引入 Arco 会带来视觉二次对齐的成本。
 
-   若要一次性全量注册，改 `src/main.ts` 加上：
+   **留到真正需要复杂组件时再引**：树、日期区间、虚拟滚动表格。
+   届时按需引入即可，`styles/arco-override.css` 已把 Arco 变量对齐到本项目色板，
+   不会产生视觉漂移。
 
-   ```ts
-   import ArcoVue from '@arco-design/web-vue'
-   import '@arco-design/web-vue/dist/arco.css'
-   app.use(ArcoVue)
-   ```
+## 已实现的页面
+
+| 页面 | 数据来源 |
+| --- | --- |
+| 场景 · 信息披露 | `GET /api/gd-metric`（负荷 / 日前价 / 实时价，15min） |
+| 管理 · 手动控制 | `GET /api/device/name-list` `GET /api/control/custom-services` `GET /api/device/telemetry` `POST /api/device/history` `POST /api/control/device` |
+| 配置 · 储能参数 | `GET /api/policy/config-fields` `GET /api/policy/config` `POST /api/setting/update` |
+
+手动控制页的两条硬规则：
+
+1. **服务与参数全部来自驱动声明**，前端不写死「充电 / 放电」。驱动换一套，页面跟着变。
+2. `parameters` 是**位置参数数组**，顺序必须与驱动声明一致 —— 表单按声明顺序渲染，
+   下发前把订单再展示一遍让人确认。冒烟用例专门断言了顺序与类型转换。
+
+储能参数页的字段表**不写在前端**：后端反射 `SPolicyMircogridConfig` 的 struct tag
+（`name`/`ct`/`vt`/`min`/`max`/`unit`/`group`）返回字段与分组，加字段只改 Go struct。
+保存前会弹出旧值 → 新值的 diff，确认后才 `POST /api/setting/update`（值是 JSON 字符串）。
+
+手动控制页叠加两层保护：驱动声明的 `min/max`，以及从储能参数推导的
+「功率上限 = 设备额定 × 配置比例」。被拦时会说清是哪一条拦的。
+
+其它 26 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+不画假图、不编假数字。
 
 ## 与线上产物的关系
 

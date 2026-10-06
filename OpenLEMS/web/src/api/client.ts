@@ -85,4 +85,6 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query'], signal?: AbortSignal) =>
     request<T>(path, { method: 'GET', query, signal }),
+  post: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    request<T>(path, { method: 'POST', body, signal }),
 }
