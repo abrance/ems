@@ -64,6 +64,7 @@ src/
 | --- | --- |
 | 场景 · 信息披露 | `GET /api/gd-metric`（负荷 / 日前价 / 实时价，15min） |
 | 管理 · 手动控制 | `GET /api/device/name-list` `GET /api/control/custom-services` `GET /api/device/telemetry` `POST /api/device/history` `POST /api/control/device` |
+| 配置 · 储能参数 | `GET /api/policy/config-fields` `GET /api/policy/config` `POST /api/setting/update` |
 
 手动控制页的两条硬规则：
 
@@ -71,7 +72,14 @@ src/
 2. `parameters` 是**位置参数数组**，顺序必须与驱动声明一致 —— 表单按声明顺序渲染，
    下发前把订单再展示一遍让人确认。冒烟用例专门断言了顺序与类型转换。
 
-其它 27 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+储能参数页的字段表**不写在前端**：后端反射 `SPolicyMircogridConfig` 的 struct tag
+（`name`/`ct`/`vt`/`min`/`max`/`unit`/`group`）返回字段与分组，加字段只改 Go struct。
+保存前会弹出旧值 → 新值的 diff，确认后才 `POST /api/setting/update`（值是 JSON 字符串）。
+
+手动控制页叠加两层保护：驱动声明的 `min/max`，以及从储能参数推导的
+「功率上限 = 设备额定 × 配置比例」。被拦时会说清是哪一条拦的。
+
+其它 26 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系

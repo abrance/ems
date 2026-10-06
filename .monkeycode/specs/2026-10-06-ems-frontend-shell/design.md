@@ -639,6 +639,18 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | --- | --- |
 | 场景 · 信息披露 | `GET /api/gd-metric` |
 | 管理 · 手动控制 | `name-list` / `control/custom-services` / `device/telemetry` / `device/history` / `control/device` |
+| 配置 · 储能参数 | `GET /api/policy/config-fields`（字段元数据）+ `GET /api/policy/config`（当前值）+ `POST /api/setting/update`（保存） |
+
+**新增接口 `GET /api/policy/config-fields`**：储能参数的表单字段元数据由后端**反射
+`SPolicyMircogridConfig` 的 struct tag** 得到（`name` / `ct` / `vt` / `min` / `max` /
+`default` / `unit` / `group`），返回字段列表与分组顺序。前端不复制第二份字段表 ——
+加字段只改 Go struct，表单自动跟上。顺带补齐了 struct 里缺失的
+`vt`（`essDevices` / `gridDeviceId` / `forecastBaseUrl`）与 `group` 标签。
+
+**储能参数 → 手动控制的保护闭环**：手动控制页读同一份配置，推导出
+「SOC 允许区间」「功率上限 = 设备额定 × 配置比例」，下发前一并校验；
+被拦时提示来自哪一条约束（驱动声明的 max，还是储能参数推导的保护上限）。
+「语义级」保护（判断该指令是充还是放）需要驱动声明充/放语义，目前没有，不做也不假装。
 
 手动控制页的口径（写死在代码注释里）：服务与参数全部来自**驱动声明**，前端不写死
 「充电 / 放电」；`parameters` 是**位置参数数组**，顺序必须与驱动声明一致，下线前二次确认。

@@ -6,6 +6,7 @@ import KpiCard from '@/components/KpiCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { fetchDeviceNames, fetchHistory, fetchTelemetry, type ChartData, type DeviceType } from '@/api/device'
 import { controlDevice, fetchCustomServices, type DriverService, type FieldDefinition } from '@/api/control'
+import { fetchPolicyConfig } from '@/api/policy'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
 /**
@@ -17,9 +18,12 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  * 2. parameters 是**位置参数数组**，顺序必须与驱动声明一致 —— 这是最容易错的地方，
  *    所以表单按 params 顺序渲染，提交前再把订单展示一遍让人确认。
  * 3. 下发前二次确认，明确显示发往哪台设备、哪个服务、什么参数。
- * 4. 当前还没有「储能参数」接口（配置 · 储能参数尚未落地），
- *    所以硬约束只能用驱动自己声明的 min/max/required。
- *    SOC / 变压器容量 / 需量阈值的跨设备保护校验要等那个接口，这里不假装有。
+ * 4. 保护分两层：
+ *    - 驱动层：参数自带的 min/max/required（驱动声明什么就用什么）；
+ *    - EMS 层：从「配置 · 储能参数」（setting policy_microgrid）推导出的 SOC 区间与
+ *      功率上限，下发前一并校验，被拦时提示来自哪一条约束。
+ *    「语义级」保护（知道某服务是充电还是放电，据此判断方向）需要驱动声明充/放语义，
+ *    目前驱动没有这个声明，所以不做，也不假装能做。
  */
 const deviceTypes: DeviceType[] = ['pcs', 'bms', 'ess', 'sess']
 
@@ -45,6 +49,57 @@ const pending = ref<{ service: DriverService; params: unknown[] } | null>(null)
 
 const current = computed(() => (deviceId.value ? telemetry.value[deviceId.value] : undefined))
 const values = computed(() => current.value?.telemetryValues ?? {})
+
+/**
+ * EMS 侧保护约束，来自「配置 · 储能参数」（setting policy_microgrid）。
+ * 这里只做「值级」校验（SOC 区间、功率上限、需量余量）。
+ * 「语义级」保护（知道这个服务是充电还是放电，据此判断方向）需要驱动声明
+ * 充/放语义，目前驱动没有这个声明，所以不假装能做。
+ */
+const policy = ref<Record<string, unknown>>({})
+
+function numOr(v: unknown, fallback: number): number {
+  const n = Number(v)
+  return Number.isFinite(n) && n !== 0 ? n : fallback
+}
+
+const limits = computed(() => {
+  const socMin = numOr(policy.value.socMinRatio, 0.1)
+  const socMax = numOr(policy.value.socMaxRatio, 0.95)
+  const deviceCharge = Number(values.value.MaxChargePower)
+  const deviceDischarge = Number(values.value.MaxDischargePower)
+  const chargeByRatio = deviceCharge > 0 ? deviceCharge * numOr(policy.value.chargePowerRatio, 1) : NaN
+  const dischargeByRatio =
+    deviceDischarge > 0 ? deviceDischarge * numOr(policy.value.dischargePowerRatio, 1) : NaN
+  const demandOn = policy.value.enableDemandControl === true || policy.value.enableDemandControl === 'true'
+  return {
+    socMinPct: socMin * 100,
+    socMaxPct: socMax * 100,
+    chargeCap: Number.isFinite(chargeByRatio) ? Math.min(deviceCharge, chargeByRatio) : deviceCharge,
+    dischargeCap: Number.isFinite(dischargeByRatio)
+      ? Math.min(deviceDischarge, dischargeByRatio)
+      : deviceDischarge,
+    demandOn,
+    demandTarget: numOr(policy.value.demandTarget, 0),
+  }
+})
+
+const socNow = computed(() => {
+  const v = Number(values.value.SOC)
+  return Number.isFinite(v) ? v : null
+})
+
+const socOutOfRange = computed(
+  () => socNow.value !== null && (socNow.value < limits.value.socMinPct || socNow.value > limits.value.socMaxPct),
+)
+
+/** 服务参数里以 kW 为单位的字段，按保护上限校验 */
+function powerCapFor(p: FieldDefinition): number | null {
+  const unit = (p.unit ?? '').toUpperCase()
+  if (unit !== 'KW') return null
+  const cap = limits.value.chargeCap || limits.value.dischargeCap
+  return Number.isFinite(cap) && cap > 0 ? cap : null
+}
 
 /** 关键量按设备是否上报来决定显不显示，不硬编码全部点位 */
 const KEY_METRICS = [
@@ -117,10 +172,12 @@ async function loadDeviceData() {
   loading.value = true
   error.value = ''
   try {
-    const [svc, tel] = await Promise.all([
+    const [svc, tel, pol] = await Promise.all([
       fetchCustomServices(deviceId.value),
       fetchTelemetry(deviceId.value),
+      fetchPolicyConfig().catch(() => ({ settingId: '', config: {} })),
     ])
+    policy.value = pol.config ?? {}
     services.value = svc
     telemetry.value = tel
     for (const s of svc) {
@@ -148,6 +205,9 @@ function validateField(p: FieldDefinition, raw: unknown): string {
   if (Number.isNaN(n)) return `${label} 需要是数字`
   if (p.min !== undefined && p.min !== null && n < p.min) return `${label} 不能小于 ${p.min}`
   if (p.max !== undefined && p.max !== null && n > p.max) return `${label} 不能大于 ${p.max}`
+  // EMS 侧保护：不超过「储能参数」推导出的功率上限
+  const cap = powerCapFor(p)
+  if (cap !== null && n > cap) return `${label} 超过保护上限 ${cap} kW（来自配置 · 储能参数）`
   return ''
 }
 
@@ -284,6 +344,14 @@ watch(deviceId, loadDeviceData)
       <template #actions>
         <button class="btn" type="button" :disabled="loading" @click="loadDeviceData">刷新</button>
       </template>
+      <div v-if="socOutOfRange" class="notice error">
+        <strong>SOC 越界</strong>
+        <span>
+          　当前 {{ socNow?.toFixed(0) }}%，不在配置允许的
+          {{ limits.socMinPct.toFixed(0) }}% ~ {{ limits.socMaxPct.toFixed(0) }}% 区间内。
+          继续下发可能加速电池衰减，请先确认现场状态。
+        </span>
+      </div>
       <div class="notice">
         <strong>实时下发</strong>
         <span>　指令会立即作用于现场设备。执行前请确认设备处于可操作状态，且已退出调试 / 检修。</span>
@@ -316,6 +384,35 @@ watch(deviceId, loadDeviceData)
         :hint="m.key in values ? '' : '该设备未上报此点位'"
       />
     </div>
+
+    <PanelBox title="保护约束" sub="来源：配置 · 储能参数" :span="12" :foot="false">
+      <div class="limits">
+        <div class="limit">
+          <span class="lk">SOC 允许区间</span>
+          <span class="lv">
+            {{ limits.socMinPct.toFixed(0) }}% ~ {{ limits.socMaxPct.toFixed(0) }}%
+          </span>
+          <StatusTag :tone="socOutOfRange ? 'red' : 'green'">
+            {{ socNow === null ? '无 SOC 遥测' : socOutOfRange ? '当前越界' : `当前 ${socNow.toFixed(0)}%` }}
+          </StatusTag>
+        </div>
+        <div class="limit">
+          <span class="lk">功率上限（设备 × 配置比例）</span>
+          <span class="lv">
+            充 {{ Number.isFinite(limits.chargeCap) ? limits.chargeCap.toFixed(0) : '—' }} kW ·
+            放 {{ Number.isFinite(limits.dischargeCap) ? limits.dischargeCap.toFixed(0) : '—' }} kW
+          </span>
+          <span class="muted">下发功率超过此值会被拦下</span>
+        </div>
+        <div class="limit">
+          <span class="lk">需量控制</span>
+          <span class="lv">
+            {{ limits.demandOn ? `启用 · 目标 ${limits.demandTarget} kW` : '未启用' }}
+          </span>
+          <span class="muted">关口功率越限由策略处理，手动下发不代判</span>
+        </div>
+      </div>
+    </PanelBox>
 
     <PanelBox
       v-if="history?.series?.length"
@@ -430,6 +527,10 @@ watch(deviceId, loadDeviceData)
   gap: var(--s4);
 }
 .chart { height: 300px; }
+.limits { display: flex; flex-direction: column; gap: var(--s3); }
+.limit { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-13); flex-wrap: wrap; }
+.limit .lk { min-width: 180px; color: var(--text-3); font-size: var(--fs-12); }
+.limit .lv { font-variant-numeric: tabular-nums; }
 .notice {
   display: flex;
   align-items: flex-start;

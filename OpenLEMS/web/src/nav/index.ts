@@ -138,7 +138,7 @@ export const NAV: NavTab[] = [
     key: 'config',
     title: '配置',
     pages: [
-      { key: 'ess', title: '储能参数', path: '/config/ess', status: 'planned', perm: 'config:ess', panels: ['电池保护', '功率约束', '需量控制', '套利默认'] },
+      { key: 'ess', title: '储能参数', path: '/config/ess', status: 'ready', perm: 'config:ess' },
       { key: 'info', title: '系统信息', path: '/config/info', status: 'planned', perm: 'config:system', panels: ['CPU', '内存', '磁盘', '网络', '运行时长', '其他'] },
       { key: 'storage', title: '存储管理', path: '/config/storage', status: 'todo', perm: 'config:storage', panels: ['存储路径', '用量', '清理'] },
       { key: 'operations', title: '系统操作', path: '/config/operations', status: 'todo', perm: 'config:operation', panels: ['备份', '恢复', '升级', '重启'] },

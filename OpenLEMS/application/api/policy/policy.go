@@ -12,6 +12,7 @@ import (
 
 type IPolicyV1 interface {
 	GetPolicyConfig(ctx context.Context, req *v1.GetPolicyConfigReq) (res *v1.GetPolicyConfigRes, err error)
+	GetPolicyConfigFields(ctx context.Context, req *v1.GetPolicyConfigFieldsReq) (res *v1.GetPolicyConfigFieldsRes, err error)
 
 	CreateEnergyStorageStrategy(ctx context.Context, req *v1.CreateEnergyStorageStrategyReq) (res *v1.CreateEnergyStorageStrategyRes, err error)
 	UpdateEnergyStorageStrategy(ctx context.Context, req *v1.UpdateEnergyStorageStrategyReq) (res *v1.UpdateEnergyStorageStrategyRes, err error)

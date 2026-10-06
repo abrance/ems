@@ -159,6 +159,27 @@ const FAKE_SERVICES = [
   },
 ]
 
+// 储能参数的字段元数据（真实来源是后端反射 Go struct tag，这里只模拟形状）
+const FAKE_CONFIG_FIELDS = [
+  { key: 'socMinRatio', name: '最小SOC比例', description: '最小SOC比例', group: '储能参数', component: 'number', valueType: 'float', min: 0, max: 1, default: '0.1' },
+  { key: 'socMaxRatio', name: '最大SOC比例', description: '最大SOC比例', group: '储能参数', component: 'number', valueType: 'float', min: 0, max: 1, default: '0.95' },
+  { key: 'chargePowerRatio', name: '充电功率比例', description: '充电功率占额定功率的比例', group: '峰谷套利', component: 'number', valueType: 'float', min: 0, max: 1, default: '1' },
+  { key: 'dischargePowerRatio', name: '放电功率比例', description: '放电功率占额定功率的比例', group: '峰谷套利', component: 'number', valueType: 'float', min: 0, max: 1, default: '1' },
+  { key: 'enableDemandControl', name: '启动需量控制模式', description: '启动需量控制模式', group: '需量控制', component: 'switch', valueType: 'bool', default: 'false' },
+  { key: 'demandTarget', name: '需量目标值', description: '关口功率上限(kW)', group: '需量控制', component: 'number', valueType: 'float', min: 0, default: '0' },
+  { key: 'transformerCapacity', name: '变压器容量', description: '变压器容量', group: '变压器', component: 'number', valueType: 'float', min: 0, default: '200', unit: 'kVA' },
+]
+const FAKE_CONFIG_GROUPS = ['储能参数', '峰谷套利', '需量控制', '变压器']
+const FAKE_POLICY_CONFIG = {
+  socMinRatio: 0.1,
+  socMaxRatio: 0.95,
+  chargePowerRatio: 0.5,
+  dischargePowerRatio: 0.5,
+  enableDemandControl: false,
+  demandTarget: 0,
+  transformerCapacity: 200,
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -189,6 +210,15 @@ globalThis.fetch = async (url, init) => {
     })
   }
   if (u.includes('/api/control/device')) {
+    return json({})
+  }
+  if (u.includes('/api/policy/config-fields')) {
+    return json({ fields: FAKE_CONFIG_FIELDS, groups: FAKE_CONFIG_GROUPS })
+  }
+  if (u.includes('/api/policy/config')) {
+    return json({ settingId: 'policy_microgrid', config: FAKE_POLICY_CONFIG })
+  }
+  if (u.includes('/api/setting/update')) {
     return json({})
   }
   const body = u.includes('/api/gd-metric')
@@ -302,6 +332,60 @@ for (const tab of NAV) {
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
 
+console.log('\n== 储能参数页 ==')
+await clickTo('配置', '储能参数')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  // 字段与分组全部来自后端 schema
+  check(bodyHas('最小SOC比例'), '字段来自后端 schema')
+  check(bodyHas('储能参数'), '渲染 schema 里的分组')
+  check(bodyHas('变压器容量'), '渲染非主分组')
+  check(bodyHas('kVA'), '带出 schema 里的单位')
+  check(bodyHas('范围 0 ~ 1'), '带出 schema 里的上下限')
+  check(bodyHas('立即生效，下一个调度周期采纳'), '标注生效语义')
+
+  // 越界值应被 schema 的 max 拦住
+  const socMax = doc.querySelector('input[id="f-socMaxRatio"]')
+  check(!!socMax, '按 key 渲染出 socMaxRatio 输入框')
+  if (socMax) {
+    socMax.value = '1.5'
+    socMax.dispatchEvent(new window.Event('input', { bubbles: true }))
+    await tick()
+    const saveBtn = [...doc.querySelectorAll('.save-row button')].find((b) => b.textContent.trim() === '保存')
+    saveBtn?.click()
+    await tick()
+    check(!doc.querySelector('.modal'), '越界值被拦住，不弹 diff')
+    check(bodyHas('不能大于 1'), '提示引用了 schema 的上限')
+  }
+
+  // 改一个合法值 → 弹 diff → 确认 → 回写完整 JSON
+  if (socMax) {
+    socMax.value = '0.9'
+    socMax.dispatchEvent(new window.Event('input', { bubbles: true }))
+    await tick()
+    const saveBtn = [...doc.querySelectorAll('.save-row button')].find((b) => b.textContent.trim() === '保存')
+    saveBtn?.click()
+    await tick()
+    check(!!doc.querySelector('.modal'), '弹出改前 diff')
+    const modalText = doc.querySelector('.modal')?.textContent ?? ''
+    check(modalText.includes('最大SOC比例'), 'diff 显示字段名')
+    check(modalText.includes('95%') && modalText.includes('90%'), 'diff 显示旧值 → 新值（比例按百分比展示）')
+
+    const confirm = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认保存')
+    confirm?.click()
+    await tick()
+    await tick()
+    const call = requests.filter((r) => r.url.includes('/api/setting/update')).pop()
+    check(!!call, '发出了保存请求')
+    check(call?.body?.id === 'policy_microgrid' && call?.body?.group === 'policy', '设置 id / 分组正确', JSON.stringify(call?.body))
+    let saved = {}
+    try { saved = JSON.parse(call?.body?.value ?? '{}') } catch { /* 断言下面会失败 */ }
+    check(saved.socMaxRatio === 0.9, '回写了改动项', JSON.stringify(saved))
+    check(saved.transformerCapacity === 200, '未改动项原样保留，没被清空', JSON.stringify(saved))
+    check(saved.enableDemandControl === false, '布尔值未被字符串化', JSON.stringify(saved))
+  }
+}
+
 console.log('\n== 手动控制页 ==')
 await clickTo('管理', '手动控制')
 {
@@ -314,24 +398,42 @@ await clickTo('管理', '手动控制')
   check(bodyText().includes('停止充放电'), '无参数服务也渲染')
   check(bodyText().includes('80.0'), 'KPI 显示遥测里的 SOC')
 
-  // 越界值应被驱动声明的 max 拦住，不弹确认框
-  const bad = doc.querySelector('.field-item input[id$="-power"]')
-  if (bad) {
-    bad.value = '999'
-    bad.dispatchEvent(new window.Event('input', { bubbles: true }))
+  const execButton = () =>
+    [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '执行')
+  const power = () => doc.querySelector('.field-item input[id$="-power"]')
+  const setPower = async (v) => {
+    const el = power()
+    el.value = v
+    el.dispatchEvent(new window.Event('input', { bubbles: true }))
     await tick()
-    const execBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '执行')
-    execBtn?.click()
-    await tick()
-    check(!doc.querySelector('.modal'), '越界值被拦住，未弹确认框')
-    check(bodyText().includes('不能大于 50'), '提示引用了驱动声明的上限')
   }
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
 
-  const power = doc.querySelector('.field-item input[id$="-power"]')
+  // 保护约束面板来自「配置 · 储能参数」
+  check(bodyHas('保护约束'), '显示保护约束面板')
+  check(bodyHas('SOC 允许区间'), '显示 SOC 允许区间')
+  // 50 kW × chargePowerRatio 0.5 = 25 kW
+  check(bodyHas('充 25 kW'), '功率上限 = 设备额定 × 配置比例')
+
+  // 驱动声明的 max 先拦一层
+  await setPower('999')
+  execButton()?.click()
+  await tick()
+  check(!doc.querySelector('.modal'), '超过驱动声明上限被拦住')
+  check(bodyHas('不能大于 50'), '提示引用了驱动声明的上限')
+
+  // 再被 EMS 侧保护上限拦一层（40 未超驱动 50，但超了保护的 25）
+  await setPower('40')
+  execButton()?.click()
+  await tick()
+  check(!doc.querySelector('.modal'), '超过 EMS 保护上限被拦住')
+  check(bodyHas('超过保护上限 25 kW'), '提示引用了储能参数推导出的上限')
+
+  const powerEl = power()
   const duration = doc.querySelector('.field-item input[id$="-duration"]')
-  if (power) {
-    power.value = '30'
-    power.dispatchEvent(new window.Event('input', { bubbles: true }))
+  if (powerEl) {
+    powerEl.value = '20'
+    powerEl.dispatchEvent(new window.Event('input', { bubbles: true }))
   }
   if (duration) {
     duration.value = '15'
@@ -361,7 +463,7 @@ await clickTo('管理', '手动控制')
     JSON.stringify(call?.body?.parameters),
   )
   check(
-    call?.body?.parameters?.[0] === 30 && call?.body?.parameters?.[1] === 15,
+    call?.body?.parameters?.[0] === 20 && call?.body?.parameters?.[1] === 15,
     'parameters 按驱动声明顺序（功率, 时长）',
     JSON.stringify(call?.body?.parameters),
   )
