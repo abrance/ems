@@ -652,7 +652,25 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 自动化联动 | `GET /api/automation/page`、`POST /api/automation`、`PUT\|DELETE /api/automation/{id}`、`POST .../toggle` |
 | 配置 · 采集与凭据 | `GET /api/system/credentials`（**只读**，密钥打码不回显） |
 | 配置 · 界面与语言 | 纯前端：主题 / 密度 / 默认首页，存 localStorage |
-| 场景 · 长周期电价预测 | `GET /api/forecast/price` |
+| 场景 · 长周期电价预测 | `GET /api/forecast/price`（`grain=day\|intraday`） |
+| 场景 · 预测复盘 | `GET /api/forecast/recorded`、`GET /api/forecast/backtest`、`GET /api/gd-metric/series` |
+
+**预测复盘的口径已定（§5.5 从「公式待定」变为已实现）**：
+
+| 指标 | 口径 |
+| --- | --- |
+| 趋势相关度 | **Spearman ρ**（秩相关）。电价有尖峰、有负价，Pearson 会被尖峰主导；样本 < 3 或秩无方差时显示「—」，**不返回 0** |
+| 分时离散度 | `\|预测 − 实际\| ÷ 当日出清均价`。分母不用逐点实际值 —— 广东有负电价，分母趋 0 会爆表 |
+| 峰平谷平均离散度 | 时段内离散度均值；峰/平/谷 取自「管理 · 电价管理」的时段配置（单一真源） |
+
+**两条数据腿必须在页面上分清**：
+
+- **留痕对账（1B）** —— 真正复盘：对比**当时**发出去的预测。表 `gd_price_forecast` 按
+  `(generated_on, market, grain, target_time)` 去重，每次预测写入。
+- **事后回测（1A）** —— 过渡用：**当前模型**在历史数据上重跑。抽样 ≤6 天（TimesFM ~2s/次），
+  缓存 30 分钟。数字会随模型/历史数据变化，**不等于当时预测**。
+
+指标算法收口在 `src/metrics/forecast.ts`，页面不各算一遍。
 
 **长周期电价预测页目前只有「平均」视图。** 日报未提取 96 点价格曲线，后端给的是
 **日均序列**预测，所以出的是「未来多日日均价 + 10~90% 分位带 + 明细表」。

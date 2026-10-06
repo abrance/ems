@@ -61,8 +61,16 @@ type SPriceForecastIntraday struct {
 	GeneratedOn string
 }
 
-// LoadPriceIntraday 用电网日指标 CSV 的 15 分钟序列做 96 点预测。
+// LoadPriceIntraday 用电网日指标 CSV 的 15 分钟序列做 96 点预测（以「今天」为预测起点的未来预测）。
 func LoadPriceIntraday(ctx context.Context, market string, historyDays, horizonDays int, quantiles []float64) (*SPriceForecastIntraday, error) {
+	return loadPriceIntradayAsOf(ctx, market, historyDays, horizonDays, quantiles, time.Now())
+}
+
+// loadPriceIntradayAsOf 以 asOf 为「今天」做预测。
+// 回测靠它把预测起点挪到历史某天：只用 asOf 之前的序列，预测 asOf 之后 horizonDays 天。
+func loadPriceIntradayAsOf(
+	ctx context.Context, market string, historyDays, horizonDays int, quantiles []float64, asOf time.Time,
+) (*SPriceForecastIntraday, error) {
 	spec, err := resolvePriceSpec(market)
 	if err != nil {
 		return nil, err
@@ -93,7 +101,7 @@ func LoadPriceIntraday(ctx context.Context, market string, historyDays, horizonD
 	}
 
 	loc := priceLocation()
-	today := time.Now().In(loc)
+	today := asOf.In(loc)
 	// 电网日指标 CSV 的滞后：最新一般到昨天，取到今天也不会报错（没数据就少一天）
 	to := today.Format(priceDateLayout)
 	from := today.AddDate(0, 0, -historyDays+1).Format(priceDateLayout)

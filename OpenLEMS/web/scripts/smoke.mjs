@@ -462,6 +462,46 @@ const FAKE_CREDS = {
   note: '密钥保存在服务端配置文件或环境变量里，改后需重启；页面只读，不提供在线修改。密钥值一律不回显。',
 }
 
+// ===== 预测复盘的手算夹具 =====
+// 回测：2 天 × 4 点。实际值恒为 100，所以当日均价=100，标幺离散度 = |pred-100|/100。
+// 预测值 perfect 单调 ↔ 实际恒定 —— 实际恒定则秩无方差 → Spearman 必须返回 null（不是 0）。
+const FAKE_BACKTEST_RESULT = {
+  market: 'ahead',
+  grain: 'intraday',
+  unit: '元/MWh',
+  model: 'timesfm-3.0',
+  from: '2026-09-20',
+  to: '2026-09-21',
+  sampleDays: 3,
+  targetDates: ['2026-09-20', '2026-09-21'],
+  skipped: ['2026-09-18'],
+  timeMs: 4210,
+  points: [
+    { targetTime: '2026-09-20 00:00', predicted: 100, actual: 100, q10: 90, q50: 100, q90: 110 },
+    { targetTime: '2026-09-20 06:00', predicted: 90, actual: 100, q10: 80, q50: 90, q90: 100 },
+    { targetTime: '2026-09-21 12:00', predicted: 110, actual: 200, q10: 100, q50: 110, q90: 120 },
+    { targetTime: '2026-09-21 18:00', predicted: 100, actual: 200, q10: 90, q50: 100, q90: 110 },
+  ],
+}
+// 留痕：只有预测这一条腿，实际值由 /api/gd-metric/series 配对
+const FAKE_RECORDED = {
+  generatedDates: ['2026-09-19', '2026-09-20'],
+  points: [
+    { generatedOn: '2026-09-19', targetTime: '2026-09-20 00:00', point: 100, q10: 90, q50: 100, q90: 110, model: 'timesfm-3.0', unit: '元/MWh', source: 'gd_metric.csv' },
+    { generatedOn: '2026-09-19', targetTime: '2026-09-20 06:00', point: 80, q10: 70, q50: 80, q90: 90, model: 'timesfm-3.0', unit: '元/MWh', source: 'gd_metric.csv' },
+  ],
+}
+const FAKE_SERIES = {
+  kind: 'dayAhead',
+  from: '2026-09-20',
+  to: '2026-09-20',
+  days: ['2026-09-20'],
+  points: [
+    { date: '2026-09-20', time: '00:00', value: 100 },
+    { date: '2026-09-20', time: '06:00', value: 100 },
+  ],
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -558,6 +598,9 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/system/reboot/execute')) return json({})
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
+  if (u.includes('/api/forecast/recorded')) return json(FAKE_RECORDED)
+  if (u.includes('/api/forecast/backtest')) return json(FAKE_BACKTEST_RESULT)
+  if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
   if (u.includes('/api/forecast/load')) return json({ forecast: FAKE_LOAD })
   if (u.includes('/api/forecast/price')) return json({ forecast: FAKE_PRICE })
   if (u.includes('/api/spot-report/trend')) {
@@ -592,6 +635,7 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/spot-report/metric')) return json({ metric: FAKE_METRICS[0] })
   if (u.includes('/api/spot-report')) return json({ list: FAKE_REPORTS })
   if (u.includes('/api/price/current')) {
+    // 与列表用同一份夹具：否则「当前生效」标记会找不到对应卡片（曾经因此漏测）
     return json({ price: FAKE_PRICES[0] })
   }
   if (u.includes('/api/price')) {
@@ -1232,6 +1276,71 @@ for (const tab of NAV) {
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
 
+console.log('\n== 预测复盘页 ==')
+await clickTo('场景', '预测复盘')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('事后回测'))
+  check(bodyHas('回测：用') || bodyHas('用**当前模型**在历史数据上重跑'), '回测模式显式声明「不是当时预测」')
+
+  await waitFor(() => bodyHas('对比点数'))
+  // 等数据真的加载完再断言 —— 否则看到的是加载前的占位文案，断言会因为错的原因通过
+  await waitFor(() => /对比点数[\s\S]{0,80}>?\s*4/.test(doc.body.textContent ?? ''))
+  check(bodyHas('4'), '对比点数 4')
+  check(bodyHas('2 天') || bodyHas('2 个自然日'), '覆盖 2 个自然日')
+
+  // Spearman ρ（全天）手算：
+  //   预测 [100,90,110,100] → 秩 [2.5, 1, 4, 2.5]
+  //   实际 [100,100,200,200] → 秩 [1.5, 1.5, 3.5, 3.5]
+  //   num = 3, dx = 4.5, dy = 4 → ρ = 3 / √18 = 0.7071
+  await waitFor(() => bodyHas('0.707'))
+  // 时段来自电价夹具：00-08 谷 / 08-13 峰 / 13-20 平 / 20-24 谷
+  //   四个点 → 谷×2（09-20 00:00、06:00）、峰×1（09-21 12:00）、平×1（09-21 18:00）
+  //   三个分段都 <3 点 → ρ 必须是「—样本不足」，不能是 0（0 会被读成「不相关」）
+  //   全天 4 点 → 手算 ρ = 3/√18 = 0.707
+  const rhoMatrix = [...doc.querySelectorAll('.matrix')][0]
+  const rhoRow = [...rhoMatrix.querySelectorAll('.num')].slice(0, 4).map((c) => c.textContent.replace(/\s+/g, '').trim())
+  check(rhoRow.slice(0, 3).every((t) => t === '—样本不足'), '分段样本 <3 时 ρ 显示「—」并说明样本不足', JSON.stringify(rhoRow))
+  check(rhoRow[3] === '0.707', '全天 ρ = 0.707（秩相关手算值）', rhoRow[3])
+
+  // 离散度：分母=当日均价（09-20 均价 100、09-21 均价 200）
+  // |100-100|/100=0, |90-100|/100=0.1, |110-200|/200=0.45, |100-200|/200=0.5 → 平均 0.2625
+  const pctCells = [...doc.querySelectorAll('.matrix')][1].querySelectorAll('.num')
+  const allPct = [...pctCells].map((c) => c.textContent.trim()).find((t) => t.startsWith('0.26'))
+  check(!!allPct, `全天平均离散度 = 0.2625（分母为当日均价）`, [...pctCells].map((c) => c.textContent.trim()).join('|'))
+  // MAE: (0+10+90+100)/4 = 50
+  check([...pctCells].some((c) => c.textContent.trim() === '50.0'), '全天 MAE = 50.0 元/MWh')
+  // 分段离散度（分母都是当日均价）：
+  //   谷（09-20 00:00、06:00，当日均价 100）→ mean(0, 0.1) = 0.05
+  //   峰（09-21 12:00，当日均价 200）→ 0.45
+  //   平（09-21 18:00，当日均价 200）→ 0.5
+  const pctRow = [...pctCells].slice(0, 4).map((c) => c.textContent.trim())
+  check(pctRow[0] === '0.450', '峰平均离散度 = 0.450', JSON.stringify(pctRow))
+  check(pctRow[1] === '0.500', '平平均离散度 = 0.500', JSON.stringify(pctRow))
+  check(pctRow[2] === '0.050', '谷平均离散度 = 0.050', JSON.stringify(pctRow))
+
+  // 切到留痕模式：走 /recorded + /gd-metric/series 配对
+  const recBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '留痕对账')
+  recBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/forecast/recorded')))
+  check(requests.some((r) => r.url.includes('/api/forecast/recorded')), '留痕模式请求 /forecast/recorded')
+  await waitFor(() => requests.some((r) => r.url.includes('/api/gd-metric/series')))
+  const seriesCall = requests.filter((r) => r.url.includes('/api/gd-metric/series')).pop()
+  check(seriesCall.url.includes('kind=dayAhead'), '实际值按市场选 kind', seriesCall.url)
+  check(bodyHas('留痕：'), '留痕模式显式声明「当时发出的预测」')
+
+  // 逐点离散度切标幺/数值
+  const absBtn = [...doc.querySelectorAll('.panel-head .radio-group button')].find((b) => b.textContent.trim() === '数值')
+  check(!!absBtn, '有数值切换')
+  absBtn.click()
+  await tick()
+  check(bodyHas('数值（元/MWh）'), '切到数值模式')
+
+  // 口径说明必须在页面上，公式不藏在代码里
+  check(bodyHas('Spearman'), '口径说明写明用 Spearman')
+  check(bodyHas('当日出清均价'), '口径说明写明分母')
+}
+
 console.log('\n== 长周期电价预测页 ==')
 await clickTo('场景', '长周期电价预测')
 {
@@ -1520,7 +1629,10 @@ await clickTo('管理', '电价管理')
   check(bodyHas('2026 秋季工商业') && bodyHas('对照组固定价'), '列表渲染电价配置')
   check(bodyHas('长期 · 自 2026-10-01'), '日期范围文案')
   check(bodyHas('按星期 · 每天'), '时间范围文案')
-  check(bodyHas('当前生效'), '标出当前生效的电价')
+  // 原来只断言 body 里出现「当前生效」，而那四个字也出现在顶部提示条里 ——
+  // 资源没有命中任何卡片也能过。改成断言卡片上确实有「当前生效」标记。
+  const activeCards = [...doc.querySelectorAll('.card')].filter((c) => (c.textContent ?? '').includes('当前生效'))
+  check(activeCards.length === 1, '恰有一张卡片被标为当前生效', String(activeCards.length))
   check(bodyHas('全站唯一来源'), '声明时段是全站唯一来源')
 
   // 甘特条：5 段，宽度按时长比例

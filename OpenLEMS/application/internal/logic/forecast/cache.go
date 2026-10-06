@@ -18,6 +18,9 @@ import (
 // 5 分钟量级对预测结果是安全的：序列本身是分钟/日级采样，模型一天也只重训一次。
 const forecastCacheDuration = 5 * time.Minute
 
+// backtestCacheDuration 回测比单次预测贵一个量级，缓存也长一些
+const backtestCacheDuration = 30 * time.Minute
+
 var (
 	forecastCache     *gcache.Cache
 	forecastCacheOnce sync.Once
@@ -36,6 +39,18 @@ func withForecastCache[T any](
 	force bool,
 	produce func(context.Context) (*T, error),
 ) (*T, error) {
+	return withForecastCacheTTL(ctx, key, force, forecastCacheDuration, produce)
+}
+
+// withForecastCacheTTL 同 withForecastCache，但可指定 TTL。
+// 回测要跑十几次推理（~12s），缓存时间得比预测长一个量级，否则用户连点两次就重跑。
+func withForecastCacheTTL[T any](
+	ctx context.Context,
+	key string,
+	force bool,
+	ttl time.Duration,
+	produce func(context.Context) (*T, error),
+) (*T, error) {
 	c := forecastCacheInstance()
 	if !force {
 		if v, err := c.Get(ctx, key); err == nil && v != nil && !v.IsNil() {
@@ -50,6 +65,6 @@ func withForecastCache[T any](
 		return nil, err
 	}
 	// 写缓存失败不影响本次结果，忽略错误
-	_ = c.Set(ctx, key, out, forecastCacheDuration)
+	_ = c.Set(ctx, key, out, ttl)
 	return out, nil
 }

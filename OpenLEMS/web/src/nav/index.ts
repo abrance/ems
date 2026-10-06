@@ -44,19 +44,7 @@ export const NAV: NavTab[] = [
       },
       { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
       { key: 'clearing', title: '市场出清', path: '/scene/clearing', status: 'ready' },
-      {
-        key: 'review',
-        title: '预测复盘',
-        path: '/scene/review',
-        status: 'planned',
-        note: '趋势相关度 / 分时离散度的公式待定（见设计稿 §10.9）',
-        panels: [
-          '市场出清与预测价格',
-          '趋势相关度（峰 / 平 / 谷 / 全天）',
-          '分时离散度（标幺 / 数值）',
-          '峰平谷平均离散度',
-        ],
-      },
+      { key: 'review', title: '预测复盘', path: '/scene/review', status: 'ready' },
       {
         key: 'inference',
         title: '策略反演',
