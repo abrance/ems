@@ -26,6 +26,8 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   info: () => import('./config/SystemInfoView.vue'),
   storage: () => import('./config/StorageView.vue'),
   operations: () => import('./config/OperationsView.vue'),
+  credentials: () => import('./config/CredentialsView.vue'),
+  ui: () => import('./config/UiView.vue'),
 }
 
 export { PlaceholderView }
