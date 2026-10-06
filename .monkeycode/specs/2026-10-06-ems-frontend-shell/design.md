@@ -643,6 +643,29 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage`、`PUT/DELETE .../{id}`、`POST .../activate`、`GET /api/effect/backtest`（试运行） |
 | 管理 · 电价管理 | `GET /api/price`、`GET /api/price/current`、`POST /api/price`、`PUT /api/price/{id}`、`DELETE`、`PUT /api/price/{id}/toggle` |
 | 管理 · 采集管理 | `GET /api/spot-report`、`GET .../data`、`GET .../audit`、`POST .../collect`、`.../extract`、`.../extract/batch`(+`/status`)、`.../metric`、`.../confirm` |
+| 场景 · 历史信息 | `GET /api/spot-report/trend`（按运行日分桶，日/周/月，**只看已确认**） |
+| 场景 · 决策支持 | `GET /api/effect/summary`、`GET /api/effect/backtest`、`GET /api/forecast/load`、`GET /api/forecast/price` |
+
+**决策支持 = effect-overlay 的迁入点**（实测效果 KPI + 算法回测 + 负荷预测），
+外加电价预测。两套都复用既有实现：效果与回测走**同一套成本模型**，
+预测走**同一个 TimesFM**，页面不另做估算。
+
+预测是 CPU 推理（后端已缓存 5 分钟），所以页面区分两个动作：普通「查询」不穿透缓存，
+只有「刷新预测」才带 `forceRefresh=true` —— 否则每次切页都在打模型。
+电价预测明确标注是**日均**不是 96 点分时（日报未提取价格曲线，见 §14.5），
+并展示 `missingDays`，不装作数据齐全。
+
+「日前市场竞争空间」「历史相似日分析」没有数据源，页面底部逐条列出。
+
+**历史信息 = overlay 趋势卡的迁入点**。三个口径要点：
+1. 「只看已确认」是**后端在 SQL 里**做的，被排除的条数由 `excludedPending` 带出，
+   页面必须显示「已排除未复核 N 项」—— 否则用户会以为数据少了。
+2. 时间轴用 **运行日**（`run_date`），不是报告发布日；「本周」预设按 ISO 周（周一→今天），
+   与后端的「按周」分桶同一口径，不会错位。
+3. 档位类数据集（`node_price_*`）是**分类计数不是价格**，图上要标出来，别当折线读。
+
+设计稿 §5.7 里列的火电启停 / 备用 / 调频 / 出清电量四块**没有数据源**，
+页面底部逐条列出「待数据源 / 待口径」，不画空图。
 
 **采集管理 = overlay 能力迁入的落点**，`spot-overlay.js` 的四件事都在这里：
 采集台（粘链接入库）、日报档案（带复核进度）、结构化数据与复核队列（逐条修订 +

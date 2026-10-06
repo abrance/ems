@@ -110,6 +110,44 @@ export function getReportData(
   return api.get('/api/spot-report/data', { date }, signal)
 }
 
+/** 趋势点：一个桶内一条序列的聚合结果 */
+export interface SpotTrendPoint {
+  bucket: string
+  from: string
+  to: string
+  dataset: string
+  scope: string
+  metric: string
+  avg: number
+  max: number
+  min: number
+  sum: number
+  days: number
+  unit: string
+  /** 仅申报容量类：Σ容量 ÷ Σ申报容量 × 100（桶内重算） */
+  sharePct?: number
+  /** 仅地市档位类：档位序号 / 区间文本 / 命中该档位的城市-天数 */
+  value: number
+  textValue?: string
+  count?: number
+}
+
+export interface SpotTrend {
+  from: string
+  to: string
+  grain: string
+  points: SpotTrendPoint[]
+  /** 区间内因未复核被排除的指标条数 */
+  excludedPending: number
+}
+
+export function fetchTrend(
+  params: { from?: string; to?: string; grain?: string },
+  signal?: AbortSignal,
+): Promise<SpotTrend> {
+  return api.get<SpotTrend>('/api/spot-report/trend', params, signal)
+}
+
 export function listAudit(date: string, limit = 50, signal?: AbortSignal): Promise<SpotMetricAudit[]> {
   return api
     .get<{ list: SpotMetricAudit[] }>('/api/spot-report/audit', { date, limit }, signal)

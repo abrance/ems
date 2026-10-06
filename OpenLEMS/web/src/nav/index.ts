@@ -42,14 +42,7 @@ export const NAV: NavTab[] = [
         path: '/scene/disclosure',
         status: 'ready',
       },
-      {
-        key: 'decision',
-        title: '决策支持',
-        path: '/scene/decision',
-        status: 'planned',
-        note: '等价格预测模型接入（/api/forecast/price 已就绪）',
-        panels: ['市场价格预测', '日前市场竞争空间', '历史相似日分析', '历史相似日情况分析'],
-      },
+      { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
       {
         key: 'clearing',
         title: '市场出清',
@@ -84,21 +77,7 @@ export const NAV: NavTab[] = [
         note: '缺网络模型 / 出清模型 / 机组成本参数，只靠日报无法反演（设计稿 §14.1）',
         panels: ['机组实时出力', '市场成员报价策略反演', '机组累计电量', '日前市场火电开机安排'],
       },
-      {
-        key: 'history',
-        title: '历史信息',
-        path: '/scene/history',
-        status: 'planned',
-        note: '多日聚合口径待逐指标定义',
-        panels: [
-          '火电启停状态统计（多日）',
-          '日前市场火电开机安排（多日）',
-          '日前系统备用需求',
-          '日前系统调频辅助服务需求',
-          '日前-实时市场出清与预测价格',
-          '日前-实时市场出清电量',
-        ],
-      },
+      { key: 'history', title: '历史信息', path: '/scene/history', status: 'ready' },
       {
         key: 'forecast',
         title: '长周期电价预测',
