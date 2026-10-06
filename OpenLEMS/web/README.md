@@ -69,6 +69,7 @@ src/
 | 管理 · 电价管理 | `GET /api/price` `GET /api/price/current` `POST /api/price` `PUT/DELETE /api/price/{id}` `PUT /api/price/{id}/toggle` |
 | 管理 · 采集管理 | `GET /api/spot-report` `GET .../data` `GET .../audit` `POST .../collect` `.../extract` `.../extract/batch` `.../metric` `.../confirm` |
 | 场景 · 历史信息 | `GET /api/spot-report/trend` |
+| 场景 · 决策支持 | `GET /api/effect/summary` `GET /api/effect/backtest` `GET /api/forecast/load` `GET /api/forecast/price` |
 
 手动控制页的两条硬规则：
 
@@ -97,7 +98,10 @@ src/
 历史信息是 overlay 趋势卡的迁入点。被排除的未复核条数（`excludedPending`）必须在页面上显示，
 否则用户会以为数据少了 —— 这个数字是后端在 SQL 层排除时统计出来的。
 
-其它 22 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+决策支持是 `effect-overlay` 的迁入点。预测接口区分两个动作：普通查询不穿透后端缓存，
+只有「刷新预测」才带 `forceRefresh=true` —— TimesFM 是 CPU 推理，切页就打模型会排队。
+
+其它 21 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系

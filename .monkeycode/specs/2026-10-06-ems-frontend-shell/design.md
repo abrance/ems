@@ -644,6 +644,18 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 电价管理 | `GET /api/price`、`GET /api/price/current`、`POST /api/price`、`PUT /api/price/{id}`、`DELETE`、`PUT /api/price/{id}/toggle` |
 | 管理 · 采集管理 | `GET /api/spot-report`、`GET .../data`、`GET .../audit`、`POST .../collect`、`.../extract`、`.../extract/batch`(+`/status`)、`.../metric`、`.../confirm` |
 | 场景 · 历史信息 | `GET /api/spot-report/trend`（按运行日分桶，日/周/月，**只看已确认**） |
+| 场景 · 决策支持 | `GET /api/effect/summary`、`GET /api/effect/backtest`、`GET /api/forecast/load`、`GET /api/forecast/price` |
+
+**决策支持 = effect-overlay 的迁入点**（实测效果 KPI + 算法回测 + 负荷预测），
+外加电价预测。两套都复用既有实现：效果与回测走**同一套成本模型**，
+预测走**同一个 TimesFM**，页面不另做估算。
+
+预测是 CPU 推理（后端已缓存 5 分钟），所以页面区分两个动作：普通「查询」不穿透缓存，
+只有「刷新预测」才带 `forceRefresh=true` —— 否则每次切页都在打模型。
+电价预测明确标注是**日均**不是 96 点分时（日报未提取价格曲线，见 §14.5），
+并展示 `missingDays`，不装作数据齐全。
+
+「日前市场竞争空间」「历史相似日分析」没有数据源，页面底部逐条列出。
 
 **历史信息 = overlay 趋势卡的迁入点**。三个口径要点：
 1. 「只看已确认」是**后端在 SQL 里**做的，被排除的条数由 `excludedPending` 带出，

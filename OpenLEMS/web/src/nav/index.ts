@@ -42,14 +42,7 @@ export const NAV: NavTab[] = [
         path: '/scene/disclosure',
         status: 'ready',
       },
-      {
-        key: 'decision',
-        title: '决策支持',
-        path: '/scene/decision',
-        status: 'planned',
-        note: '等价格预测模型接入（/api/forecast/price 已就绪）',
-        panels: ['市场价格预测', '日前市场竞争空间', '历史相似日分析', '历史相似日情况分析'],
-      },
+      { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
       {
         key: 'clearing',
         title: '市场出清',

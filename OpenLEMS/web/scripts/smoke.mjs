@@ -293,6 +293,35 @@ const FAKE_TREND_POINTS = [
   { bucket: '2026-W40', from: '2026-09-28', to: '2026-10-04', dataset: 'summary', scope: '市场', metric: '日前加权平均电价', avg: 390, max: 410, min: 375, sum: 0, days: 7, unit: '元/MWh', value: 0 },
 ]
 
+const FAKE_SUMMARY = {
+  start: '2026-09-30', end: '2026-10-06', points: 672, algorithm: 'tou-rule',
+  gridDeviceId: 'grid_1', essDeviceIds: ['ess_1'], demandPrice: 40,
+  chargeEnergy: 420.5, dischargeEnergy: 380.25, chargeCost: 168.2, dischargeRevenue: 402.4,
+  arbitrageProfit: 234.2, actualMaxDemand: 118, baselineMaxDemand: 120, demandSaving: 80, totalSaving: 314.2,
+}
+
+const FAKE_LOAD = {
+  deviceId: 'grid_1', model: 'timesfm-3.0', stepMinutes: 15, lookbackPoints: 96, inputTruncated: false,
+  historyTimes: [1759000000000, 1759000900000],
+  historyValues: [120, 130],
+  forecastTimes: [1759001800000, 1759002700000],
+  forecastPoint: [140, 150],
+  forecastQuantiles: { '0.1': [120, 130], '0.5': [140, 150], '0.9': [160, 170] },
+  timeMs: 2100,
+}
+
+const FAKE_PRICE = {
+  market: 'ahead', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价',
+  unit: '元/MWh', model: 'timesfm-3.0', from: '2026-07-24', to: '2026-09-21',
+  historyDates: ['2026-09-19', '2026-09-20', '2026-09-21'],
+  historyValues: [380, 390, 400],
+  forecast: [
+    { runDate: '2026-09-22', point: 368.4, quantiles: { '0.1': 341.2, '0.5': 368.4, '0.9': 401.7 } },
+    { runDate: '2026-09-23', point: 372.1, quantiles: { '0.1': 345, '0.5': 372.1, '0.9': 408 } },
+  ],
+  contextPoints: 60, inputTruncated: false, missingDays: 50, timeMs: 2063,
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -341,6 +370,10 @@ globalThis.fetch = async (url, init) => {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
   }
+  if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
+  if (u.includes('/api/effect/backtest2')) return json({})
+  if (u.includes('/api/forecast/load')) return json({ forecast: FAKE_LOAD })
+  if (u.includes('/api/forecast/price')) return json({ forecast: FAKE_PRICE })
   if (u.includes('/api/spot-report/trend')) {
     const q = new URL(u, 'http://x').searchParams
     return json({
@@ -486,6 +519,56 @@ for (const tab of NAV) {
   }
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
+
+console.log('\n== 决策支持页 ==')
+await clickTo('场景', '决策支持')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('总节省'))
+  // 实测效果 KPI：从 /api/effect/summary 的 summary 里取值（后端是 { summary: {...} }）
+  check(bodyHas('314'), 'KPI 取到总节省（说明拆包对了）')
+  check(bodyHas('234'), 'KPI 取到套利净收益')
+  check(bodyHas('80'), 'KPI 取到需量节省')
+  check(bodyHas('tou-rule'), '脚注显示生效算法')
+
+  // 电价预测：日均 + 分位，且明确说明不是分时
+  check(bodyHas('日前电价预测'), '有电价预测面板')
+  check(bodyHas('预测是'), '明确说明是日均不是分时')
+  check(bodyHas('历史 60 点'), '展示上下文点数')
+  check(bodyHas('缺数据 50 天'), '展示缺失天数（不装作数据齐全）')
+
+  // 负荷预测：分位带
+  check(bodyHas('负荷预测'), '有负荷预测面板')
+  check(bodyHas('预测 10% 分位') || bodyHas('90% 分位'), '负荷预测给出分位')
+
+  // 回测表：首个是 idle 基线
+  check(bodyHas('算法回测对比'), '有回测面板')
+  check(bodyHas('idle') && bodyHas('基线'), '首个算法标 idle 基线')
+  // 回测表里按算法行定位，避免和上方 KPI 的数字混在一起
+  const btRows = [...doc.querySelectorAll('table tbody tr')].filter((r) => (r.textContent ?? '').includes('tou-rule'))
+  check(btRows.length > 0, '回测表有 tou-rule 行')
+  const cells = [...(btRows[0]?.querySelectorAll('td') ?? [])].map((c) => c.textContent.trim())
+  check(cells.includes('314.00'), '回测表 tou-rule 的总节省单元格正确', JSON.stringify(cells))
+
+  // 待数据源的 panels
+  check(bodyHas('日前市场竞争空间'), '点名缺竞争空间')
+  check(bodyHas('历史相似日分析'), '点名缺相似日')
+
+  // 刷新预测要显式跳过缓存
+  const reqBefore = requests.filter((r) => r.url.includes('/api/forecast/')).length
+  const refreshBtn = [...doc.querySelectorAll('.panel-head button, .toolbar button')].find((b) =>
+    b.textContent.includes('刷新预测'),
+  )
+  check(!!refreshBtn, '有「刷新预测」按钮')
+  refreshBtn.click()
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/forecast/')).length >= reqBefore + 2)
+  const forced = requests.filter((r) => r.url.includes('/api/forecast/')).slice(-2)
+  check(
+    forced.every((r) => r.url.includes('forceRefresh=true')),
+    '刷新预测带 forceRefresh=true（其余查询不穿透缓存）',
+    JSON.stringify(forced.map((r) => r.url)),
+  )
+}
 
 console.log('\n== 历史信息页 ==')
 await clickTo('场景', '历史信息')

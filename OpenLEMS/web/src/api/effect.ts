@@ -18,6 +18,26 @@ export interface BacktestAlgorithmResult {
   finalSocPct: number
 }
 
+/** 实测效果汇总（峰谷套利 + 需量节省） */
+export interface EffectSummary {
+  start: string
+  end: string
+  points: number
+  algorithm: string
+  gridDeviceId: string
+  essDeviceIds: string[]
+  demandPrice: number
+  chargeEnergy: number
+  dischargeEnergy: number
+  chargeCost: number
+  dischargeRevenue: number
+  arbitrageProfit: number
+  actualMaxDemand: number
+  baselineMaxDemand: number
+  demandSaving: number
+  totalSaving: number
+}
+
 export interface EffectBacktest {
   start: string
   end: string
@@ -30,6 +50,20 @@ export interface EffectBacktest {
   capacityKwh: number
   /** 首个为 idle 基线 */
   results: BacktestAlgorithmResult[]
+}
+
+/** GET /api/effect/summary → { summary } */
+export function fetchEffectSummary(
+  params: { start: string; end: string },
+  signal?: AbortSignal,
+): Promise<EffectSummary> {
+  return api
+    .get<{ summary: EffectSummary }>(
+      '/api/effect/summary',
+      { start: params.start, end: params.end },
+      signal,
+    )
+    .then((r) => r.summary)
 }
 
 export function fetchBacktest(
