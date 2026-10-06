@@ -2,6 +2,7 @@ package forecast
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -54,8 +55,20 @@ type SLoadForecast struct {
 	TimeMs            float64
 }
 
+// LoadRequest 负荷预测请求。
+// ForceRefresh=true 跳过缓存（前端手动刷新用）。
+type LoadRequest struct {
+	DeviceId      string
+	LookbackHours int
+	HistoryHours  int
+	Horizon       int
+	ForceRefresh  bool
+}
+
 // Load 读取设备历史有功功率并调用 TimesFM 预测，返回历史窗口与预测曲线。
-func Load(ctx context.Context, deviceID string, lookbackHours, historyHours, horizon int) (*SLoadForecast, error) {
+// 结果按请求参数缓存 forecastCacheDuration，避免同一屏多个面板各推理一次。
+func Load(ctx context.Context, req LoadRequest) (*SLoadForecast, error) {
+	lookbackHours, historyHours := req.LookbackHours, req.HistoryHours
 	if lookbackHours <= 0 {
 		lookbackHours = defaultLookbackHours
 	}
@@ -67,6 +80,7 @@ func Load(ctx context.Context, deviceID string, lookbackHours, historyHours, hor
 	if err != nil {
 		return nil, err
 	}
+	deviceID, horizon := req.DeviceId, req.Horizon
 	if deviceID == "" {
 		deviceID = cfgDeviceID
 	}
@@ -83,6 +97,15 @@ func Load(ctx context.Context, deviceID string, lookbackHours, historyHours, hor
 		return nil, errors.New("策略未配置预测服务地址")
 	}
 
+	key := fmt.Sprintf("forecast:load:%s:%d:%d:%d", deviceID, lookbackHours, historyHours, horizon)
+	return withForecastCache(ctx, key, req.ForceRefresh, func(ctx context.Context) (*SLoadForecast, error) {
+		client := s_forecast.NewClient(baseURL, forecastTimeout)
+		return loadWith(ctx, client, deviceID, lookbackHours, historyHours, horizon)
+	})
+}
+
+// loadWith 执行一次负荷预测（读历史 + 调模型），不含缓存与配置解析，便于测试注入。
+func loadWith(ctx context.Context, client s_forecast.IClient, deviceID string, lookbackHours, historyHours, horizon int) (*SLoadForecast, error) {
 	times, values, err := loadHistorySeries(deviceID, lookbackHours)
 	if err != nil {
 		return nil, err
@@ -103,7 +126,6 @@ func Load(ctx context.Context, deviceID string, lookbackHours, historyHours, hor
 		return nil, errors.New("历史数据不足两个点，无法预测")
 	}
 
-	client := s_forecast.NewClient(baseURL, forecastTimeout)
 	resp, err := client.Forecast(ctx, &s_forecast.SForecastRequest{
 		Series:    []*s_forecast.SSeries{{Id: deviceID, Values: values}},
 		Horizon:   horizon,
@@ -112,7 +134,7 @@ func Load(ctx context.Context, deviceID string, lookbackHours, historyHours, hor
 	if err != nil {
 		return nil, errors.Wrap(err, "调用预测服务失败")
 	}
-	item := resp.Forecasts[0]
+	item := pickForecast(resp.Forecasts, deviceID)
 	if item == nil || len(item.Point) == 0 {
 		return nil, errors.New("预测服务未返回点预测")
 	}
@@ -140,6 +162,24 @@ func Load(ctx context.Context, deviceID string, lookbackHours, historyHours, hor
 		ForecastQuantiles: item.Quantiles,
 		TimeMs:            resp.TimeMs,
 	}, nil
+}
+
+// pickForecast 按 id 取回结果。服务端若多序列、乱序或过滤，取下标 0 就是错的值；
+// id 匹配不上时再回落到第一个非空项。
+func pickForecast(items []*s_forecast.SForecastItem, id string) *s_forecast.SForecastItem {
+	var first *s_forecast.SForecastItem
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		if first == nil {
+			first = it
+		}
+		if id != "" && it.Id == id {
+			return it
+		}
+	}
+	return first
 }
 
 // buildForecastTimes 依据历史末点与采样步长生成预测时间轴。

@@ -2,6 +2,7 @@ package forecast
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +41,15 @@ const (
 	priceDateLayout = "2006-01-02"
 )
 
+// PriceRequest 电价预测请求。ForceRefresh=true 跳过缓存（前端手动刷新用）。
+type PriceRequest struct {
+	Market       string
+	HistoryDays  int
+	HorizonDays  int
+	Quantiles    []float64
+	ForceRefresh bool
+}
+
 // priceSpec 一种市场对应的指标口径。
 type priceSpec struct {
 	Market  string
@@ -47,16 +57,12 @@ type priceSpec struct {
 	Source  string // 首选来源表，缺失时回落到同数据集的其他来源
 }
 
-// resolvePriceSpec 解析 market 参数。
-func resolvePriceSpec(market string) (priceSpec, error) {
-	switch strings.ToLower(strings.TrimSpace(market)) {
-	case "", "ahead", "day_ahead", "day-ahead":
-		return priceSpec{Market: "ahead", Dataset: spotreport.DatasetTrade, Source: spotreport.SourceTrade}, nil
-	case "real", "realtime", "rt":
-		return priceSpec{Market: "real", Dataset: spotreport.DatasetRealtime, Source: spotreport.SourceRealtime}, nil
-	default:
-		return priceSpec{}, errors.Errorf("不支持的市场类型: %s（仅支持 ahead / real）", market)
-	}
+// priceSeriesSource 历史指标读取函数，便于测试替换。
+type priceSeriesSource func(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error)
+
+// spotMetricSource 默认实现：读日报已确认的指标明细。
+func spotMetricSource(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error) {
+	return s_db.GetSpotExtractService().ListMetricsByRunDateRange(ctx, from, to)
 }
 
 // SPriceForecast 电价预测结果。
@@ -81,11 +87,13 @@ type SPriceForecast struct {
 }
 
 // LoadPrice 读取日报已确认的日均成交价并调用 TimesFM 预测未来多日。
-func LoadPrice(ctx context.Context, market string, historyDays, horizonDays int, quantiles []float64) (*SPriceForecast, error) {
-	spec, err := resolvePriceSpec(market)
+// 结果按请求参数缓存 forecastCacheDuration。
+func LoadPrice(ctx context.Context, req PriceRequest) (*SPriceForecast, error) {
+	spec, err := resolvePriceSpec(req.Market)
 	if err != nil {
 		return nil, err
 	}
+	historyDays, horizonDays := req.HistoryDays, req.HorizonDays
 	if historyDays <= 0 {
 		historyDays = defaultPriceHistoryDays
 	}
@@ -95,6 +103,7 @@ func LoadPrice(ctx context.Context, market string, historyDays, horizonDays int,
 	if horizonDays > maxPriceHorizonDays {
 		horizonDays = maxPriceHorizonDays
 	}
+	quantiles := req.Quantiles
 	if len(quantiles) == 0 {
 		quantiles = defaultQuantiles
 	}
@@ -107,21 +116,38 @@ func LoadPrice(ctx context.Context, market string, historyDays, horizonDays int,
 		return nil, errors.New("策略未配置预测服务地址")
 	}
 
-	loc := priceLocation()
-	today := time.Now().In(loc)
+	key := fmt.Sprintf("forecast:price:%s:%d:%d:%s", spec.Market, historyDays, horizonDays, quantileKey(quantiles))
+	return withForecastCache(ctx, key, req.ForceRefresh, func(ctx context.Context) (*SPriceForecast, error) {
+		client := s_forecast.NewClient(baseURL, forecastTimeout)
+		return loadPriceWith(ctx, client, spotMetricSource, spec, historyDays, horizonDays, quantiles, priceLocation(), time.Now())
+	})
+}
+
+// loadPriceWith 执行一次电价预测（读指标 + 调模型），不含缓存与配置解析，便于测试注入。
+func loadPriceWith(
+	ctx context.Context,
+	client s_forecast.IClient,
+	source priceSeriesSource,
+	spec priceSpec,
+	historyDays, horizonDays int,
+	quantiles []float64,
+	loc *time.Location,
+	now time.Time,
+) (*SPriceForecast, error) {
+	today := now.In(loc)
 	// 日前价格当日发布，历史区间到「今天」为止；实时价可能今天还没有，缺就是缺。
 	to := today.Format(priceDateLayout)
 	from := today.AddDate(0, 0, -historyDays+1).Format(priceDateLayout)
 
-	service := s_db.GetSpotExtractService()
-	models, err := service.ListMetricsByRunDateRange(ctx, from, to)
+	models, err := source(ctx, from, to)
 	if err != nil {
 		return nil, errors.Wrap(err, "查询日报电价指标失败")
 	}
 
 	dates, values, unit := buildDailySeries(models, spec)
 	if len(dates) < minPricePoints {
-		return nil, errors.Errorf("已确认的%s电价数据不足（%d 天，至少需要 %d 天）", marketLabel(spec.Market), len(dates), minPricePoints)
+		return nil, errors.Errorf("已确认的%s电价数据不足（%d 天，至少需要 %d 天）",
+			marketLabel(spec.Market), len(dates), minPricePoints)
 	}
 
 	// 截断到模型上下文上限（按天算几乎不会触发，保留防御）
@@ -132,7 +158,6 @@ func LoadPrice(ctx context.Context, market string, historyDays, horizonDays int,
 		truncated = true
 	}
 
-	client := s_forecast.NewClient(baseURL, forecastTimeout)
 	resp, err := client.Forecast(ctx, &s_forecast.SForecastRequest{
 		Series:    []*s_forecast.SSeries{{Id: spec.Market, Values: values}},
 		Horizon:   horizonDays,
@@ -141,7 +166,7 @@ func LoadPrice(ctx context.Context, market string, historyDays, horizonDays int,
 	if err != nil {
 		return nil, errors.Wrap(err, "调用预测服务失败")
 	}
-	item := resp.Forecasts[0]
+	item := pickForecast(resp.Forecasts, spec.Market)
 	if item == nil || len(item.Point) == 0 {
 		return nil, errors.New("预测服务未返回点预测")
 	}
@@ -170,6 +195,18 @@ func LoadPrice(ctx context.Context, market string, historyDays, horizonDays int,
 		MissingDays:       daysBetween(from, to) - len(dates),
 		TimeMs:            resp.TimeMs,
 	}, nil
+}
+
+// resolvePriceSpec 解析 market 参数。
+func resolvePriceSpec(market string) (priceSpec, error) {
+	switch strings.ToLower(strings.TrimSpace(market)) {
+	case "", "ahead", "day_ahead", "day-ahead":
+		return priceSpec{Market: "ahead", Dataset: spotreport.DatasetTrade, Source: spotreport.SourceTrade}, nil
+	case "real", "realtime", "rt":
+		return priceSpec{Market: "real", Dataset: spotreport.DatasetRealtime, Source: spotreport.SourceRealtime}, nil
+	default:
+		return priceSpec{}, errors.Errorf("不支持的市场类型: %s（仅支持 ahead / real）", market)
+	}
 }
 
 // buildDailySeries 从指标明细构造「运行日 → 日均成交价」序列（升序）。
@@ -232,6 +269,15 @@ func daysBetween(from, to string) int {
 		return 0
 	}
 	return int(t.Sub(f).Hours()/24) + 1
+}
+
+// quantileKey 把分位点拼成稳定的缓存键片段。
+func quantileKey(quantiles []float64) string {
+	parts := make([]string, 0, len(quantiles))
+	for _, q := range quantiles {
+		parts = append(parts, strconv.FormatFloat(q, 'g', -1, 64))
+	}
+	return strings.Join(parts, "|")
 }
 
 // ParsePriceQuantiles 解析逗号分隔的分位点；空串返回 nil（由调用方取默认值）。
