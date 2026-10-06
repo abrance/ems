@@ -475,6 +475,29 @@ const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
+console.log('\n== 旧路由重定向 ==')
+for (const [from, to] of [['/programs', '手动控制'], ['/effect', '决策支持']]) {
+  window.history.pushState({}, '', from)
+  window.dispatchEvent(new window.Event('popstate'))
+  await waitFor(() => (doc.querySelector('.pagehead h1')?.textContent ?? '').includes(to), 800)
+  check(
+    (doc.querySelector('.pagehead h1')?.textContent ?? '').includes(to),
+    `${from} → ${to}`,
+    doc.querySelector('.pagehead h1')?.textContent ?? '(空)',
+  )
+}
+
+console.log('\n== 401 提示 ==')
+{
+  const orig = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 401, message: '未登录或登录已过期' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
+  await clickTo('配置', '系统信息')
+  await waitFor(() => !!doc.querySelector('.auth-warn'), 800)
+  check(!!doc.querySelector('.auth-warn'), '接口 401 时给出会话提示')
+  check((doc.body.textContent ?? '').includes('AUTH_BYPASS_ROLE'), '提示里说清依赖哪个环境变量')
+  globalThis.fetch = orig
+}
+
 console.log('\n== 导航结构 ==')
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 3, `Tab 数量 = ${tabEls.length}（期望 3）`, tabEls.map((e) => e.textContent.trim()).join('/'))

@@ -1168,7 +1168,32 @@ EMS 侧的跨设备保护（SOC / 变压器 / 需量）要等「配置 · 储能
 | 日期区间默认近 7 天 | 全局时间组件（§6） |
 | 手写 SVG 折线（不引 echarts） | 换成统一 ECharts 主题 |
 
-### 13.3 要保留的后端接口（不动）
+### 13.3 替换与下线（已执行）
+
+**替换方式：换 zip，不是换开关。** `npm run build` 的 `dist/` 打成
+`application/manifest/web.zip`，由 `go:embed` 打进可执行文件，Go 侧不感知前端框架。
+
+Go 侧同步改动：
+
+| 改动 | 位置 |
+| --- | --- |
+| 删掉悬浮层的 `<link>`/`<script>` 注入 | `internal/cmd/web.go` |
+| 删掉 `/overlay/*` 静态路由与 `manifest.OverlayFS` | `internal/cmd/web.go`、`manifest/overlay_embed.go` |
+| 删掉 4 个悬浮层资源与其测试 | `manifest/overlay/*`、`manifest/overlay_embed_test.go`、`internal/cmd/web_overlay_test.go` |
+
+**注入点从 `</head>` 之前改到 `<head>` 之后。** 构建产物把 `<script type="module">`
+放在 `<head>` 里；虽然模块脚本实际延迟执行，但位置排在注入脚本之前，一旦换成同步入口
+就会读到空会话。紧跟 `<head>` 能保证顺序。
+
+**`authBypassScript` 必须保留。** 它往 localStorage 写 `ems:user:token` / `ems:user:role`，
+而新前端没有登录页 —— 这是当前**唯一**的会话来源，删掉它整个界面 401。
+后端 `MiddlewareAuth` 也是「临时放开」状态，靠 `AUTH_BYPASS_ROLE` 放行；该变量目前
+只在环境变量里设，`deploy/docker-compose` 没有设置（**部署时必须补上**）。
+
+前端配套：旧路径保留重定向（`/programs` → 管理·手动控制，`/effect` → 场景·决策支持），
+以及 401 时的显式提示条（说清依赖 `AUTH_BYPASS_ROLE`），避免「界面全空但不说为什么」。
+
+### 13.4 要保留的后端接口（不动）
 
 | 接口 | 用途 |
 | --- | --- |
