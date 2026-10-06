@@ -43,7 +43,12 @@ type policyConfig struct {
 	GridDeviceId        string
 	EssDeviceIds        []string
 	DemandPrice         float64
+	DemandTarget        float64
 	EnableDemandControl bool
+	SocMinRatio         float64
+	SocMaxRatio         float64
+	ChargeEfficiency    float64
+	DischargeEfficiency float64
 }
 
 // Summary 依据实测数据计算 [start, end] 区间的储能效果。
@@ -110,14 +115,36 @@ func loadPolicyConfig(ctx context.Context) (*policyConfig, error) {
 	cfg := &policyConfig{
 		GridDeviceId:        strings.TrimSpace(j.Get("gridDeviceId").String()),
 		DemandPrice:         j.Get("demandPrice").Float64(),
+		DemandTarget:        j.Get("demandTarget").Float64(),
 		EnableDemandControl: j.Get("enableDemandControl").Bool(),
+		SocMinRatio:         j.Get("socMinRatio").Float64(),
+		SocMaxRatio:         j.Get("socMaxRatio").Float64(),
+		ChargeEfficiency:    j.Get("chargeEfficiency").Float64(),
+		DischargeEfficiency: j.Get("dischargeEfficiency").Float64(),
 	}
+	cfg.applyDefaults()
 	for _, id := range j.Get("essDevices").Strings() {
 		if id = strings.TrimSpace(id); id != "" {
 			cfg.EssDeviceIds = append(cfg.EssDeviceIds, id)
 		}
 	}
 	return cfg, nil
+}
+
+// applyDefaults 为缺省配置填充合理默认值（与 p_policy_mircogrid 的默认值保持一致）。
+func (c *policyConfig) applyDefaults() {
+	if c.SocMinRatio <= 0 {
+		c.SocMinRatio = 0.1
+	}
+	if c.SocMaxRatio <= 0 {
+		c.SocMaxRatio = 0.95
+	}
+	if c.ChargeEfficiency <= 0 {
+		c.ChargeEfficiency = 0.95
+	}
+	if c.DischargeEfficiency <= 0 {
+		c.DischargeEfficiency = 0.95
+	}
 }
 
 // loadSeries 读取单个设备的有功功率历史。
