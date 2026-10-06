@@ -31,6 +31,7 @@ type SSummary struct {
 	Start        time.Time
 	End          time.Time
 	Points       int
+	Algorithm    string
 	GridDeviceId string
 	EssDeviceIds []string
 	DemandPrice  float64
@@ -39,9 +40,10 @@ type SSummary struct {
 
 // policyConfig 从策略配置中提取效果测算所需字段
 type policyConfig struct {
-	GridDeviceId string
-	EssDeviceIds []string
-	DemandPrice  float64
+	GridDeviceId        string
+	EssDeviceIds        []string
+	DemandPrice         float64
+	EnableDemandControl bool
 }
 
 // Summary 依据实测数据计算 [start, end] 区间的储能效果。
@@ -82,11 +84,20 @@ func Summary(ctx context.Context, start, end time.Time) (*SSummary, error) {
 		Start:        start,
 		End:          end,
 		Points:       len(intervals),
+		Algorithm:    algorithmName(cfg.EnableDemandControl),
 		GridDeviceId: cfg.GridDeviceId,
 		EssDeviceIds: cfg.EssDeviceIds,
 		DemandPrice:  cfg.DemandPrice,
 		Savings:      savings,
 	}, nil
+}
+
+// algorithmName 由策略配置推导当前生效的算法标识（与决策器 Name() 保持一致）。
+func algorithmName(enableDemandControl bool) string {
+	if enableDemandControl {
+		return "tou-rule+demand"
+	}
+	return "tou-rule"
 }
 
 // loadPolicyConfig 读取微电网策略设置并解析效果测算所需字段。
@@ -97,8 +108,9 @@ func loadPolicyConfig(ctx context.Context) (*policyConfig, error) {
 	}
 	j := gjson.New(*raw)
 	cfg := &policyConfig{
-		GridDeviceId: strings.TrimSpace(j.Get("gridDeviceId").String()),
-		DemandPrice:  j.Get("demandPrice").Float64(),
+		GridDeviceId:        strings.TrimSpace(j.Get("gridDeviceId").String()),
+		DemandPrice:         j.Get("demandPrice").Float64(),
+		EnableDemandControl: j.Get("enableDemandControl").Bool(),
 	}
 	for _, id := range j.Get("essDevices").Strings() {
 		if id = strings.TrimSpace(id); id != "" {

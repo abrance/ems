@@ -14,6 +14,7 @@ type EffectSummary struct {
 	Start        string   `json:"start" dc:"开始时间"`
 	End          string   `json:"end" dc:"结束时间"`
 	Points       int      `json:"points" dc:"参与计算的采样点数"`
+	Algorithm    string   `json:"algorithm" dc:"当前生效的算法标识"`
 	GridDeviceId string   `json:"gridDeviceId" dc:"关口设备ID"`
 	EssDeviceIds []string `json:"essDeviceIds" dc:"储能设备ID列表"`
 	DemandPrice  float64  `json:"demandPrice" dc:"需量电价 元/kW"`

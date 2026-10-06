@@ -3,6 +3,7 @@ package internal
 import (
 	"common"
 	"common/c_base"
+	"common/c_enum"
 	"common/c_log"
 	"common/c_type"
 	"context"
@@ -27,6 +28,8 @@ type sPolicyMircogrid struct {
 	forecastClient s_forecast.IClient
 	forecastPowers []float64 // 最近的关口功率预测（kW）
 	forecastAt     time.Time // 上次预测更新时间
+
+	lastAlgorithm string // 上次使用的决策算法名，用于切换时记录
 }
 
 // NewPolicyMircogrid 创建微电网策略实例
@@ -40,7 +43,8 @@ func NewPolicyMircogrid() c_base.IPolicy {
 
 // Init 初始化策略
 func (s *sPolicyMircogrid) Init(ctx context.Context) error {
-	s.ctx = ctx
+	// 注入 policy 日志类型，使业务日志可按策略归集
+	s.ctx = context.WithValue(ctx, c_enum.ELogTypePolicy, s.policyId)
 	c_log.Infof(ctx, "正在初始化微电网策略...")
 
 	// 从setting表加载配置
@@ -144,7 +148,8 @@ func (s *sPolicyMircogrid) Run(ctx context.Context) error {
 	}
 
 	// 4. 决策（规则版实现 IDecisionMaker，可叠加需量约束，后续可替换为优化器）
-	decision := s.newDecider().Decide(SDecisionInput{
+	decider := s.newDecider()
+	decision := decider.Decide(SDecisionInput{
 		PriceType:           segment.PriceType,
 		Price:               segment.Price,
 		Soc:                 soc,
@@ -156,14 +161,28 @@ func (s *sPolicyMircogrid) Run(ctx context.Context) error {
 		ForecastedGridPower: s.forecastedGridPower(ctx),
 	})
 
+	// 算法启用/切换时记录一次，便于效果按算法归因
+	s.noteAlgorithm(decider.Name())
+
 	// 5. 换算目标功率（kW，正=充 负=放）
 	targetPower := decision.TargetPower(ratedPower)
 
 	// 6. 下发
-	c_log.Infof(ctx, "微电网策略 - 电价类型: %s, 电价: %.4f, SOC: %.2f%%, 关口: %.1fkW, 动作: %s, 目标功率: %dkW",
-		segment.PriceType, segment.Price, soc, gridPower, decision.Action, targetPower)
+	c_log.Infof(ctx, "微电网策略 - 算法: %s, 电价类型: %s, 电价: %.4f, SOC: %.2f%%, 关口: %.1fkW, 动作: %s, 目标功率: %dkW",
+		decider.Name(), segment.PriceType, segment.Price, soc, gridPower, decision.Action, targetPower)
 
 	return s_policy.ExecuteStrategy(ctx, targetPower, s.config.EssDevices)
+}
+
+// noteAlgorithm 记录算法首次启用或切换（业务日志，可按 type=policy 查询）。
+func (s *sPolicyMircogrid) noteAlgorithm(name string) {
+	if name == s.lastAlgorithm {
+		return
+	}
+	s.lastAlgorithm = name
+	if s.ctx != nil {
+		c_log.BizInfof(s.ctx, "微电网策略算法转为: %s", name)
+	}
 }
 
 // newDecider 构造决策器。基础为峰谷套利规则版；启用需量控制时叠加需量约束层。

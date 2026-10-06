@@ -77,7 +77,10 @@ func (d SDecision) TargetPower(ratedPowerKW float64) int32 {
 // 规则版（STouRule）实现之；后续优化器 / 需量控制只需实现同一接口即可替换，
 // Run() 无需改动。
 type IDecisionMaker interface {
+	// Decide 依据输入给出充放电决策
 	Decide(in SDecisionInput) SDecision
+	// Name 返回算法标识，用于日志与效果归因（如 "tou-rule"、"tou-rule+demand"）
+	Name() string
 }
 
 // STouRule 峰谷套利规则决策器。
@@ -89,6 +92,9 @@ type STouRule struct {
 
 // 编译期断言：STouRule 实现 IDecisionMaker
 var _ IDecisionMaker = (*STouRule)(nil)
+
+// Name 算法标识。
+func (r *STouRule) Name() string { return "tou-rule" }
 
 // Decide 依据电价类型与 SOC 给出充放电决策。
 func (r *STouRule) Decide(in SDecisionInput) SDecision {
@@ -121,6 +127,9 @@ type SDemandLimitRule struct {
 }
 
 var _ IDecisionMaker = (*SDemandLimitRule)(nil)
+
+// Name 算法标识（在基础算法名后叠加约束层标记）。
+func (r *SDemandLimitRule) Name() string { return r.Base.Name() + "+demand" }
 
 // Decide 在基础决策之上叠加需量约束。
 func (r *SDemandLimitRule) Decide(in SDecisionInput) SDecision {
