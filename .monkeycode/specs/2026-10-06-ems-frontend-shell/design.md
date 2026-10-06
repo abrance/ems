@@ -650,6 +650,26 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 统计分析 | `POST /api/device/compare`、`POST /api/protocol/monitor/{overview,distribution,trend,metrics}`、`POST /api/system/resource/chart` |
 | 管理 · 审计 | `GET /api/log/biz`、`.../biz/info`、`.../biz/statistics`、`DELETE /api/log/biz` |
 | 管理 · 自动化联动 | `GET /api/automation/page`、`POST /api/automation`、`PUT\|DELETE /api/automation/{id}`、`POST .../toggle` |
+| 配置 · 采集与凭据 | `GET /api/system/credentials`（**只读**，密钥打码不回显） |
+| 配置 · 界面与语言 | 纯前端：主题 / 密度 / 默认首页，存 localStorage |
+| 场景 · 长周期电价预测 | `GET /api/forecast/price` |
+
+**长周期电价预测页目前只有「平均」视图。** 日报未提取 96 点价格曲线，后端给的是
+**日均序列**预测，所以出的是「未来多日日均价 + 10~90% 分位带 + 明细表」。
+设计稿 §5.8 的「分时」视图待图4 价格曲线纳入提取（届时把 `horizonDays` 换成点数即可，
+天数 × 96 ≤ 服务端 `max_horizon` 512，接口与模型都不用改）。页面上按待做标明，不画假曲线。
+
+**新增 `GET /api/system/credentials`（admin）**：只回答「配了没有、从哪来」，
+不回显密钥值。七牛密钥在**配置文件或环境变量**里（`QINIU_ACCESS_KEY` 等），
+OCR 只认 `OCR_BASE_URL`；改它们要重启，所以**不做在线修改接口** ——
+把长期密钥变成随手可改的网页表单是反效果。响应里 `storageMode` 告诉运维当前走七牛还是本地。
+
+**深色主题与紧凑密度是纯前端偏好**：`[data-theme=dark]` / `[data-density=compact]`
+覆盖 CSS 变量，对比度按与浅色同一标准算过（正文 ≥ 4.5:1）。
+密度只压间距（4/8/12/16/24 → 2/6/8/12/16），不缩字号。
+
+**IA 再收敛一次：「时间与时区」并入「系统操作」** —— 两者都用
+`/system/time*` 同一组接口。导航 28 → **27** 项。
 
 **自动化规则的设备条件在模型里是表达式字符串**（`"Power>30"`，见
 `entity.EAutomationDeviceCondition.Rule`），不是结构化比较。编辑时用「点位 + 比较符 + 值」

@@ -16,8 +16,13 @@ export function buildRoutes(): RouteRecordRaw[] {
       meta: { tab: tab.key, page: page.key, title: page.title },
     })),
   )
+  // 默认首页可在「配置 · 界面与语言」里改；存的是 nav 里的 path
+  const landing = localStorage.getItem('lems:ui:landing') || DEFAULT_ROUTE
+  const allPaths = new Set(routes.map((r) => r.path))
+  const landingTarget = allPaths.has(landing) ? landing : DEFAULT_ROUTE
+
   return [
-    { path: '/', redirect: DEFAULT_ROUTE },
+    { path: '/', redirect: landingTarget },
     // 旧前端用过的路径，留着防书签失效：
     //   /programs 旧 SPA 的「系统管理」页（overlay 的返回目标）
     //   /effect   effect-overlay 自建的效果评估页（已并入 场景·决策支持）
