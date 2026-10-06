@@ -378,6 +378,25 @@ const FAKE_DRIVERS = [
   { driverName: 'ammeter_demo_v1.0.0', driverVersion: 'v1.0.0', driverType: 'ammeter', driverDescription: '演示电表', driverStatus: false, driverIsEmbedded: false, driverLastUpdate: '2025-08-10', driverPath: '/app/drivers/meter.so', driverHash: 'ff00', driverFileSizeByte: 2048, driverImage: '', protocolType: 'modbus', brand: 'HEX', model: 'Demo', buildTime: '', commitHash: '', remark: '' },
 ]
 
+const FAKE_MODBUS = {
+  isRunning: true, listenPort: 502, deviceCount: 3, connectionCount: 1,
+  deviceStatus: [
+    { deviceId: 'pcs_1', modbusId: 3, startAddr: 200, isOnline: true, lastUpdateTime: '2026-10-06 21:00:00' },
+    { deviceId: 'meter_1', modbusId: 1, startAddr: 300, isOnline: false, lastUpdateTime: '2026-10-06 20:59:00' },
+  ],
+}
+const FAKE_MQTT = {
+  isRunning: true, clientCount: 2,
+  clientStatus: [
+    { config: {}, isConnected: true, isRunning: true, clientId: 'lems-01', systemNumber: '7e25fb08e2', topic: 'lems/7e25fb08e2/info' },
+    { config: {}, isConnected: false, isRunning: false, clientId: 'lems-02', systemNumber: 'aabbccdd', topic: 'lems/aabbccdd/info' },
+  ],
+}
+const FAKE_IFACES = [
+  { id: 'eth0', name: 'eth0', mac: '02:42:ac:11:00:02', isUp: true, ipv4: [{ ipv4: '100.64.0.7', subnetMask: '255.255.0.0' }], gateway: ['100.64.0.1'], dns: ['223.5.5.5'], mtu: 1500, dhcp: true },
+  { id: 'lo', name: 'lo', mac: '', isUp: true, ipv4: [{ ipv4: '127.0.0.1', subnetMask: '255.0.0.0' }], gateway: [], dns: [], mtu: 65536, dhcp: false },
+]
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -426,6 +445,14 @@ globalThis.fetch = async (url, init) => {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
   }
+  if (u.includes('/api/remote/modbus/status')) return json(FAKE_MODBUS)
+  if (u.includes('/api/remote/mqtt/status')) return json(FAKE_MQTT)
+  if (u.includes('/api/remote/modbus/enabled') || u.includes('/api/remote/mqtt/enabled')) return json({})
+  if (u.includes('/api/remote/modbus/reload') || u.includes('/api/remote/mqtt/reload')) return json({})
+  if (u.includes('/api/network/interface/list')) return json({ interfaces: FAKE_IFACES })
+  if (u.includes('/api/network/interface/update')) return json({})
+  if (u.includes('/api/network/interface/state')) return json({})
+  if (u.includes('/api/network/ping')) return json({ result: { target: '223.5.5.5', success: true, latency: 12.4, timestamp: 1759000000000 } })
   if (u.includes('/api/device/detailed-list')) return json({ devices: FAKE_DEVICES, total: FAKE_DEVICES.length })
   if (u.includes('/points/definitions')) {
     const id = decodeURIComponent(u.split('/device/')[1].split('/points/')[0])
@@ -537,6 +564,110 @@ console.log('\n== 顶栏约束（设计稿 §2 原则 6）==')
 const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
+
+console.log('\n== 远程调度页 ==')
+await clickTo('管理', '远程调度')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('Modbus 服务'))
+  check(bodyHas('运行中'), '服务状态 KPI')
+  check(bodyHas('1/2'), 'Modbus 从站在线数 1/2')
+  check(bodyHas('监听 502'), '监听端口展示')
+
+  // Modbus 从站表：起始地址按十六进制展示
+  check(bodyHas('0xC8') && bodyHas('0x12C'), '从站起始地址按 16 进制展示')
+  check(bodyHas('pcs_1') && bodyHas('meter_1'), '从站列表')
+
+  // 停服务要二次确认
+  const stopBtn = [...doc.querySelectorAll('.toolbar button')].find((b) => b.textContent.trim() === '停止服务')
+  check(!!stopBtn, '有停止服务按钮')
+  stopBtn.click()
+  await waitFor(() => !!doc.querySelector('.modal'))
+  check(!!doc.querySelector('.modal'), '停服务弹二次确认')
+  const confirm = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认停止')
+  confirm.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/remote/modbus/enabled/false')))
+  check(true, '确认后调用 enabled/false')
+
+  // 重载
+  const reloadBtn = [...doc.querySelectorAll('.toolbar button')].find((b) => b.textContent.trim() === '重载配置')
+  reloadBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/remote/modbus/reload')))
+  check(true, '重载按钮调用 reload')
+
+  // 切到 MQTT
+  const mqttTab = [...doc.querySelectorAll('.tabs-inline button')].find((b) => b.textContent.trim() === 'MQTT')
+  mqttTab.click()
+  await waitFor(() => bodyHas('lems-01'))
+  check(bodyHas('7e25fb08e2'), 'MQTT 客户端序列号')
+  check(bodyHas('lems/7e25fb08e2/info'), 'MQTT topic')
+  check(bodyHas('已连接') && bodyHas('未连接'), 'MQTT 连接状态区分')
+}
+
+console.log('\n== 网络配置页 ==')
+await clickTo('管理', '网络配置')
+{
+  const bodyHas = (t) => doc.body.textContent ?? ''
+  await waitFor(() => bodyHas().includes('eth0'))
+  check(bodyHas().includes('100.64.0.7'), '接口列表带 IP')
+  check(bodyHas().includes('DHCP'), 'DHCP 标记')
+
+  // 选中 eth0 后表单回填
+  const ifaceEls = [...doc.querySelectorAll('.iface')]
+  ifaceEls[0].click()
+  await tick()
+  const ipInput = [...doc.querySelectorAll('.fields input')].find((i) => i.placeholder === '192.168.1.100')
+  check(!!ipInput, '找到 IP 输入框')
+  check(ipInput.value === '100.64.0.7', 'IP 回填', ipInput.value)
+  check(ipInput.disabled === true, 'DHCP 模式下 IP 输入禁用')
+
+  // 关掉 DHCP，填非法 IP 应被拦住
+  const dhcpBox = [...doc.querySelectorAll('.fields input[type=checkbox]')].find((i) => i.closest('label.check'))
+  // happy-dom 的 .click() 不会连带触发 change，而 Vue 的 checkbox v-model 挂的是 change —— 手动来
+  dhcpBox.checked = false
+  dhcpBox.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await tick()
+  check(ipInput.disabled === false, '关掉 DHCP 后 IP 输入可用')
+  ipInput.value = '999.1.1.1'
+  ipInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  check(bodyHas().includes('IP 地址格式不正确'), '非法 IP 被拦住（999.1.1.1）')
+  ipInput.value = '192.168.1.256'
+  ipInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  check(bodyHas().includes('IP 地址格式不正确'), '超过 255 的段也被拦住')
+  const saveBtn = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.trim() === '保存')
+  check(saveBtn.disabled === true, '有校验错误时保存禁用')
+
+  // 改成合法值 → 确认 → 提交 → 强制刷新列表
+  ipInput.value = '192.168.1.50'
+  ipInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  saveBtn.click()
+  await waitFor(() => !!doc.querySelector('.modal'))
+  check(!!doc.querySelector('.modal'), '保存弹确认')
+  const confirm = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认提交')
+  const listCallsBefore = requests.filter((r) => r.url.includes('/api/network/interface/list')).length
+  confirm.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/network/interface/update')))
+  const call = requests.filter((r) => r.url.includes('/api/network/interface/update')).pop()
+  check(call?.body?.name === 'eth0', '提交接口名', JSON.stringify(call?.body))
+  check(call?.body?.config?.dhcp === false, '提交 dhcp=false')
+  check(call?.body?.config?.ipv4?.[0]?.ipv4 === '192.168.1.50', '提交 IPv4', JSON.stringify(call?.body?.config))
+  // 改完必须 forceRefresh 再读，否则会看到缓存里的旧配置
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/network/interface/list')).length > listCallsBefore, 1500)
+  const after = requests.filter((r) => r.url.includes('/api/network/interface/list')).pop()
+  check(after.url.includes('forceRefresh=true'), '保存后强制刷新接口列表', after.url)
+
+  // ping
+  const pingInput = [...doc.querySelectorAll('.ping input')][0]
+  pingInput.value = '223.5.5.5'
+  pingInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  const pingBtn = [...doc.querySelectorAll('.ping button')].find((b) => b.textContent.trim() === 'Ping')
+  pingBtn.click()
+  await waitFor(() => bodyHas().includes('延迟'))
+  check(bodyHas().includes('延迟 12.4 ms'), 'ping 结果展示延迟')
+}
 
 console.log('\n== 设备管理页 ==')
 await clickTo('管理', '设备管理')

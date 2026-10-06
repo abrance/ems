@@ -645,6 +645,15 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 配置 · 系统操作 | `POST /api/system/hostname/update`、`/system/time/update`、`/system/reboot/apply`、`/system/reboot/execute` |
 | 管理 · 设备管理 | `GET /api/device/detailed-list`、`GET /api/device/{id}/points/definitions`、`POST /api/device/enable\|disable` |
 | 管理 · 协议与驱动 | `GET /api/protocol/list`、`GET /api/driver/list`、`GET /api/driver/get` |
+| 管理 · 远程调度 | `GET /api/remote/modbus\|mqtt/status`、`PUT .../enabled/{enabled}`、`POST .../reload` |
+| 管理 · 网络配置 | `GET /api/network/interface/list`、`POST .../interface/update\|state`、`.../ping` |
+
+**远程调度页把两个方向写清楚**：Modbus 是 EMS 作**服务端**（上层来读），
+MQTT 是 EMS 作**客户端**（主动推送）。开关会实际启停服务，走二次确认；
+「改配置后需重载才生效」写在按钮旁。
+
+**网络配置页记住后端有 5 分钟缓存**：`/network/interface/list` 带 `forceRefresh`，
+改完配置后端**不会自动失效缓存**，页面必须显式强制刷新再读，否则会看到旧配置。
 
 **设备树在前端组装**：`/device/tree` 返回嵌套结构，但 `/device/detailed-list` 一次就给出
 扁平列表 + 协议/驱动/存储全量信息。用后者 + 按 `pid` 拼树，少一次请求也不丢字段。
