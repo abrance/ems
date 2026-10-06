@@ -16,6 +16,9 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   price: () => import('./manage/PriceView.vue'),
   collect: () => import('./manage/CollectView.vue'),
   ess: () => import('./config/EssParamsView.vue'),
+  info: () => import('./config/SystemInfoView.vue'),
+  storage: () => import('./config/StorageView.vue'),
+  operations: () => import('./config/OperationsView.vue'),
 }
 
 export { PlaceholderView }

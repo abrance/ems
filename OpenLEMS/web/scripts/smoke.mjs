@@ -333,6 +333,28 @@ const FAKE_PRICE = {
   contextPoints: 60, inputTruncated: false, missingDays: 50, timeMs: 2063,
 }
 
+const FAKE_SYS = {
+  cpu: { usage: 41.2, load1: 4.73, load5: 5.58, load15: 5.78 },
+  memory: { usage: 57.1, totalGB: 15.37, usedGB: 8.76, freeGB: 6.6, procUsage: 3.2, procRSSMB: 512.5 },
+  disk: { usage: 84.2, totalGB: 219.99, usedGB: 185.24, freeGB: 34.75 },
+  uptime: { day: 172, hour: 2, minute: 34, bootTime: '2026-04-17 16:24:00', procUptimeSeconds: 12096000, procStartTime: '2026-04-17 18:14:00' },
+  time: { now: '2026-10-06 21:00:00', timezone: 'Asia/Shanghai', ntpRunning: true, ntpServer: 'ntp.aliyun.com' },
+  sys: { hostname: 'e186166d6694', osName: 'alpine', osVersion: '3.22.1', kernel: '6.6.68-20-oc9.x86_64' },
+}
+const FAKE_NET = { upBytes: 35876000000, downBytes: 25790000000, upBps: 3306, downBps: 3666 }
+const FAKE_STORAGE = {
+  total_series: 1280, total_samples: 98765432, storage_size: 230400000,
+  storage_size_mb: 219.7, oldest_timestamp: '2025-10-06T00:00:00Z', newest_timestamp: '2026-10-06T13:00:00Z',
+  retention_time: 2592000, retention_hours: 720, avg_series_size: 180000, samples_per_second: 1.4,
+}
+const FAKE_CHART = {
+  xAxis: { type: 'category', data: ['1759000000000', '1759000900000'] },
+  series: [
+    { name: 'CPU', type: 'line', unit: '%', data: ['40', '42'] },
+    { name: '内存', type: 'line', unit: '%', data: ['55', '57'] },
+  ],
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -381,6 +403,15 @@ globalThis.fetch = async (url, init) => {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
   }
+  if (u.includes('/api/system/summary')) return json(FAKE_SYS)
+  if (u.includes('/api/system/net/traffic')) return json({ net: FAKE_NET })
+  if (u.includes('/api/system/storage/stats')) return json({ stats: FAKE_STORAGE })
+  if (u.includes('/api/system/storage-time')) return json({})
+  if (u.includes('/api/system/resource/chart')) return json({ chartData: FAKE_CHART })
+  if (u.includes('/api/system/hostname/update')) return json({})
+  if (u.includes('/api/system/time/update')) return json({})
+  if (u.includes('/api/system/reboot/apply')) return json({})
+  if (u.includes('/api/system/reboot/execute')) return json({})
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
   if (u.includes('/api/forecast/load')) return json({ forecast: FAKE_LOAD })
@@ -475,6 +506,100 @@ const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
+console.log('\n== 系统信息页 ==')
+await clickTo('配置', '系统信息')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('CPU 使用率'))
+  check(bodyHas('41.2'), '/system/summary 扁平响应取到 CPU 使用率')
+  check(bodyHas('15.4') || bodyHas('8.8'), '内存总量/已用取到')
+  check(bodyHas('172 天 2 小时 34 分'), '运行时长格式化正确')
+  check(bodyHas('Asia/Shanghai'), '时区展示')
+  check(bodyHas('e186166d6694'), '主机名展示')
+  check(bodyHas('8.1 KB/s') || bodyHas('3.2 KB/s'), '网络速率格式化（humanBytes）', '')
+  // 页面按 1 位小数展示（185.24 → 185.2 / 219.99 → 220.0），别拿原始两位小数断言
+  check(bodyHas('185.2') && bodyHas('220.0'), '磁盘已用/总量按 1 位小数展示')
+}
+
+console.log('\n== 存储管理页 ==')
+await clickTo('配置', '存储管理')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('存储占用'))
+  check(bodyHas('1280'), '时序条数取到 { stats } 外层内')
+  check(bodyHas('219.7 MB'), '占用空间格式化')
+  check(bodyHas('30'), '保留策略回填（720 小时 → 30 天）')
+
+  // 保留天数改成 0 应被拦住
+  const inputs = [...doc.querySelectorAll('.fields input')]
+  check(inputs.length === 3, `三类保留天数输入（实际 ${inputs.length}）`)
+  inputs[0].value = '0'
+  inputs[0].dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  const saveBtn = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.trim() === '保存')
+  saveBtn.click()
+  await tick()
+  check(!doc.querySelector('.modal'), '非法保留天数被拦住，不弹确认')
+
+  inputs[0].value = '45'
+  inputs[0].dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  saveBtn.click()
+  await waitFor(() => !!doc.querySelector('.modal'))
+  check(!!doc.querySelector('.modal'), '合法值弹出确认')
+  const confirm = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认保存')
+  confirm.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/system/storage-time')))
+  const call = requests.filter((r) => r.url.includes('/api/system/storage-time')).pop()
+  check(call?.body?.deviceRetentionDays === 45, '提交设备保留天数', JSON.stringify(call?.body))
+}
+
+console.log('\n== 系统操作页 ==')
+await clickTo('配置', '系统操作')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('主机名'))
+  // 主机名校验：非法字符应被拦住
+  const hn = doc.querySelector('#hostname')
+  hn.value = 'bad name!'
+  hn.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  check(bodyHas('只能包含字母、数字与短横线'), '主机名非法字符被拦住')
+
+  hn.value = 'lems-edge-01'
+  hn.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  const saveBtn = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.trim() === '保存')
+  saveBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/system/hostname/update')))
+  const call = requests.filter((r) => r.url.includes('/api/system/hostname/update')).pop()
+  check(call?.body?.hostname === 'lems-edge-01', '提交主机名', JSON.stringify(call?.body))
+
+  // 重启是两步：申请前「执行重启」必须不可用
+  const rebootBtns = [...doc.querySelectorAll('.reboot button')]
+  check(rebootBtns.length === 2, `重启两步各一个按钮（实际 ${rebootBtns.length}）`)
+  check(rebootBtns[1].disabled === true, '未申请时「执行重启」不可用')
+  rebootBtns[0].click()
+  await waitFor(() => bodyHas('已申请'))
+  check(bodyHas('已申请'), '申请后进入倒计时中间态')
+  check([...doc.querySelectorAll('.reboot button')][1].disabled === false, '申请后「执行重启」可用')
+  const applyCall = requests.filter((r) => r.url.includes('/api/system/reboot/apply')).pop()
+  check(!!applyCall, '发出重启申请')
+
+  // 执行需输主机名确认
+  ;[...doc.querySelectorAll('.reboot button')][1].click()
+  await waitFor(() => !!doc.querySelector('.danger-modal'))
+  const execBtn = [...doc.querySelectorAll('.danger-modal button')].find((b) => b.textContent.trim() === '确认重启')
+  check(execBtn.disabled === true, '未输主机名时不能确认重启')
+  const confirmInput = doc.querySelector('.danger-modal input')
+  confirmInput.value = 'lems-edge-01'
+  confirmInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  ;[...doc.querySelectorAll('.danger-modal button')].find((b) => b.textContent.trim() === '确认重启').click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/system/reboot/execute')))
+  check(true, '输对主机名后可执行重启')
+}
+
 console.log('\n== 旧路由重定向 ==')
 for (const [from, to] of [['/programs', '手动控制'], ['/effect', '决策支持']]) {
   window.history.pushState({}, '', from)
@@ -499,11 +624,14 @@ console.log('\n== 401 提示 ==')
 }
 
 console.log('\n== 导航结构 ==')
+// 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
+// 当前 28 = 29 - 「数据保留」（后端接口挂在 system 下，已并入「存储管理」，不留两个入口）
+const EXPECTED_PAGES = 28
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 3, `Tab 数量 = ${tabEls.length}（期望 3）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(NAV[0].pages.length === 7, `场景页 7 个（实际 ${NAV[0].pages.length}）`)
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
-check(totalPages === 29, `页面总数 29（实际 ${totalPages}）`)
+check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${totalPages}）`)
 
 /** 点 Tab 再点侧栏项 */
 async function clickTo(tabTitle, pageTitle) {

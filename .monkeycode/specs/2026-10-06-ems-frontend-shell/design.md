@@ -640,6 +640,17 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 场景 · 信息披露 | `GET /api/gd-metric` |
 | 管理 · 手动控制 | `name-list` / `control/custom-services` / `device/telemetry` / `device/history` / `control/device` |
 | 配置 · 储能参数 | `GET /api/policy/config-fields`（字段元数据）+ `GET /api/policy/config`（当前值）+ `POST /api/setting/update`（保存） |
+| 配置 · 系统信息 | `GET /api/system/summary`、`GET /api/system/net/traffic`、`POST /api/system/resource/chart` |
+| 配置 · 存储管理 | `GET /api/system/storage/stats`、`POST /api/system/storage-time` |
+| 配置 · 系统操作 | `POST /api/system/hostname/update`、`/system/time/update`、`/system/reboot/apply`、`/system/reboot/execute` |
+
+**IA 调整：「数据保留」并入「存储管理」。** 后端把保留天数放在
+`POST /system/storage-time`（与存储统计同一组接口），单开一页会变成同一功能两个入口。
+导航从 33 项收敛为 28 项。
+
+**重启是两步，页面照后端的语义做**：`reboot/apply`（申请，30 秒内有效）→
+`reboot/execute`（执行）。页面上把「已申请 · 倒计时」这个中间态显式做出来，
+否则用户不知道 30 秒在倒计时。执行需输入主机名确认。
 | 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage`、`PUT/DELETE .../{id}`、`POST .../activate`、`GET /api/effect/backtest`（试运行） |
 | 管理 · 电价管理 | `GET /api/price`、`GET /api/price/current`、`POST /api/price`、`PUT /api/price/{id}`、`DELETE`、`PUT /api/price/{id}/toggle` |
 | 管理 · 采集管理 | `GET /api/spot-report`、`GET .../data`、`GET .../audit`、`POST .../collect`、`.../extract`、`.../extract/batch`(+`/status`)、`.../metric`、`.../confirm` |
