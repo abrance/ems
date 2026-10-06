@@ -80,6 +80,7 @@ src/
 | 管理 · 网络配置 | `GET /api/network/interface/list` `POST .../interface/update` `.../interface/state` `.../ping` |
 | 管理 · 统计分析 | `POST /api/device/compare` `POST /api/protocol/monitor/{overview,distribution,trend,metrics}` `POST /api/system/resource/chart` |
 | 管理 · 审计 | `GET /api/log/biz` `.../biz/info` `.../biz/statistics` `DELETE /api/log/biz` |
+| 管理 · 自动化联动 | `GET /api/automation/page` `POST /api/automation` `PUT/DELETE /api/automation/{id}` `POST .../toggle` |
 
 手动控制页的两条硬规则：
 
@@ -117,7 +118,7 @@ src/
 「数据保留」不单开页：后端接口挂在 `/system/storage-time`，已并入「存储管理」，
 避免同一功能两个入口（导航因此从 29 项变 28 项，冒烟里有显式常量盯着）。
 
-其它 11 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+其它 10 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系

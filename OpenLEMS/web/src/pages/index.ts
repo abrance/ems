@@ -18,6 +18,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   remote: () => import('./manage/RemoteView.vue'),
   network: () => import('./manage/NetworkView.vue'),
   statistics: () => import('./manage/StatisticsView.vue'),
+  automation: () => import('./manage/AutomationView.vue'),
   audit: () => import('./manage/AuditView.vue'),
   price: () => import('./manage/PriceView.vue'),
   collect: () => import('./manage/CollectView.vue'),

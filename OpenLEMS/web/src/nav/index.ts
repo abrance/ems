@@ -88,7 +88,7 @@ export const NAV: NavTab[] = [
         perm: 'manage:control',
       },
       { key: 'policies', title: '策略管理', path: '/manage/policies', status: 'ready', perm: 'manage:policy' },
-      { key: 'automation', title: '自动化联动', path: '/manage/automation', status: 'todo', perm: 'manage:automation', panels: ['自动化规则'] },
+      { key: 'automation', title: '自动化联动', path: '/manage/automation', status: 'ready', perm: 'manage:automation' },
       { key: 'devices', title: '设备管理', path: '/manage/devices', status: 'ready', perm: 'manage:device' },
       { key: 'drivers', title: '协议与驱动', path: '/manage/drivers', status: 'ready', perm: 'manage:driver' },
       { key: 'remote', title: '远程调度', path: '/manage/remote', status: 'ready', perm: 'manage:remote' },

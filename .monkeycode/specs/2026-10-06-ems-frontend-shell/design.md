@@ -649,6 +649,12 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 网络配置 | `GET /api/network/interface/list`、`POST .../interface/update\|state`、`.../ping` |
 | 管理 · 统计分析 | `POST /api/device/compare`、`POST /api/protocol/monitor/{overview,distribution,trend,metrics}`、`POST /api/system/resource/chart` |
 | 管理 · 审计 | `GET /api/log/biz`、`.../biz/info`、`.../biz/statistics`、`DELETE /api/log/biz` |
+| 管理 · 自动化联动 | `GET /api/automation/page`、`POST /api/automation`、`PUT\|DELETE /api/automation/{id}`、`POST .../toggle` |
+
+**自动化规则的设备条件在模型里是表达式字符串**（`"Power>30"`，见
+`entity.EAutomationDeviceCondition.Rule`），不是结构化比较。编辑时用「点位 + 比较符 + 值」
+拼出来；读回来能解析就展示、解析不了就原样显示，不猜。执行动作的 `params` 仍是
+**位置参数**，选完服务后按驱动声明渲染输入框（与手动控制页同一约定）。
 
 **协议趋势的 `metricKeys` 取值来自后端映射表**
 （`internal/controller/protocol/protocol_v1_post_monitor_trend.go`）：
