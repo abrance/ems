@@ -97,6 +97,20 @@ globalThis.HTMLCanvasElement = window.HTMLCanvasElement
 globalThis.SVGElement = window.SVGElement
 globalThis.Element = window.Element
 globalThis.Node = window.Node
+// ECharts（zrender）在初始化时会逐个探测一批浏览器构造器。
+// 一个个补是打地鼠，直接把 happy-dom 上的构造器整体映射过来，已有的不动。
+const SKIP = new Set(['window', 'self', 'top', 'parent', 'globalThis', 'location', 'history', 'document', 'navigator'])
+for (const key of Object.getOwnPropertyNames(window)) {
+  if (SKIP.has(key) || key in globalThis) continue
+  if (!/^[A-Z]/.test(key)) continue
+  let value
+  try {
+    value = window[key]
+  } catch {
+    continue
+  }
+  if (typeof value === 'function') globalThis[key] = value
+}
 globalThis.localStorage = window.localStorage
 globalThis.getComputedStyle = window.getComputedStyle.bind(window)
 
@@ -270,6 +284,15 @@ const FAKE_AUDIT = [
 
 const FAKE_BATCH = { id: 'job1', status: 'done', total: 3, done: 3, succeeded: 3, failed: 0, overwritten: 1, current: '', skippedConfirmed: ['2026-09-21'], errors: [], startedAt: '2026-09-21 22:30', finishedAt: '2026-09-21 22:31' }
 
+const FAKE_TREND_POINTS = [
+  { bucket: '2026-W39', from: '2026-09-21', to: '2026-09-27', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 400.5, max: 480, min: 320, sum: 0, days: 7, unit: '元/MWh', value: 0 },
+  { bucket: '2026-W40', from: '2026-09-28', to: '2026-10-04', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 388.2, max: 470, min: 300, sum: 0, days: 7, unit: '元/MWh', value: 0 },
+  { bucket: '2026-W39', from: '2026-09-21', to: '2026-09-27', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', avg: 402.1, max: 460, min: 350, sum: 0, days: 7, unit: '元/MWh', value: 0 },
+  { bucket: '2026-W40', from: '2026-09-28', to: '2026-10-04', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', avg: 395.6, max: 455, min: 340, sum: 0, days: 7, unit: '元/MWh', value: 0 },
+  { bucket: '2026-W39', from: '2026-09-21', to: '2026-09-27', dataset: 'summary', scope: '市场', metric: '日前加权平均电价', avg: 399, max: 420, min: 380, sum: 0, days: 7, unit: '元/MWh', value: 0 },
+  { bucket: '2026-W40', from: '2026-09-28', to: '2026-10-04', dataset: 'summary', scope: '市场', metric: '日前加权平均电价', avg: 390, max: 410, min: 375, sum: 0, days: 7, unit: '元/MWh', value: 0 },
+]
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -317,6 +340,16 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/strategy/energy-storage')) {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
+  }
+  if (u.includes('/api/spot-report/trend')) {
+    const q = new URL(u, 'http://x').searchParams
+    return json({
+      from: q.get('from') || '2026-10-01',
+      to: q.get('to') || '2026-10-06',
+      grain: q.get('grain') || 'week',
+      excludedPending: 8,
+      points: FAKE_TREND_POINTS,
+    })
   }
   if (u.includes('/api/spot-report/collect')) return json({ report: FAKE_REPORTS[0] })
   if (u.includes('/api/spot-report/data')) {
@@ -453,6 +486,67 @@ for (const tab of NAV) {
   }
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
+
+console.log('\n== 历史信息页 ==')
+await clickTo('场景', '历史信息')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('已排除未复核'))
+  check(bodyHas('已排除未复核 8 项'), '显示被排除的未复核条数（不静默少数据）')
+  check(bodyHas('本周') && bodyHas('本月') && bodyHas('自定义'), '区间预设齐全')
+  check(bodyHas('按日') && bodyHas('按周') && bodyHas('按月'), '粒度可选')
+
+  // 默认本月预设：请求应带 from/to（前端算，前端显示；后端也能兜底）
+  const first = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
+  check(!!first, '发出趋势请求')
+  check(bodyHas('粒度 week'), '展示后端返回的粒度')
+  check(bodyHas('共 2 个桶'), '展示桶数')
+
+  // 图表按数据集分组
+  const chartTitles = [...doc.querySelectorAll('.panel-title')].map((e) => e.textContent.trim())
+  check(chartTitles.includes('日前成交电价') && chartTitles.includes('正文摘要指标'), '按数据集出图')
+
+  // 桶明细：2 行（2 个桶）× 3 条序列
+  const rows = [...doc.querySelectorAll('.table-wrap tbody tr')]
+  check(rows.length === 2, `桶明细 2 行（实际 ${rows.length}）`)
+  const cells = [...rows[0].querySelectorAll('td')]
+  check(cells.length === 4, `桶明细 1 + 3 列（实际 ${cells.length}）`)
+  check(cells[1].textContent.trim() === '400.5', '桶明细取 avg', cells[1].textContent)
+
+  // 取消勾选一条序列 → 图和宽表都少一列
+  const toggles = [...doc.querySelectorAll('.chips .chip-toggle')]
+  const coalToggle = toggles.find((b) => b.textContent.includes('燃煤'))
+  check(!!coalToggle, '指标多选里有燃煤序列')
+  coalToggle.click()
+  await tick()
+  const after = [...doc.querySelectorAll('.table-wrap tbody tr')][0]
+  check(after.querySelectorAll('td').length === 3, '取消勾选后宽表少一列', String(after.querySelectorAll('td').length))
+
+  // 待数据源的面板要明说，不画空图
+  check(bodyHas('待数据源'), '列出待数据源的面板')
+  check(bodyHas('火电启停状态统计（多日）'), '点名缺哪几块')
+
+  // 切粒度会重新请求。happy-dom 下 select.value 走不通（Vue 把值挂在 option 上），
+  // 所以按 option 定位再改 selectedIndex —— 与真实选择行为一致。
+  const before = requests.filter((r) => r.url.includes('/api/spot-report/trend')).length
+  const grainSelect = [...doc.querySelectorAll('.toolbar .field select')][0]
+  check(!!grainSelect, '找到粒度下拉')
+  const dayOption = [...grainSelect.options].find((o) => o.textContent.trim() === '按日')
+  check(!!dayOption, '下拉里有「按日」')
+  grainSelect.selectedIndex = dayOption.index
+  grainSelect.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/spot-report/trend')).length > before)
+  const dayCall = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
+  check(dayCall.url.includes('grain=day'), '切粒度带上 grain 参数', dayCall.url)
+
+  // 区间预设按钮也会重新查询
+  const beforeWeek = requests.filter((r) => r.url.includes('/api/spot-report/trend')).length
+  const weekBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '本周')
+  weekBtn.click()
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/spot-report/trend')).length > beforeWeek)
+  const weekCall = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
+  check(weekCall.url.includes('grain=day'), '切换区间保留已选粒度', weekCall.url)
+}
 
 console.log('\n== 采集管理页 ==')
 await clickTo('管理', '采集管理')
