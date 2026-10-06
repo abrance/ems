@@ -76,3 +76,50 @@
   --w-side: 220px;
   --w-side-rail: 56px;
 }
+
+/* ============================================================================
+   深色主题：与浅色同结构，对比度按同一标准算过（正文 ≥ 4.5:1）。
+   语义色在深色下是「深底 + 亮字」—— 与浅色的「浅底 + 深字」是对偶关系，
+   StatusTag 之类用 var(--{tone}-soft/ink) 的组件会自动跟随，不用改。
+   ========================================================================== */
+[data-theme='dark'] {
+  --bg-1: #17171a;
+  --bg-2: #232324;
+  --bg-3: #2a2a2b;
+  --bg-4: #1d1d1f;
+  --border: #3a3a3c;
+  --divider: #303032;
+
+  --text-1: #f2f3f5;
+  --text-2: #c9cdd4;
+  --text-3: #a3a6ad;
+
+  /* 品牌亮档在深色底上做竖条/图表仍然可见；承载文字改用亮档 */
+  --brand: #ff7d00;
+  --brand-ink: #ffb16b;
+  --brand-btn: #c25400;
+  --brand-btn-h: #b85000;
+  --brand-soft: #3a2410;
+  --brand-line: #6b4318;
+
+  --green-ink: #7ee08f;
+  --green-soft: #17301c;
+  --red-ink: #ff9a94;
+  --red-soft: #3a1a18;
+  --blue-ink: #7aa6ff;
+  --blue-soft: #16223a;
+  --purple-ink: #b98cff;
+  --purple-soft: #2a1b3d;
+  --gray-ink: #c9cdd4;
+  --gray-soft: #2a2a2b;
+}
+
+/* 紧凑密度：只压间距，不动字号（压字号会牺牲可读性） */
+[data-density='compact'] {
+  --s1: 2px;
+  --s2: 6px;
+  --s3: 8px;
+  --s4: 12px;
+  --s5: 16px;
+  --s6: 24px;
+}

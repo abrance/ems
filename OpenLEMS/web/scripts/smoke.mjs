@@ -449,6 +449,19 @@ const FAKE_SERVICES_DIDO = [
   { key: 'setLowLevel', name: '置低电平', description: '红灯灭', params: [] },
 ]
 
+const FAKE_CREDS = {
+  storageMode: 'qiniu',
+  qiniu: [
+    { name: 'AccessKey', configured: true, source: 'env', value: '••••••' },
+    { name: 'SecretKey', configured: true, source: 'env', value: '••••••' },
+    { name: 'Bucket', configured: true, source: 'config', value: 'tos-me' },
+    { name: '访问域名', configured: true, source: 'config', value: 'http://file.example.com' },
+    { name: 'Zone', configured: true, source: 'default', value: 'z2' },
+  ],
+  ocr: [{ name: '服务地址', configured: false, source: 'missing', value: '' }],
+  note: '密钥保存在服务端配置文件或环境变量里，改后需重启；页面只读，不提供在线修改。密钥值一律不回显。',
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -533,6 +546,7 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/protocol/list')) return json({ list: FAKE_PROTOCOLS, total: FAKE_PROTOCOLS.length })
   if (u.includes('/api/driver/get')) return json({ driver: FAKE_DRIVERS[0] })
   if (u.includes('/api/driver/list')) return json({ list: FAKE_DRIVERS, total: FAKE_DRIVERS.length })
+  if (u.includes('/api/system/credentials')) return json(FAKE_CREDS)
   if (u.includes('/api/system/summary')) return json(FAKE_SYS)
   if (u.includes('/api/system/net/traffic')) return json({ net: FAKE_NET })
   if (u.includes('/api/system/storage/stats')) return json({ stats: FAKE_STORAGE })
@@ -982,6 +996,58 @@ await clickTo('管理', '协议与驱动')
   check(bodyHas('40.0 KB'), '文件大小格式化')
 }
 
+console.log('\n== 采集与凭据页 ==')
+await clickTo('配置', '采集与凭据')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('凭据状态'))
+  check(bodyHas('七牛云'), '显示存储方式')
+  check(bodyHas('tos-me'), '非敏感值（bucket）正常展示')
+  check(bodyHas('••••••') && !bodyHas('SUPER-SECRET'), '密钥打码，且原文未出现')
+  check(bodyHas('环境变量') && bodyHas('配置文件') && bodyHas('默认值'), '来源标注（env/config/default）')
+  check(bodyHas('这里不能改'), '明确声明页面只读')
+  check(bodyHas('未配置 OCR') || bodyHas('不能解析成结构化数据'), 'OCR 未配置时说明后果')
+}
+
+console.log('\n== 界面与语言页 ==')
+await clickTo('配置', '界面与语言')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('主题'))
+  check(bodyHas('浅色') && bodyHas('深色'), '主题可选')
+  check(bodyHas('紧凑'), '密度可选')
+  check(bodyHas('本期不做'), '语言项明确标为不做，不做假下拉框')
+
+  // 切深色要真的落到 documentElement 上（主题是 CSS 变量驱动的）
+  const darkBtn = [...doc.querySelectorAll('.choice')].find((b) => b.textContent.includes('深色'))
+  darkBtn.click()
+  await tick()
+  check(doc.documentElement.dataset.theme === 'dark', '切深色写入 data-theme', String(doc.documentElement.dataset.theme))
+  check(localStorage.getItem('lems:ui:theme') === 'dark', '主题持久化到 localStorage')
+
+  // 切紧凑
+  const compactBtn = [...doc.querySelectorAll('.choice')].find((b) => b.textContent.includes('紧凑'))
+  compactBtn.click()
+  await tick()
+  check(doc.documentElement.dataset.density === 'compact', '切紧凑写入 data-density')
+
+  // 切回浅色要移除属性（不是设为其他值）
+  const lightBtn = [...doc.querySelectorAll('.choice')].find((b) => b.textContent.includes('浅色'))
+  lightBtn.click()
+  await tick()
+  check(doc.documentElement.dataset.theme === undefined, '切回浅色移除 data-theme')
+
+  // 默认首页
+  const sel = doc.querySelector('.field select')
+  const opt = [...sel.options].find((o) => o.textContent.includes('策略管理'))
+  check(!!opt, '默认首页下拉列出所有页面')
+  sel.selectedIndex = opt.index
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await tick()
+  check(!!localStorage.getItem('lems:ui:landing'), '默认首页持久化')
+  check(bodyHas('策略管理'), '展示当前默认页预览')
+}
+
 console.log('\n== 系统信息页 ==')
 await clickTo('配置', '系统信息')
 {
@@ -1101,8 +1167,9 @@ console.log('\n== 401 提示 ==')
 
 console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
-// 当前 28 = 29 - 「数据保留」（后端接口挂在 system 下，已并入「存储管理」，不留两个入口）
-const EXPECTED_PAGES = 28
+// 当前 27 = 29 - 「数据保留」- 「时间与时区」
+//   两者都是「后端接口挂在别的功能下」：保留→存储管理，时间→系统操作，不留两个入口
+const EXPECTED_PAGES = 27
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 3, `Tab 数量 = ${tabEls.length}（期望 3）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(NAV[0].pages.length === 7, `场景页 7 个（实际 ${NAV[0].pages.length}）`)
@@ -1129,7 +1196,8 @@ for (const tab of NAV) {
     continue
   }
   tabEl.click()
-  await waitFor(() => sideTitles().length === tab.pages.length)
+  // 判断依据要唯一：两栏项数可能相同（配置与场景都是 7），按首页标题等才可靠
+  await waitFor(() => !!findSide(tab.pages[0].title))
 
   const sideCount = sideTitles().length
   check(sideCount === tab.pages.length, `${tab.title} 侧栏项数 = ${sideCount}（期望 ${tab.pages.length}）`)
