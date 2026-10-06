@@ -70,6 +70,7 @@ src/
 | 管理 · 采集管理 | `GET /api/spot-report` `GET .../data` `GET .../audit` `POST .../collect` `.../extract` `.../extract/batch` `.../metric` `.../confirm` |
 | 场景 · 历史信息 | `GET /api/spot-report/trend` |
 | 场景 · 决策支持 | `GET /api/effect/summary` `GET /api/effect/backtest` `GET /api/forecast/load` `GET /api/forecast/price` |
+| 场景 · 市场出清 | `GET /api/spot-report/data` |
 
 手动控制页的两条硬规则：
 
@@ -101,7 +102,10 @@ src/
 决策支持是 `effect-overlay` 的迁入点。预测接口区分两个动作：普通查询不穿透后端缓存，
 只有「刷新预测」才带 `forceRefresh=true` —— TimesFM 是 CPU 推理，切页就打模型会排队。
 
-其它 21 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+市场出清页的节点电价档位是**图像采样预填**（`origin=cv`）——数值只存在于色块里，
+页面显著标注「需人工确认」。档位顺序从区间文本下界推导，日报换档位划分不用改代码。
+
+其它 20 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系

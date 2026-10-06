@@ -645,6 +645,13 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 采集管理 | `GET /api/spot-report`、`GET .../data`、`GET .../audit`、`POST .../collect`、`.../extract`、`.../extract/batch`(+`/status`)、`.../metric`、`.../confirm` |
 | 场景 · 历史信息 | `GET /api/spot-report/trend`（按运行日分桶，日/周/月，**只看已确认**） |
 | 场景 · 决策支持 | `GET /api/effect/summary`、`GET /api/effect/backtest`、`GET /api/forecast/load`、`GET /api/forecast/price` |
+| 场景 · 市场出清 | `GET /api/spot-report/data`（节点电价档位 + 日前/实时成交电价） |
+
+**市场出清页的数据性质要标清楚**：地市节点电价档位（图2-1/2-2）是**图像采样预填**
+（`origin=cv`）—— 数值只存在于色块里，OCR 取不到，所以必须显著标注「需人工确认」。
+档位顺序**从区间文本的下界推导**，不写死阈值；日报换了档位划分页面不用改。
+实时成交电价来自表2(二)，承载的是**滞后运行日 T-2**，与页面选的运行日不是同一天，
+必须显式提示。启停统计图/表、调频价格、输电约束与阻塞日报未提取，逐条点名。
 
 **决策支持 = effect-overlay 的迁入点**（实测效果 KPI + 算法回测 + 负荷预测），
 外加电价预测。两套都复用既有实现：效果与回测走**同一套成本模型**，
