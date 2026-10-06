@@ -640,6 +640,16 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 场景 · 信息披露 | `GET /api/gd-metric` |
 | 管理 · 手动控制 | `name-list` / `control/custom-services` / `device/telemetry` / `device/history` / `control/device` |
 | 配置 · 储能参数 | `GET /api/policy/config-fields`（字段元数据）+ `GET /api/policy/config`（当前值）+ `POST /api/setting/update`（保存） |
+| 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage`、`PUT/DELETE .../{id}`、`POST .../activate`、`GET /api/effect/backtest`（试运行） |
+
+**策略管理页的两个口径**（写死在代码注释里）：
+
+1. **储能参数 vs 储能策略是两个东西，不要混**：储能参数（setting `policy_microgrid`）
+   是**运行中的微电网策略参数**，全局一份；储能策略是**可排期的计划**
+   （日期范围 + 时间范围 + 24 小时功率点位 `[[hour, percent]]`），多条并存、按优先级
+   与时间范围命中，靠 `activate` 启用/停用。
+2. **试运行直接调 `/api/effect/backtest`**，与「储能效果评估」用**同一套成本模型**。
+   另造一套估算的话，同一个策略会在两个页面给出两个收益，没人知道该信哪个。
 
 **新增接口 `GET /api/policy/config-fields`**：储能参数的表单字段元数据由后端**反射
 `SPolicyMircogridConfig` 的 struct tag** 得到（`name` / `ct` / `vt` / `min` / `max` /
