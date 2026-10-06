@@ -319,7 +319,8 @@ func buildIndexHTMLWithRuntimeConfig(ctx context.Context, webfs fs.FS) ([]byte, 
 	indexHTML := string(indexHTMLBytes)
 
 	if strings.Contains(indexHTML, "</head>") {
-		overlayTags := runtimeScript + "\n    <link rel=\"stylesheet\" href=\"/overlay/spot-overlay.css\" />\n    <script src=\"/overlay/spot-overlay.js\" defer></script>\n"
+		overlayTags := runtimeScript + "\n    <link rel=\"stylesheet\" href=\"/overlay/spot-overlay.css\" />\n    <script src=\"/overlay/spot-overlay.js\" defer></script>" +
+			"\n    <link rel=\"stylesheet\" href=\"/overlay/effect-overlay.css\" />\n    <script src=\"/overlay/effect-overlay.js\" defer></script>\n"
 		indexHTML = strings.Replace(indexHTML, "</head>", "    "+overlayTags+"  </head>", 1)
 	} else {
 		indexHTML = runtimeScript + indexHTML

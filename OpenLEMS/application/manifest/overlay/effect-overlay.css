@@ -1,0 +1,284 @@
+/* 储能效果评估悬浮层样式。与 spot-overlay.css 一样全部走 SPA 的 CSS 变量，
+   因此跟随明/暗主题。类名统一 effect- 前缀，避免与 spot- 系列冲突。 */
+
+/* ---------- 入口卡片（系统管理 → 配置区） ---------- */
+.effect-card {
+  width: 100%;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--color-bg-2, #fff);
+  border: 1px solid var(--color-border, #e5e6eb);
+  border-radius: 8px;
+  cursor: pointer;
+  box-sizing: border-box;
+  padding: 10px;
+}
+.effect-card:hover {
+  box-shadow: 0 4px 10px #0000001a;
+}
+.effect-card-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(var(--primary-6, 255, 125, 0), 0.12);
+  color: rgb(var(--primary-6, 255, 125, 0));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+.effect-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-1, #1d2129);
+}
+.effect-card-desc {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+  text-align: center;
+}
+
+/* ---------- 整页 ---------- */
+.effect-page {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  background: var(--color-bg-1, #f5f6f7);
+  overflow: auto;
+  padding: 20px 24px 40px;
+  box-sizing: border-box;
+}
+.effect-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.effect-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.effect-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-1, #1d2129);
+}
+.effect-sub {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+.effect-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.effect-controls-label {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+.effect-input {
+  border: 1px solid var(--color-border, #e5e6eb);
+  background: var(--color-bg-2, #fff);
+  color: var(--color-text-1, #1d2129);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.effect-btn {
+  border: 1px solid var(--color-border, #e5e6eb);
+  background: var(--color-bg-2, #fff);
+  color: var(--color-text-1, #1d2129);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.effect-btn:hover {
+  border-color: rgb(var(--primary-6, 255, 125, 0));
+  color: rgb(var(--primary-6, 255, 125, 0));
+}
+
+/* ---------- 分区 ---------- */
+.effect-section {
+  background: var(--color-bg-2, #fff);
+  border: 1px solid var(--color-border, #e5e6eb);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.effect-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-1, #1d2129);
+  margin-bottom: 4px;
+}
+.effect-section .effect-sub {
+  margin-bottom: 10px;
+}
+.effect-msg {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+  margin: 6px 0 10px;
+}
+
+/* ---------- 指标卡 ---------- */
+.effect-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+.effect-stat {
+  border: 1px solid var(--color-border, #e5e6eb);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--color-bg-1, #f7f8fa);
+}
+.effect-stat-label {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+.effect-stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-1, #1d2129);
+  margin: 4px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.effect-stat-desc {
+  font-size: 11px;
+  color: var(--color-text-4, #a9aeb8);
+}
+
+/* ---------- 回测表 ---------- */
+.effect-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-bg-2, #fff);
+  border: 1px solid var(--color-border, #e5e6eb);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.effect-table th,
+.effect-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-border, #e5e6eb);
+  font-size: 13px;
+  color: var(--color-text-1, #1d2129);
+  text-align: left;
+  white-space: nowrap;
+}
+.effect-table th {
+  background: var(--color-fill-1, #f7f8fa);
+  font-weight: 600;
+  color: var(--color-text-2, #4e5969);
+}
+.effect-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.effect-table tbody tr:hover td {
+  background: var(--color-fill-1, #fafafa);
+}
+.effect-row-baseline td {
+  color: var(--color-text-3, #86909c);
+}
+.effect-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.effect-strong {
+  font-weight: 600;
+}
+.effect-algo {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* ---------- 预测图 ---------- */
+.effect-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.effect-svg-grid {
+  stroke: var(--color-border, #e5e6eb);
+  stroke-width: 1;
+}
+.effect-svg-axis {
+  fill: var(--color-text-3, #86909c);
+  font-size: 11px;
+}
+.effect-svg-divider {
+  stroke: var(--color-border-3, #c9cdd4);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.effect-svg-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.effect-svg-history {
+  stroke: rgb(var(--primary-6, 255, 125, 0));
+}
+.effect-svg-forecast {
+  stroke: #3491fa;
+  stroke-dasharray: 6 4;
+}
+.effect-svg-band {
+  fill: rgba(52, 145, 250, 0.16);
+  stroke: none;
+}
+.effect-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-2, #4e5969);
+}
+.effect-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.effect-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.effect-legend-actual { background: rgb(var(--primary-6, 255, 125, 0)); }
+.effect-legend-pred { background: #3491fa; }
+.effect-legend-band { background: rgba(52, 145, 250, 0.3); }
+.effect-legend-hint { color: var(--color-text-4, #a9aeb8); }
+
+@media (max-width: 960px) {
+  .effect-page {
+    top: 48px;
+    padding: 12px;
+  }
+  .effect-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .effect-table th,
+  .effect-table td {
+    padding: 8px 8px;
+    font-size: 12px;
+  }
+}
