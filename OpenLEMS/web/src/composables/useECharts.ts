@@ -1,11 +1,7 @@
-import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, watch, type Ref, type WatchSource } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
-import {
-  GridComponent,
-  LegendComponent,
-  TooltipComponent,
-} from 'echarts/components'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsOption } from 'echarts'
 
@@ -13,10 +9,16 @@ import type { EChartsOption } from 'echarts'
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 /**
- * 把 ECharts 挂到一个 div 上：自动 init / 跟随容器尺寸 / 卸载时 dispose。
- * 只在真正需要交互图（tooltip、缩放、图例开关）时用它；静态小图不必上 ECharts。
+ * 把 ECharts 挂到一个 div 上：init / 跟随容器尺寸 / 卸载时 dispose。
+ *
+ * `deps` 是数据依赖：图表在数据到达之前就挂载时，必须传进去，否则首帧画的是空数据、
+ * 之后不会自己重绘。图表挂在 `v-if` 里（数据到了才创建）的场景可以不传。
  */
-export function useECharts(el: Ref<HTMLElement | undefined>, build: () => EChartsOption) {
+export function useECharts(
+  el: Ref<HTMLElement | undefined>,
+  build: () => EChartsOption,
+  deps: WatchSource[] = [],
+) {
   let chart: echarts.ECharts | null = null
   let observer: ResizeObserver | null = null
 
@@ -47,9 +49,9 @@ export function useECharts(el: Ref<HTMLElement | undefined>, build: () => EChart
     chart = null
   })
 
-  watch(build, render, { deep: true })
+  if (deps.length) watch(deps, render, { deep: true })
 
-  return { resize }
+  return { render, resize }
 }
 
 export const CHART_COLORS = {

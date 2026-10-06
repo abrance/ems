@@ -71,6 +71,9 @@ src/
 | 场景 · 历史信息 | `GET /api/spot-report/trend` |
 | 场景 · 决策支持 | `GET /api/effect/summary` `GET /api/effect/backtest` `GET /api/forecast/load` `GET /api/forecast/price` |
 | 场景 · 市场出清 | `GET /api/spot-report/data` |
+| 配置 · 系统信息 | `GET /api/system/summary` `GET /api/system/net/traffic` `POST /api/system/resource/chart` |
+| 配置 · 存储管理 | `GET /api/system/storage/stats` `POST /api/system/storage-time` |
+| 配置 · 系统操作 | `POST /api/system/hostname/update` `POST /api/system/time/update` `POST /api/system/reboot/apply` `.../execute` |
 
 手动控制页的两条硬规则：
 
@@ -105,7 +108,10 @@ src/
 市场出清页的节点电价档位是**图像采样预填**（`origin=cv`）——数值只存在于色块里，
 页面显著标注「需人工确认」。档位顺序从区间文本下界推导，日报换档位划分不用改代码。
 
-其它 20 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+「数据保留」不单开页：后端接口挂在 `/system/storage-time`，已并入「存储管理」，
+避免同一功能两个入口（导航因此从 29 项变 28 项，冒烟里有显式常量盯着）。
+
+其它 17 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系
