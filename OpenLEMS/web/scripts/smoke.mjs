@@ -250,6 +250,26 @@ const FAKE_PRICES = [
   },
 ]
 
+const FAKE_REPORTS = [
+  { date: '2026-09-21', title: '现货运行日报（09.21）', sourceUrl: 'https://mp.weixin.qq.com/s/x', pageCount: 4, pages: [], collectedAt: '2026-09-21 22:10', pendingCount: 2, confirmedCount: 40 },
+  { date: '2026-09-19', title: '现货运行日报（09.19）', sourceUrl: 'https://mp.weixin.qq.com/s/y', pageCount: 4, pages: [], collectedAt: '2026-09-19 20:55', pendingCount: 0, confirmedCount: 42 },
+]
+
+const FAKE_METRICS = [
+  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', value: 400.5, unit: '元/MWh', atTime: '', textValue: '', momPct: 1.2, sharePct: null, source: '表1(二)', conf: 0.98, origin: 'manual', editedBy: 'admin', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', value: 0, unit: '元/MWh', atTime: '', textValue: '', momPct: null, sharePct: null, source: '表1(二)', conf: 0.62, origin: 'ocr', editedBy: '', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'summary', scope: '市场', metric: '日前加权平均电价', value: 0, unit: '元/MWh', atTime: '', textValue: '', momPct: null, sharePct: null, source: '正文', conf: 0.5, origin: 'ocr', editedBy: '', editedAt: '' },
+]
+
+const FAKE_EXTRACT = { status: 'ok', ocrModel: 'pp-ocr', pageCount: 4, ocrMs: 3200, warnings: ['表2 与历史值有 1 处不一致'], updatedAt: '2026-09-21 22:12', extractorVersion: 'tpl-1' }
+
+const FAKE_AUDIT = [
+  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', oldValue: 380, newValue: 400.5, operation: 'edit', operator: 'admin', createdAt: '2026-09-21 22:20' },
+  { runDate: '2026-09-19', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', oldValue: 300, newValue: 305, operation: 'overwritten_by_extract', operator: '', createdAt: '2026-09-21 22:12' },
+]
+
+const FAKE_BATCH = { id: 'job1', status: 'done', total: 3, done: 3, succeeded: 3, failed: 0, overwritten: 1, current: '', skippedConfirmed: ['2026-09-21'], errors: [], startedAt: '2026-09-21 22:30', finishedAt: '2026-09-21 22:31' }
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -298,6 +318,21 @@ globalThis.fetch = async (url, init) => {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
   }
+  if (u.includes('/api/spot-report/collect')) return json({ report: FAKE_REPORTS[0] })
+  if (u.includes('/api/spot-report/data')) {
+    return json({ date: '2026-09-21', tradeDate: '2026-09-19', metrics: FAKE_METRICS, extract: FAKE_EXTRACT })
+  }
+  if (u.includes('/api/spot-report/audit')) return json({ list: FAKE_AUDIT })
+  if (u.includes('/api/spot-report/confirm')) return json({ confirmed: 2 })
+  if (u.includes('/api/spot-report/extract/batch/status')) return json(FAKE_BATCH)
+  if (u.includes('/api/spot-report/extract/batch')) {
+    const b = init?.body ? JSON.parse(String(init.body)) : {}
+    if (b.dryRun) return json({ id: 'dry', total: 3, status: 'planned', dates: ['2026-09-19', '2026-09-20', '2026-09-21'], skippedConfirmed: ['2026-09-21'] })
+    return json({ id: 'job1', total: 3, status: 'running', dates: [], skippedConfirmed: [] })
+  }
+  if (u.includes('/api/spot-report/extract')) return json({ metricCount: 42, status: 'ok', warnings: [], preserved: 5, pending: 2 })
+  if (u.includes('/api/spot-report/metric')) return json({ metric: FAKE_METRICS[0] })
+  if (u.includes('/api/spot-report')) return json({ list: FAKE_REPORTS })
   if (u.includes('/api/price/current')) {
     return json({ price: FAKE_PRICES[0] })
   }
@@ -418,6 +453,78 @@ for (const tab of NAV) {
   }
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
+
+console.log('\n== 采集管理页 ==')
+await clickTo('管理', '采集管理')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  check(bodyHas('采集台'), '渲染采集台')
+  check(bodyHas('2026-09-21') && bodyHas('2026-09-19'), '档案列表加载并自动选中最新一份')
+  check(bodyHas('未复核 2'), '列表显示未复核条数')
+  check(bodyHas('已全部确认'), '已确认的日报显示已全部确认')
+
+  // 结构化数据按数据集分组，未复核项从 origin 推导
+  check(bodyHas('日前成交电价') && bodyHas('正文摘要指标'), '按数据集分组')
+  check(bodyHas('未复核'), '未复核标记')
+  check(bodyHas('表2 承载的滞后运行日是 2026-09-19'), '提示表2 是滞后运行日')
+  check(bodyHas('解析告警'), '展示解析告警')
+
+  // 逐条修订：填值 → 写入 → POST /metric 带正确的定位键
+  const editInputs = [...doc.querySelectorAll('td.edit input')]
+  check(editInputs.length === 3, `每行都有修订输入（实际 ${editInputs.length}）`)
+  // 按行内容定位「燃煤」那一行，不按下标猜（数据集顺序由 DATASET_LABELS 决定）
+  const rows = [...doc.querySelectorAll('tbody tr')].filter((r) => r.querySelector('td.edit input'))
+  const coalRow = rows.find((r) => (r.textContent ?? '').includes('燃煤'))
+  check(!!coalRow, '找到燃煤行')
+  const coalInput = coalRow.querySelector('td.edit input')
+  coalInput.value = '412.3'
+  coalInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  coalRow.querySelector('td.edit button').click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/spot-report/metric')))
+  const saveCall = requests.filter((r) => r.url.includes('/api/spot-report/metric')).pop()
+  check(saveCall?.body?.value === 412.3, '修订提交数值', JSON.stringify(saveCall?.body))
+  check(
+    saveCall?.body?.dataset === 'day_ahead_trade' && saveCall?.body?.scope === '燃煤' && saveCall?.body?.runDate === '2026-09-21',
+    '修订带齐定位键（date/runDate/dataset/scope/metric）',
+    JSON.stringify(saveCall?.body),
+  )
+
+  // 一键确认
+  const confirmBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.includes('确认全部'))
+  check(!!confirmBtn, '有「确认全部」按钮')
+  confirmBtn?.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/spot-report/confirm')))
+  check(true, '发出确认请求')
+
+  // 单日重跑：force 默认关，payload 里要带上
+  const extractBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.includes('解析 / 重跑'))
+  extractBtn?.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/spot-report/extract') && !r.url.includes('batch')))
+  const ex = requests.filter((r) => r.url.includes('/api/spot-report/extract') && !r.url.includes('batch')).pop()
+  check(ex?.body?.date === '2026-09-21' && ex?.body?.force === false, '单日重跑默认不覆盖已确认', JSON.stringify(ex?.body))
+
+  // 批量重跑：先 dryRun 预览，再执行
+  const previewBtn = [...doc.querySelectorAll('.batch button')].find((b) => b.textContent.trim() === '预览')
+  previewBtn?.click()
+  await waitFor(() => bodyHas('将重跑'))
+  check(bodyHas('跳过（已人工复核）') && bodyHas('2026-09-21'), '预览列出将跳过的已复核日报')
+  const dry = requests.filter((r) => r.url.includes('batch') && r.body?.dryRun).pop()
+  check(dry?.body?.dryRun === true, '预览用 dryRun')
+
+  const runBtn = [...doc.querySelectorAll('.preview-actions button')].find((b) => b.textContent.trim() === '确认执行')
+  runBtn?.click()
+  // 执行时不带 dryRun（undefined 会被 JSON.stringify 丢掉），按 includeConfirmed 判定
+  await waitFor(() => requests.some((r) => r.url.includes('batch') && r.body?.includeConfirmed === false))
+  const real = requests.filter((r) => r.url.includes('batch') && r.body?.includeConfirmed === false).pop()
+  check(!!real && !('dryRun' in real.body), '执行请求不带 dryRun', JSON.stringify(real?.body))
+  check(real?.body?.includeConfirmed === false, '批量重跑默认不覆盖已确认日报', JSON.stringify(real?.body))
+
+  // 审计：人工修订与重跑覆盖要能区分
+  await waitFor(() => bodyHas('指标变更审计'))
+  check(bodyHas('人工修订') && bodyHas('重跑覆盖'), '审计区分人工修订与重跑覆盖')
+  check(bodyHas('380 →') || bodyHas('380'), '审计显示旧值 → 新值')
+}
 
 console.log('\n== 电价管理页 ==')
 await clickTo('管理', '电价管理')

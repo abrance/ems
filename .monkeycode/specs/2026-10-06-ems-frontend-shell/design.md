@@ -642,6 +642,13 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 配置 · 储能参数 | `GET /api/policy/config-fields`（字段元数据）+ `GET /api/policy/config`（当前值）+ `POST /api/setting/update`（保存） |
 | 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage`、`PUT/DELETE .../{id}`、`POST .../activate`、`GET /api/effect/backtest`（试运行） |
 | 管理 · 电价管理 | `GET /api/price`、`GET /api/price/current`、`POST /api/price`、`PUT /api/price/{id}`、`DELETE`、`PUT /api/price/{id}/toggle` |
+| 管理 · 采集管理 | `GET /api/spot-report`、`GET .../data`、`GET .../audit`、`POST .../collect`、`.../extract`、`.../extract/batch`(+`/status`)、`.../metric`、`.../confirm` |
+
+**采集管理 = overlay 能力迁入的落点**，`spot-overlay.js` 的四件事都在这里：
+采集台（粘链接入库）、日报档案（带复核进度）、结构化数据与复核队列（逐条修订 +
+一键确认）、重跑（单日解析 + 批量重跑先 `dryRun` 预览）。
+口径：`origin === 'manual'` 才算已确认，未复核项不参与趋势聚合；
+`force=false` 时重跑保留已确认行（复核状态优先）。
 
 **电价管理页的口径**：这里配置的峰平谷时段是**全站唯一来源** —— 策略套利阈值、
 预测复盘的分时段相关度/离散度都读它，页面上明写这句话。

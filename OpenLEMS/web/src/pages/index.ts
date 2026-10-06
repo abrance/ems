@@ -11,6 +11,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   manual: () => import('./manage/ManualControlView.vue'),
   policies: () => import('./manage/PolicyListView.vue'),
   price: () => import('./manage/PriceView.vue'),
+  collect: () => import('./manage/CollectView.vue'),
   ess: () => import('./config/EssParamsView.vue'),
 }
 

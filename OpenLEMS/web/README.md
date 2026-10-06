@@ -67,6 +67,7 @@ src/
 | 配置 · 储能参数 | `GET /api/policy/config-fields` `GET /api/policy/config` `POST /api/setting/update` |
 | 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage` `PUT/DELETE .../{id}` `POST .../activate` `GET /api/effect/backtest` |
 | 管理 · 电价管理 | `GET /api/price` `GET /api/price/current` `POST /api/price` `PUT/DELETE /api/price/{id}` `PUT /api/price/{id}/toggle` |
+| 管理 · 采集管理 | `GET /api/spot-report` `GET .../data` `GET .../audit` `POST .../collect` `.../extract` `.../extract/batch` `.../metric` `.../confirm` |
 
 手动控制页的两条硬规则：
 
@@ -88,7 +89,11 @@ src/
 `priceType` 走字符串（后端 `EPriceType.MarshalJSON`）。校验分两级：重叠/负价/起止非法阻断保存，
 未铺满 24 小时只提醒。
 
-其它 24 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+采集管理是 `spot-overlay.js` 能力的迁入点（采集台 / 档案 / 复核 / 重跑），
+也是下线 overlay 的前置条件。未复核判定集中在 `api/spotreport.ts` 的 `isPending()`，
+页面里不各写一遍。
+
+其它 23 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系
