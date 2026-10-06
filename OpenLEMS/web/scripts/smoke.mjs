@@ -416,15 +416,50 @@ const FAKE_LOGS = [
   { createdAt: '2026-10-06T20:58:00+08:00', id: 'l3', type: 'policy', level: 'INFO', content: '策略 tou-rule 触发：峰时段充电 40kW' },
 ]
 
+const FAKE_AUTOMATIONS = [
+  {
+    id: 7,
+    name: '派能BMS SOC 过高 → 红灯高电平',
+    enabled: true,
+    triggerRule: {
+      anyMatch: [{ deviceCondition: { deviceId: 'bms_1', from: '', rule: 'SOC>100' } }],
+      subMatch: [],
+      subMatchAll: false,
+      executionInterval: 0,
+    },
+    executeRule: { rules: [{ deviceId: 'dido_1', service: 'setHighLevel', params: [] }] },
+    createdAt: '2026-09-01T10:00:00Z',
+  },
+  {
+    id: 8,
+    name: '夜间时段关闭放电',
+    enabled: false,
+    triggerRule: {
+      anyMatch: [{ timeCondition: { startTime: '23:00', endTime: '06:00', dayOfWeek: 1 } }],
+      subMatch: [],
+      subMatchAll: false,
+      executionInterval: 60,
+    },
+    executeRule: { rules: [{ deviceId: 'pcs_1', service: 'stop', params: [] }] },
+  },
+]
+
+const FAKE_SERVICES_DIDO = [
+  { key: 'setHighLevel', name: '置高电平', description: '红灯亮', params: [] },
+  { key: 'setLowLevel', name: '置低电平', description: '红灯灭', params: [] },
+]
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
   const u = String(url)
   if (u.includes('/api/device/name-list')) {
-    return json({ deviceNames: { ess_1: '储能柜 1', pcs_1: 'PCS 1' } })
+    // 自动化规则会引用 BMS 与 DIDO，设备桩里要有
+    return json({ deviceNames: { ess_1: '储能柜 1', pcs_1: 'PCS 1', bms_1: '派能BMS', dido_1: '红灯' } })
   }
   if (u.includes('/api/control/custom-services')) {
-    return json({ services: FAKE_SERVICES })
+    const dev = new URL(u, 'http://x').searchParams.get('deviceId')
+    return json({ services: dev === 'dido_1' ? FAKE_SERVICES_DIDO : FAKE_SERVICES })
   }
   if (u.includes('/api/device/telemetry')) {
     return json({
@@ -464,6 +499,12 @@ globalThis.fetch = async (url, init) => {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
   }
+  if (u.includes('/api/automation/page')) return json({ list: FAKE_AUTOMATIONS, total: FAKE_AUTOMATIONS.length, page: 1, pageSize: 100 })
+  if (u.includes('/api/automation/')) {
+    if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
+    return json({ automation: FAKE_AUTOMATIONS[0] })
+  }
+  if (u.includes('/api/automation')) return json({ id: 9 })
   if (u.includes('/api/protocol/monitor/overview')) return json(FAKE_PROTO_OVERVIEW)
   if (u.includes('/api/protocol/monitor/distribution')) return json(FAKE_PROTO_DIST)
   if (u.includes('/api/protocol/monitor/trend')) return json(FAKE_TREND_CHART)
@@ -594,6 +635,84 @@ console.log('\n== 顶栏约束（设计稿 §2 原则 6）==')
 const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
+
+console.log('\n== 自动化联动页 ==')
+await clickTo('管理', '自动化联动')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('派能BMS'))
+  check(bodyHas('SOC>100'), '设备条件按表达式原样展示（不解析成中文）')
+  check(bodyHas('23:00~06:00') && bodyHas('周一'), '时间条件摘要可读')
+  check(bodyHas('实时') && bodyHas('间隔 60s'), '执行间隔分别展示实时/间隔')
+  check(bodyHas('bms_1') && bodyHas('dido_1 → setHighLevel'), '执行动作摘要')
+
+  // 新建：默认一个设备条件 + 一个动作
+  const createBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.includes('新建规则'))
+  createBtn.click()
+  await waitFor(() => !!doc.querySelector('.drawer'))
+  check(!!doc.querySelector('.drawer'), '打开编辑抽屉')
+  check(doc.querySelectorAll('.cond-row').length === 2, '默认 1 条件 + 1 动作', String(doc.querySelectorAll('.cond-row').length))
+
+  // 空表单时保存禁用（名称/条件/动作都空）
+  const saveBtn = [...doc.querySelectorAll('.drawer-foot button')].find((b) => b.textContent.trim() === '保存')
+  check(saveBtn.disabled === true, '空表单时保存禁用')
+
+  // 填名称但条件未选设备 → 仍禁用
+  const nameInput = doc.querySelector('.form-grid input')
+  nameInput.value = '过温停充'
+  nameInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  check(saveBtn.disabled === true, '条件未选设备时保存仍禁用')
+  check(bodyHas('未选设备'), '提示指明缺什么', '')
+
+  // 选设备 + 点位 + 值
+  const devSel = [...doc.querySelectorAll('.cond-body select')][0]
+  const opt = [...devSel.options].find((o) => o.value === 'bms_1')
+  check(!!opt, '条件下拉有设备')
+  devSel.value = 'bms_1'
+  devSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await tick()
+  const pointInput = [...doc.querySelectorAll('.cond-body input')][0]
+  pointInput.value = 'SOC'
+  pointInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  const valueInput = [...doc.querySelectorAll('.cond-body input')][1]
+  valueInput.value = '95'
+  valueInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+
+  // 选执行动作的服务
+  const execDevSel = [...doc.querySelectorAll('.cond-body select')].slice(-2)[0]
+  execDevSel.value = 'dido_1'
+  execDevSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  // 等服务清单按设备拉回来（抽屉里按 deviceId 缓存）
+  await waitFor(() => [...doc.querySelectorAll('.cond-body select')].some((sel) =>
+    [...sel.options].some((o) => o.value === 'setHighLevel')), 1500)
+  const svcSel = [...doc.querySelectorAll('.cond-body select')].slice(-1)[0]
+  const svcOpt = [...svcSel.options].find((o) => o.value === 'setHighLevel')
+  if (svcOpt) {
+    svcSel.value = 'setHighLevel'
+    svcSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await tick()
+  }
+  check(saveBtn.disabled === false, '条件与动作齐全后保存可用')
+
+  saveBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/automation') && r.body?.name === '过温停充'))
+  const call = requests.filter((r) => r.url.includes('/api/automation') && r.body?.name === '过温停充').pop()
+  check(call?.body?.triggerRule?.anyMatch?.[0]?.deviceCondition?.rule === 'SOC>95', '设备条件拼成表达式 SOC>95', JSON.stringify(call?.body?.triggerRule))
+  check(typeof call?.body?.executeRule === 'string', 'executeRule 以 JSON 字符串提交（后端契约）')
+  let exec = {}
+  try { exec = JSON.parse(call?.body?.executeRule ?? '{}') } catch { /* 下面断言会失败 */ }
+  check(exec?.rules?.[0]?.service === 'setHighLevel', '执行动作带服务 key', JSON.stringify(exec))
+
+  // 启停
+  await waitFor(() => !!doc.querySelector('.rule'))
+  const toggleBtn = [...doc.querySelectorAll('.rule .ops button')].find((b) => b.textContent.trim() === '停用')
+  toggleBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/toggle')))
+  const tg = requests.filter((r) => r.url.includes('/toggle')).pop()
+  check(tg?.body?.enable === false, '停用提交 enable=false', JSON.stringify(tg?.body))
+}
 
 console.log('\n== 统计分析页 ==')
 await clickTo('管理', '统计分析')

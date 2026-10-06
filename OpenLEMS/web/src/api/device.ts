@@ -1,7 +1,21 @@
 import { api } from './client'
 
 /** 设备类型（与后端 c_enum.EDeviceType 对齐，只列本页用到的） */
-export type DeviceType = 'pcs' | 'bms' | 'ess' | 'sess' | 'ammeter' | 'load' | 'pv'
+export type DeviceType =
+  | 'pcs'
+  | 'bms'
+  | 'ess'
+  | 'sess'
+  | 'ammeter'
+  | 'load'
+  | 'pv'
+  | 'cp'
+  | 'gen'
+  | 'gpio'
+  | 'fire'
+  | 'ca'
+  | 'cl'
+  | 'hum'
 
 /** GET /api/device/name-list → {设备ID: 名称} */
 export function fetchDeviceNames(
