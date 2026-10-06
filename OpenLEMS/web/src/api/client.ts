@@ -8,6 +8,16 @@
  */
 const TOKEN_KEY = 'ems:user:token'
 
+/**
+ * 401 处理钩子。本期不做登录页，所以一旦后端未开 AUTH_BYPASS_ROLE，
+ * 所有接口都会 401 —— 至少要让人知道「为什么全是空的」，而不是一脸空白。
+ */
+let unauthorizedHandler: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  unauthorizedHandler = fn
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -72,6 +82,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   } catch {
     payload = undefined
   }
+
+  if (res.status === 401) unauthorizedHandler?.()
 
   if (!res.ok) {
     throw new ApiError(payload?.message || `请求失败（HTTP ${res.status}）`, payload?.code, res.status)

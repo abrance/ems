@@ -222,13 +222,6 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 	s.BindHandler("GET:/dashboard/*", func(r *ghttp.Request) {
 		fileServer.ServeHTTP(r.Response.Writer, r.Request)
 	})
-	if overlayFS, overlayErr := fs.Sub(manifest.OverlayFS, "overlay"); overlayErr == nil {
-		overlayServer := http.FileServer(http.FS(overlayFS))
-		s.BindHandler("GET:/overlay/*", func(r *ghttp.Request) {
-			http.StripPrefix("/overlay", overlayServer).ServeHTTP(r.Response.Writer, r.Request)
-		})
-	}
-
 	// 根路径：直接输出 index.html
 	s.BindHandler("GET:/", func(r *ghttp.Request) {
 		writeIndexHTML(r, indexHTML)
@@ -252,6 +245,8 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 			strings.HasPrefix(r.URL.Path, "/config/") ||
 			strings.HasPrefix(r.URL.Path, "/demo/") ||
 			strings.HasPrefix(r.URL.Path, "/libs/") ||
+			// 悬浮层已下线：/overlay/* 保留在跳过列表里，是为了让旧书签拿到 404
+			// 而不是被 SPA 回退吞掉、返回一份 index.html
 			strings.HasPrefix(r.URL.Path, "/overlay/") ||
 			r.URL.Path == "/favicon.ico" {
 			r.Response.WriteStatus(http.StatusNotFound)
@@ -318,10 +313,16 @@ func buildIndexHTMLWithRuntimeConfig(ctx context.Context, webfs fs.FS) ([]byte, 
 	}
 	indexHTML := string(indexHTMLBytes)
 
-	if strings.Contains(indexHTML, "</head>") {
-		overlayTags := runtimeScript + "\n    <link rel=\"stylesheet\" href=\"/overlay/spot-overlay.css\" />\n    <script src=\"/overlay/spot-overlay.js\" defer></script>" +
-			"\n    <link rel=\"stylesheet\" href=\"/overlay/effect-overlay.css\" />\n    <script src=\"/overlay/effect-overlay.js\" defer></script>\n"
-		indexHTML = strings.Replace(indexHTML, "</head>", "    "+overlayTags+"  </head>", 1)
+	// 新前端是一份完整构建产物，不再需要运行时注入悬浮层脚本。
+	// 这里仍然要注入「运行时配置 + 鉴权绕过会话」——后者是当前唯一的会话来源
+	// （新前端没有登录页），删掉它会让整个界面 401。
+	//
+	// 注入点在 <head> 之后而不是 </head> 之前：构建产物会把 <script type="module">
+	// 放在 <head> 里，而模块脚本虽然实际是延迟执行，但位置会排在注入脚本之前，
+	// 一旦将来换成同步入口就会读到空会话。紧跟 <head> 能保证顺序。
+	if head := strings.Index(indexHTML, "<head>"); head >= 0 {
+		at := head + len("<head>")
+		indexHTML = indexHTML[:at] + "\n    " + runtimeScript + indexHTML[at:]
 	} else {
 		indexHTML = runtimeScript + indexHTML
 	}

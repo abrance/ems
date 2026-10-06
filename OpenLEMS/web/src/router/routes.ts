@@ -18,6 +18,11 @@ export function buildRoutes(): RouteRecordRaw[] {
   )
   return [
     { path: '/', redirect: DEFAULT_ROUTE },
+    // 旧前端用过的路径，留着防书签失效：
+    //   /programs 旧 SPA 的「系统管理」页（overlay 的返回目标）
+    //   /effect   effect-overlay 自建的效果评估页（已并入 场景·决策支持）
+    { path: '/programs', redirect: '/manage/manual' },
+    { path: '/effect', redirect: '/scene/decision' },
     ...routes,
     { path: '/:pathMatch(.*)*', redirect: DEFAULT_ROUTE },
   ]
