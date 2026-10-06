@@ -58,6 +58,11 @@ func GetSpotReportService() s_db_basic.ISpotReportService {
 	return impl.GetSpotReportService()
 }
 
+// GetPriceForecastService 获取电价预测留痕service对象
+func GetPriceForecastService() s_db_basic.IPriceForecastService {
+	return impl.GetPriceForecastService()
+}
+
 // GetSpotExtractService 获取现货日报结构化提取service对象
 func GetSpotExtractService() s_db_basic.ISpotExtractService {
 	return impl.GetSpotExtractService()

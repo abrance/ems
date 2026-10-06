@@ -173,6 +173,17 @@ type SpotMetricCounts struct {
 	Confirmed int
 }
 
+// IPriceForecastService 电价预测留痕
+type IPriceForecastService interface {
+	// UpsertBatch 按 (generated_on, market, grain, target_time) 覆盖写入
+	UpsertBatch(ctx context.Context, rows []*s_db_model.SPriceForecastModel) error
+	// ListByTargetRange 取目标时刻落在 [from, to] 内的留痕（升序）。
+	// from/to 对日粒度是 YYYY-MM-DD，对 96 点是 YYYY-MM-DD HH:MM（字符串比较即可，格式对齐）。
+	ListByTargetRange(ctx context.Context, from, to, market, grain string) ([]*s_db_model.SPriceForecastModel, error)
+	// GeneratedDates 返回区间内有哪些生成日，前端用来提示「留痕从哪天开始有」
+	GeneratedDates(ctx context.Context, market, grain string) ([]string, error)
+}
+
 // ISpotExtractService 现货日报结构化提取结果
 type ISpotExtractService interface {
 	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）。
