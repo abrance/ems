@@ -397,6 +397,25 @@ const FAKE_IFACES = [
   { id: 'lo', name: 'lo', mac: '', isUp: true, ipv4: [{ ipv4: '127.0.0.1', subnetMask: '255.0.0.0' }], gateway: [], dns: [], mtu: 65536, dhcp: false },
 ]
 
+const FAKE_PROTO_OVERVIEW = { totalProtocols: 9, activeProtocols: 7, avgSuccessRate: 98.7, avgResponseMs: 42.5, abnormalProtocols: 1 }
+const FAKE_PROTO_DIST = { typeDistribution: { modbus_tcp: 6, gpio: 2, canbus: 1 }, statusDistribution: { active: 7, inactive: 2 } }
+const FAKE_TREND_CHART = {
+  xAxis: { type: 'category', data: ['1759000000000', '1759000900000'] },
+  series: [{ name: 'ProtocolMetricSuccessRate', type: 'line', unit: '%', data: ['99.1', '98.3'] }],
+}
+const FAKE_COMPARE_CHART = {
+  xAxis: { type: 'category', data: ['1759000000000', '1759000900000'] },
+  series: [
+    { name: 'pcs_1-Power', type: 'line', unit: 'kW', data: ['5', '8'] },
+    { name: 'meter_1-Power', type: 'line', unit: 'kW', data: ['120', '126'] },
+  ],
+}
+const FAKE_LOGS = [
+  { createdAt: '2026-10-06T21:00:01+08:00', id: 'l1', type: 'remote', level: 'DEBUG', content: '成功推送设备数据：设备ID=pcs_1, Topic=lems/7e25fb08e2/info' },
+  { createdAt: '2026-10-06T20:59:30+08:00', id: 'l2', type: 'device', level: 'ERROR', content: '设备 meter_1 采集失败：连接超时' },
+  { createdAt: '2026-10-06T20:58:00+08:00', id: 'l3', type: 'policy', level: 'INFO', content: '策略 tou-rule 触发：峰时段充电 40kW' },
+]
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -444,6 +463,17 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/strategy/energy-storage')) {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
+  }
+  if (u.includes('/api/protocol/monitor/overview')) return json(FAKE_PROTO_OVERVIEW)
+  if (u.includes('/api/protocol/monitor/distribution')) return json(FAKE_PROTO_DIST)
+  if (u.includes('/api/protocol/monitor/trend')) return json(FAKE_TREND_CHART)
+  if (u.includes('/api/protocol/monitor/metrics')) return json(FAKE_TREND_CHART)
+  if (u.includes('/api/device/compare')) return json(FAKE_COMPARE_CHART)
+  if (u.includes('/api/log/biz/info')) return json({ total: 12800, firstLogTime: '2026-09-01 00:00:00', latestLogTime: '2026-10-06 21:00:00' })
+  if (u.includes('/api/log/biz/statistics')) return json({ type: { ems: 100, device: 900, protocol: 1200, policy: 30 }, level: { DEBUG: 1500, INFO: 600, WARN: 80, ERROR: 12 } })
+  if (u.includes('/api/log/biz')) {
+    if (init?.method === 'DELETE') return json({ total: 42 })
+    return json({ total: 3, lines: FAKE_LOGS })
   }
   if (u.includes('/api/remote/modbus/status')) return json(FAKE_MODBUS)
   if (u.includes('/api/remote/mqtt/status')) return json(FAKE_MQTT)
@@ -564,6 +594,96 @@ console.log('\n== 顶栏约束（设计稿 §2 原则 6）==')
 const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
+
+console.log('\n== 统计分析页 ==')
+await clickTo('管理', '统计分析')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('选择设备'))
+  check(bodyHas('折线点位') && bodyHas('柱状点位'), '设备对比表单齐全')
+  // 默认选中第一台设备；直接查（未填点位会先被拦？点位有默认值 Power）
+  const queryBtn = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.trim() === '查询')
+  queryBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/device/compare')))
+  const call = requests.filter((r) => r.url.includes('/api/device/compare')).pop()
+  check(Array.isArray(call?.body?.deviceIds) && call.body.deviceIds.length === 1, '提交设备列表', JSON.stringify(call?.body?.deviceIds))
+  check(call?.body?.lineKeys?.[0] === 'Power', '提交折线点位', JSON.stringify(call?.body?.lineKeys))
+  check(typeof call?.body?.startTime === 'number' && call.body.endTime > call.body.startTime, '提交时间区间')
+
+  // 切到协议统计
+  const protoTab = [...doc.querySelectorAll('.tabs-inline button')].find((b) => b.textContent.trim() === '协议统计')
+  protoTab.click()
+  await waitFor(() => bodyHas('协议总数'))
+  // 概览与分布是点「查询」之后才拉的，所以先查再断言
+  const rateBtn = [...doc.querySelectorAll('.chip-toggle')].find((b) => b.textContent.trim() === '成功率(%)')
+  check(rateBtn?.classList.contains('on'), '默认勾选成功率指标')
+  const protoQuery = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.trim() === '查询')
+  protoQuery.click()
+  await waitFor(() => bodyHas('98.7'))
+  check(bodyHas('9') && bodyHas('异常协议'), '概览 KPI 取到 totalProtocols 与异常数')
+  check(bodyHas('98.7'), '平均成功率')
+  check(bodyHas('modbus_tcp：6'), '类型分布')
+  await waitFor(() => requests.some((r) => r.url.includes('/api/protocol/monitor/trend')))
+  const trend = requests.filter((r) => r.url.includes('/api/protocol/monitor/trend')).pop()
+  check(
+    trend?.body?.metricKeys?.includes('ProtocolMetricSuccessRate'),
+    '趋势请求带 metricKeys（取值来自后端映射表）',
+    JSON.stringify(trend?.body?.metricKeys),
+  )
+
+  // 切到系统监控
+  const sysTab = [...doc.querySelectorAll('.tabs-inline button')].find((b) => b.textContent.trim() === '系统监控')
+  sysTab.click()
+  await tick()
+  const sysQuery = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.trim() === '查询')
+  sysQuery.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/system/resource/chart')))
+  const rc = requests.filter((r) => r.url.includes('/api/system/resource/chart')).pop()
+  check(rc?.body?.category === 'process', '系统监控默认查进程资源', JSON.stringify(rc?.body?.category))
+}
+
+console.log('\n== 审计页 ==')
+await clickTo('管理', '审计')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('运行日志'))
+  check(bodyHas('12800'), '日志总量来自 info 接口')
+  check(bodyHas('device') && bodyHas('protocol'), '级别/类型统计卡')
+  check(bodyHas('12'), 'ERROR 计数')
+  check(bodyHas('连接超时'), '日志行内容')
+  check(bodyHas('第 1 / 1 页'), '分页信息')
+
+  // 详情抽屉
+  const row = [...doc.querySelectorAll('.log-row')][1]
+  row.click()
+  await waitFor(() => !!doc.querySelector('.drawer'))
+  check(bodyHas('l2'), '详情显示日志 ID')
+  check(!!doc.querySelector('.content-full'), '详情展示完整内容')
+  ;[...doc.querySelectorAll('.drawer-head button')].find((b) => b.textContent.trim() === '关闭').click()
+  await tick()
+
+  // 变更审计页签：必须自我声明它不是真审计
+  const auditTab = [...doc.querySelectorAll('.tabs-inline button')].find((b) => b.textContent.trim() === '变更审计')
+  auditTab.click()
+  await tick()
+  check(bodyHas('这不是真正的变更审计'), '变更审计页显式声明局限')
+  check(bodyHas('policy') && bodyHas('ems') === false || bodyHas('tou-rule'), '变更审计只挑 policy/ems 类日志')
+
+  // 删除：不支持按日期删，要输 DELETE
+  const delBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '删除')
+  delBtn.click()
+  await waitFor(() => !!doc.querySelector('.modal'))
+  check(bodyHas('不支持按日期删除'), '删除弹窗说明不支持按日期删')
+  const confirmBtn = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认删除')
+  check(confirmBtn.disabled === true, '未输 DELETE 时不能确认')
+  const input = doc.querySelector('.modal input')
+  input.value = 'DELETE'
+  input.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  ;[...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认删除').click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/log/biz') && r.method === 'DELETE'))
+  check(true, '输对后调用 DELETE')
+}
 
 console.log('\n== 远程调度页 ==')
 await clickTo('管理', '远程调度')
