@@ -355,6 +355,29 @@ const FAKE_CHART = {
   ],
 }
 
+const FAKE_DEVICES = [
+  { id: 'site_1', pid: '0', name: '储能柜示范站', protocolId: '', driver: '', enableDebug: false, strategy: '', storageEnable: false, storageIntervalSec: 0, sort: 0, enabled: true, params: {}, deviceType: 'sess', isVirtualDevice: false, driverType: '', driverBrand: '', driverModel: '', driverVersion: '', protocolName: '', protocolType: '', protocolAddress: '' },
+  { id: 'pcs_1', pid: 'site_1', name: 'PCS 1', protocolId: 'proto_1', driver: 'ess_demo_v1.0.0', enableDebug: true, strategy: 'policy_microgrid', storageEnable: true, storageIntervalSec: 15, sort: 1, enabled: true, params: { unitId: 1 }, deviceType: 'pcs', isVirtualDevice: false, driverType: 'pcs', driverBrand: 'HEX', driverModel: 'Demo', driverVersion: 'v1.0.0', protocolName: 'modbus_tcp_1', protocolType: 'modbus_tcp', protocolAddress: 'emsdevice:1502' },
+  { id: 'meter_1', pid: 'site_1', name: '关口电表', protocolId: 'proto_1', driver: 'ammeter_demo_v1.0.0', enableDebug: false, strategy: '', storageEnable: true, storageIntervalSec: 15, sort: 2, enabled: false, params: {}, deviceType: 'ammeter', isVirtualDevice: false, driverType: 'ammeter', driverBrand: 'HEX', driverModel: 'Demo', driverVersion: 'v1.0.0', protocolName: 'modbus_tcp_1', protocolType: 'modbus_tcp', protocolAddress: 'emsdevice:1502', failedMessage: '采集初始化超时' },
+]
+const FAKE_POINTS_PCS = {
+  isVirtualDevice: false,
+  groups: [{ key: 'status', name: '状态量' }, { key: 'ctrl', name: '控制量' }],
+  fields: [
+    { key: 'Power', name: '有功功率', groupKey: 'status', valueType: 'float', componentType: 'number', required: false, unit: 'kW', min: -50, max: 50, description: '正值充电' },
+    { key: 'SOC', name: 'SOC', groupKey: 'status', valueType: 'float', componentType: 'number', required: false, unit: '%', min: 0, max: 100, description: '' },
+    { key: 'SetPower', name: '功率设定', groupKey: 'ctrl', valueType: 'float', componentType: 'number', required: true, unit: 'kW', min: -50, max: 50, default: '0', description: '下发目标功率' },
+  ],
+}
+const FAKE_PROTOCOLS = [
+  { protocolId: 'proto_1', protocolName: 'modbus_tcp_1', protocolType: 'modbus_tcp', protocolAddress: '100.64.0.3', protocolPort: 2509, protocolTimeout: 3000, protocolLogLevel: 'Info', protocolParams: '{}', protocolActive: true },
+  { protocolId: 'proto_2', protocolName: 'gpio_in', protocolType: 'gpio', protocolAddress: '', protocolPort: 0, protocolTimeout: 0, protocolLogLevel: 'Warn', protocolParams: '{}', protocolActive: false, boundDeviceId: 'dido_1', boundDeviceName: '左开关' },
+]
+const FAKE_DRIVERS = [
+  { driverName: 'ess_demo_v1.0.0', driverVersion: 'v1.0.0', driverType: 'pcs', driverDescription: '演示储能', driverStatus: true, driverIsEmbedded: true, driverLastUpdate: '2025-09-01', driverPath: '/app/drivers/ess_demo.so', driverHash: 'abc123def456', driverFileSizeByte: 40960, driverImage: '', protocolType: 'modbus', brand: 'HEX', model: 'Demo', buildTime: '2025-09-01T10:00:00Z', commitHash: 'deadbeef', remark: '内置' },
+  { driverName: 'ammeter_demo_v1.0.0', driverVersion: 'v1.0.0', driverType: 'ammeter', driverDescription: '演示电表', driverStatus: false, driverIsEmbedded: false, driverLastUpdate: '2025-08-10', driverPath: '/app/drivers/meter.so', driverHash: 'ff00', driverFileSizeByte: 2048, driverImage: '', protocolType: 'modbus', brand: 'HEX', model: 'Demo', buildTime: '', commitHash: '', remark: '' },
+]
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -403,6 +426,15 @@ globalThis.fetch = async (url, init) => {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
   }
+  if (u.includes('/api/device/detailed-list')) return json({ devices: FAKE_DEVICES, total: FAKE_DEVICES.length })
+  if (u.includes('/points/definitions')) {
+    const id = decodeURIComponent(u.split('/device/')[1].split('/points/')[0])
+    return json(id === 'pcs_1' ? FAKE_POINTS_PCS : { isVirtualDevice: false, groups: [], fields: [] })
+  }
+  if (u.includes('/api/device/enable') || u.includes('/api/device/disable')) return json({})
+  if (u.includes('/api/protocol/list')) return json({ list: FAKE_PROTOCOLS, total: FAKE_PROTOCOLS.length })
+  if (u.includes('/api/driver/get')) return json({ driver: FAKE_DRIVERS[0] })
+  if (u.includes('/api/driver/list')) return json({ list: FAKE_DRIVERS, total: FAKE_DRIVERS.length })
   if (u.includes('/api/system/summary')) return json(FAKE_SYS)
   if (u.includes('/api/system/net/traffic')) return json({ net: FAKE_NET })
   if (u.includes('/api/system/storage/stats')) return json({ stats: FAKE_STORAGE })
@@ -505,6 +537,80 @@ console.log('\n== 顶栏约束（设计稿 §2 原则 6）==')
 const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
+
+console.log('\n== 设备管理页 ==')
+await clickTo('管理', '设备管理')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('储能柜示范站'))
+  // 树：扁平列表按 pid 组装出层级
+  const nodes = [...doc.querySelectorAll('.tree .node')]
+  check(nodes.length === 3, `树渲染 3 台设备（实际 ${nodes.length}）`)
+  check(nodes[0].textContent.includes('储能柜示范站'), '根节点在最前')
+  const indented = nodes.filter((n) => parseInt(n.style.paddingLeft) > 8)
+  check(indented.length === 2, '子节点有缩进（层级来自 pid）', JSON.stringify(nodes.map((n) => n.style.paddingLeft)))
+
+  // 默认选中第一台（根）→ 点表为空
+  check(bodyHas('设备 ID'), '显示详情')
+  nodes[1].click()
+  await waitFor(() => bodyHas('ess_demo_v1.0.0'))
+  check(bodyHas('HEX Demo vv1.0.0') || bodyHas('HEX Demo'), '驱动品牌/型号展示')
+  check(bodyHas('emsdevice:1502'), '协议地址展示')
+  check(bodyHas('间隔 15 秒'), '存储间隔展示')
+
+  // 点表按分组
+  await waitFor(() => bodyHas('状态量'))
+  check(bodyHas('状态量') && bodyHas('控制量'), '点表按 group 分组')
+  check(bodyHas('有功功率') && bodyHas('正值充电'), '点位名与说明')
+  check(bodyHas('-50 ~ 50'), '点位范围')
+  check(bodyHas('3 个点位') || bodyHas('3 个'), '点位数量统计')
+
+  // 停用/启用
+  const toggle = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '停用')
+  check(!!toggle, '有停用按钮')
+  toggle.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/device/disable')))
+  const call = requests.filter((r) => r.url.includes('/api/device/disable')).pop()
+  check(call?.body?.deviceId === 'pcs_1', '停用提交正确的设备 ID', JSON.stringify(call?.body))
+
+  // 异常设备标红
+  check(bodyHas('异常') || bodyHas('停用'), '停用/异常状态有标记')
+}
+
+console.log('\n== 协议与驱动页 ==')
+await clickTo('管理', '协议与驱动')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('modbus_tcp_1'))
+  check(bodyHas('已激活') && bodyHas('未激活'), '协议激活状态区分')
+  check(bodyHas('左开关'), 'GPIO 协议显示绑定设备')
+  check(bodyHas('modbus_tcp'), '协议类型展示')
+
+  // 类型筛选
+  const typeSel = [...doc.querySelectorAll('.field select')][0]
+  const gpioOpt = [...typeSel.options].find((o) => o.textContent.trim() === 'gpio')
+  check(!!gpioOpt, '类型下拉含 gpio')
+  typeSel.selectedIndex = gpioOpt.index
+  typeSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await tick()
+  const rows = [...doc.querySelectorAll('tbody tr')]
+  check(rows.length === 1 && rows[0].textContent.includes('gpio_in'), '按类型筛选生效', String(rows.length))
+
+  // 切到驱动 Tab
+  const driverTab = [...doc.querySelectorAll('.tabs-inline button')].find((b) => b.textContent.trim() === '驱动管理')
+  driverTab.click()
+  await waitFor(() => bodyHas('ess_demo_v1.0.0'))
+  check(bodyHas('运行中') && bodyHas('未加载'), '驱动状态区分')
+  check(bodyHas('内置'), '内置驱动有标记')
+
+  // 驱动详情抽屉
+  const detailBtn = [...doc.querySelectorAll('tbody button')].find((b) => b.textContent.trim() === '详情')
+  detailBtn.click()
+  await waitFor(() => !!doc.querySelector('.drawer'))
+  check(!!doc.querySelector('.drawer'), '打开驱动详情')
+  check(bodyHas('deadbeef'), '详情带出提交哈希')
+  check(bodyHas('40.0 KB'), '文件大小格式化')
+}
 
 console.log('\n== 系统信息页 ==')
 await clickTo('配置', '系统信息')
