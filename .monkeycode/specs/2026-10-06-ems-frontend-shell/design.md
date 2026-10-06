@@ -625,10 +625,25 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 - 信息披露页接了真实数据（`GET /api/gd-metric`）；其余 28 页落 `PlaceholderView`，按 nav 里声明的面板列结构 + 标状态
 - 壳层冒烟：happy-dom 加载**构建产物**，逐个点过 29 页断言标题 / 占位面板 / 顶栏约束
 
-**Arco 的取舍**：P0 不注册 Arco 全局组件。实测 `import ArcoVue` + `arco.css` 会让 CSS
-从 **8KB 涨到 404KB**、JS 从 **108KB 涨到 872KB**，而 P0 一个 Arco 组件都没用到。
-依赖仍声明（下一批表单/表格页要用），`styles/arco-override.css` 已把 Arco 变量对齐到本项目色板，
-届时按需引入即可，不会产生视觉漂移。
+**Arco 的取舍**：P0 与手动控制页（第一批表单）都**没有**注册 Arco 全局组件。实测
+全量 `import ArcoVue` + `arco.css` 会让 CSS 从 **8KB 涨到 404KB**、JS 从 **108KB 涨到 872KB**。
+按需引入单组件样式可把 CSS 压在百 KB 内，但本项目的 tokens + 手写控件已覆盖
+「输入 / 下拉 / 开关 / 卡片」，且对比度是算过的；引入 Arco 反而多一轮视觉对齐。
+
+**结论：Arco 留到真正需要复杂组件时再引**（树、日期区间、虚拟滚动表格）。
+`styles/arco-override.css` 已把 Arco 变量对齐到本项目色板，届时按需引入不会产生视觉漂移。
+
+**已实现的页面**（其余按 nav 声明落占位页）：
+
+| 页面 | 接的接口 |
+| --- | --- |
+| 场景 · 信息披露 | `GET /api/gd-metric` |
+| 管理 · 手动控制 | `name-list` / `control/custom-services` / `device/telemetry` / `device/history` / `control/device` |
+
+手动控制页的口径（写死在代码注释里）：服务与参数全部来自**驱动声明**，前端不写死
+「充电 / 放电」；`parameters` 是**位置参数数组**，顺序必须与驱动声明一致，下线前二次确认。
+EMS 侧的跨设备保护（SOC / 变压器 / 需量）要等「配置 · 储能参数」接口，现在只用
+驱动自己声明的 `min/max/required`，不假装有。
 
 分期：
 

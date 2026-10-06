@@ -8,6 +8,7 @@ import PlaceholderView from '@/components/PlaceholderView.vue'
  */
 export const PAGE_LOADERS: Record<string, RouteComponent> = {
   disclosure: () => import('./scene/DisclosureView.vue'),
+  manual: () => import('./manage/ManualControlView.vue'),
 }
 
 export { PlaceholderView }

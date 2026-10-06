@@ -33,12 +33,34 @@ function check(ok, label, detail = '') {
 }
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
+/**
+ * 等条件成立。懒加载分块（含它自带的 CSS）在 happy-dom 下的解析时机不确定，
+ * 固定的 setTimeout(0) 会在导航完成前就断言，所以统一用轮询等待。
+ */
+async function waitFor(fn, ms = 3000) {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (fn()) return true
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  return false
+}
+
+const h1Text = () => doc.querySelector('.pagehead h1')?.textContent?.trim() ?? ''
+const sideTitles = () => [...doc.querySelectorAll('.side-item')].map((e) => e.textContent.trim())
+const findSide = (title) =>
+  [...doc.querySelectorAll('.side-item')].find((e) => e.textContent.trim().startsWith(title))
+const findTab = (title) => [...doc.querySelectorAll('.tabs .tab')].find((e) => e.textContent.trim() === title)
+
 // vue-router 在 happy-dom 下会用一个非 Event 对象调 window.dispatchEvent，
 // 属于测试环境互操作瑕疵（线上无此问题），单独归集，不算失败。
 const interopNoise = []
+/** 测试环境噪音：happy-dom 缺 canvas / 只认标准 Event，与业务逻辑无关 */
+const NOISE = [/dispatchEvent/, /clearRect/, /'dpr'/]
 process.on('unhandledRejection', (err) => {
-  if (String(err?.message || err).includes('dispatchEvent')) {
-    interopNoise.push(String(err.message))
+  const msg = String(err?.message || err)
+  if (NOISE.some((re) => re.test(msg))) {
+    interopNoise.push(msg)
     return
   }
   failed++
@@ -58,7 +80,12 @@ try {
 }
 
 // --- 浏览器环境 ---
-const window = new Window({ url: 'http://localhost/' })
+const window = new Window({
+  url: 'http://localhost/',
+  // 懒加载分块会带自己的 CSS，happy-dom 去加载 <link> 时会在 load 事件里抛错，
+  // 直接把导航打断。我们只验证 DOM 结构，不验样式，所以关掉样式/脚本文件加载。
+  settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true },
+})
 const doc = window.document
 globalThis.window = window
 globalThis.document = doc
@@ -72,7 +99,34 @@ globalThis.Element = window.Element
 globalThis.Node = window.Node
 globalThis.localStorage = window.localStorage
 globalThis.getComputedStyle = window.getComputedStyle.bind(window)
+
+// vite 的 __vitePreload 会为懒加载分块注入 <link rel=stylesheet> 并等它的 load/error。
+// 从 file:// 加载 dist 时 href 会变成 file:///assets/*.css（不存在）→ reject → 导航被中断。
+// 这里不验样式，直接让 link「加载成功」。
+const origCreateElement = doc.createElement.bind(doc)
+doc.createElement = (tag, ...rest) => {
+  const el = origCreateElement(tag, ...rest)
+  if (String(tag).toLowerCase() === 'link') {
+    setTimeout(() => el.dispatchEvent(new window.Event('load')), 0)
+  }
+  return el
+}
+
+// happy-dom 的 window.dispatchEvent 只接受真正的 Event，而 vue-router 在导航收尾时
+// 会传普通对象；抛错会直接中断异步组件的导航。这里放宽：非 Event 一律忽略。
+const rawDispatch = window.dispatchEvent.bind(window)
+window.dispatchEvent = (evt) => (evt instanceof window.Event ? rawDispatch(evt) : true)
 globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
+
+window.addEventListener('error', (e) => {
+  const msg = String(e?.message ?? e?.error?.message ?? '')
+  if (NOISE.some((re) => re.test(msg))) {
+    interopNoise.push(msg)
+    return
+  }
+  failed++
+  console.error('  FAIL 未捕获的页面错误:', msg)
+})
 
 // ECharts 初始化要 2d context；happy-dom 不实现，给个够用的空壳
 window.HTMLCanvasElement.prototype.getContext = () =>
@@ -85,12 +139,61 @@ window.HTMLCanvasElement.prototype.getContext = () =>
     { get: (t, k) => (k in t ? t[k] : () => {}) },
   )
 
-globalThis.fetch = async (url) => {
-  const body = String(url).includes('/api/gd-metric')
+// 手动控制页要用的假驱动服务：参数刻意给两个不同类型的字段，
+// 用来验证「按驱动声明顺序发位置参数」这条最容易错的逻辑
+const FAKE_SERVICES = [
+  {
+    key: 'setChargePower',
+    name: '设置充电功率',
+    description: '下发充电功率设定值',
+    params: [
+      { key: 'power', name: '功率', valueType: 'int', componentType: 'number', required: true, unit: 'kW', min: 0, max: 50, description: '0~50' },
+      { key: 'duration', name: '时长', valueType: 'int', componentType: 'number', required: false, unit: 'min', step: 5 },
+    ],
+  },
+  {
+    key: 'stop',
+    name: '停止充放电',
+    description: '停止当前充放动作',
+    params: [],
+  },
+]
+
+const requests = []
+globalThis.fetch = async (url, init) => {
+  requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
+  const u = String(url)
+  if (u.includes('/api/device/name-list')) {
+    return json({ deviceNames: { ess_1: '储能柜 1', pcs_1: 'PCS 1' } })
+  }
+  if (u.includes('/api/control/custom-services')) {
+    return json({ services: FAKE_SERVICES })
+  }
+  if (u.includes('/api/device/telemetry')) {
+    return json({
+      telemetry: {
+        ess_1: {
+          lastUpdateTime: '2026-10-06T18:58:00+08:00',
+          telemetryValues: { SOC: 80, Power: 5, SOH: 98, MaxChargePower: 50, MaxDischargePower: 50 },
+        },
+      },
+    })
+  }
+  if (u.includes('/api/device/history')) {
+    return json({
+      xAxis: { type: 'category', data: ['0', '900000'] },
+      series: [
+        { name: 'Power', type: 'line', unit: 'kW', data: ['0', '5'] },
+        { name: 'SOC', type: 'line', unit: '%', data: ['80', '81'] },
+      ],
+    })
+  }
+  if (u.includes('/api/control/device')) {
+    return json({})
+  }
+  const body = u.includes('/api/gd-metric')
     ? {
-        code: 0,
-        data: {
-          latestDate: '2026-09-21', from: '2026-08-23', to: '2026-09-21', date: '2026-09-21',
+        latestDate: '2026-09-21', from: '2026-08-23', to: '2026-09-21', date: '2026-09-21',
           source: 'gd-metric', updatedAt: '2026-09-21 20:00', availableDays: ['2026-09-21'],
           latest: {
             date: '2026-09-21',
@@ -98,11 +201,18 @@ globalThis.fetch = async (url) => {
             dayAhead: { avg: 380, max: 760, min: 60, last: 380, count: 96, unit: '元/MWh' },
             realtime: { avg: 365, max: 780, min: 40, last: 365, count: 96, unit: '元/MWh' },
           },
-          days: [], curve: { date: '2026-09-21', load: [], dayAhead: [], realtime: [] },
-        },
+        days: [],
+        curve: { date: '2026-09-21', load: [], dayAhead: [], realtime: [] },
       }
-    : { code: 0, data: {} }
-  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    : {}
+  return json(body)
+}
+
+function json(data) {
+  return new Response(JSON.stringify({ code: 0, data }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 const rootEl = doc.createElement('div')
@@ -137,6 +247,17 @@ check(NAV[0].pages.length === 7, `场景页 7 个（实际 ${NAV[0].pages.length
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
 check(totalPages === 29, `页面总数 29（实际 ${totalPages}）`)
 
+/** 点 Tab 再点侧栏项 */
+async function clickTo(tabTitle, pageTitle) {
+  const tabEl = findTab(tabTitle)
+  if (!tabEl) throw new Error(`找不到 Tab ${tabTitle}`)
+  tabEl.click()
+  if (!(await waitFor(() => !!findSide(pageTitle)))) throw new Error(`切到「${tabTitle}」后侧栏没有「${pageTitle}」`)
+  findSide(pageTitle).click()
+  await waitFor(() => h1Text() === pageTitle)
+  await tick()
+}
+
 console.log('\n== 逐页点击 ==')
 let visited = 0
 for (const tab of NAV) {
@@ -146,21 +267,21 @@ for (const tab of NAV) {
     continue
   }
   tabEl.click()
-  await tick()
+  await waitFor(() => sideTitles().length === tab.pages.length)
 
-  const sideItems = [...doc.querySelectorAll('.side-item')]
-  check(sideItems.length === tab.pages.length, `${tab.title} 侧栏项数 = ${sideItems.length}（期望 ${tab.pages.length}）`)
+  const sideCount = sideTitles().length
+  check(sideCount === tab.pages.length, `${tab.title} 侧栏项数 = ${sideCount}（期望 ${tab.pages.length}）`)
 
   for (const page of tab.pages) {
-    const item = [...doc.querySelectorAll('.side-item')].find((e) => e.textContent.trim().startsWith(page.title))
+    const item = findSide(page.title)
     if (!item) {
       check(false, `${tab.key}/${page.key} 侧栏项存在`)
       continue
     }
     try {
       item.click()
-      await tick()
-      const h1 = doc.querySelector('.pagehead h1')?.textContent?.trim()
+      await waitFor(() => h1Text() === page.title)
+      const h1 = h1Text()
       const body = doc.body.textContent ?? ''
       check(h1 === page.title, `${tab.key}/${page.key} 标题`, `期望 ${page.title}，实际 ${h1}`)
       if (page.status !== 'ready') {
@@ -181,8 +302,75 @@ for (const tab of NAV) {
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
 
+console.log('\n== 手动控制页 ==')
+await clickTo('管理', '手动控制')
+{
+  const bodyText = () => doc.body.textContent ?? ''
+  check(bodyText().includes('实时下发'), '显示实时下发警告')
+  check(!!doc.querySelector('.field select'), '渲染设备选择框')
+  // 服务名与参数字段都来自驱动声明 —— 证明表单是数据驱动的，不是前端写死的
+  check(bodyText().includes('设置充电功率'), '服务名来自驱动')
+  check(bodyText().includes('时长'), '参数字段来自驱动')
+  check(bodyText().includes('停止充放电'), '无参数服务也渲染')
+  check(bodyText().includes('80.0'), 'KPI 显示遥测里的 SOC')
+
+  // 越界值应被驱动声明的 max 拦住，不弹确认框
+  const bad = doc.querySelector('.field-item input[id$="-power"]')
+  if (bad) {
+    bad.value = '999'
+    bad.dispatchEvent(new window.Event('input', { bubbles: true }))
+    await tick()
+    const execBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '执行')
+    execBtn?.click()
+    await tick()
+    check(!doc.querySelector('.modal'), '越界值被拦住，未弹确认框')
+    check(bodyText().includes('不能大于 50'), '提示引用了驱动声明的上限')
+  }
+
+  const power = doc.querySelector('.field-item input[id$="-power"]')
+  const duration = doc.querySelector('.field-item input[id$="-duration"]')
+  if (power) {
+    power.value = '30'
+    power.dispatchEvent(new window.Event('input', { bubbles: true }))
+  }
+  if (duration) {
+    duration.value = '15'
+    duration.dispatchEvent(new window.Event('input', { bubbles: true }))
+  }
+  await tick()
+  const exec = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '执行')
+  exec?.click()
+  await tick()
+  check(!!doc.querySelector('.modal'), '弹出二次确认框')
+  const modalText = doc.querySelector('.modal')?.textContent ?? ''
+  check(modalText.includes('储能柜 1'), '确认框显示目标设备')
+  check(modalText.includes('设置充电功率'), '确认框显示服务名')
+
+  const confirm = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认下发')
+  confirm?.click()
+  await tick()
+  await tick()
+
+  const call = requests.filter((r) => r.url.includes('/api/control/device')).pop()
+  check(!!call, '发出了控制请求')
+  check(call?.body?.deviceId === 'ess_1', 'deviceId 正确', JSON.stringify(call?.body))
+  check(call?.body?.commandName === 'setChargePower', 'commandName 用服务 key', JSON.stringify(call?.body))
+  check(
+    Array.isArray(call?.body?.parameters) && call.body.parameters.length === 2,
+    'parameters 是数组',
+    JSON.stringify(call?.body?.parameters),
+  )
+  check(
+    call?.body?.parameters?.[0] === 30 && call?.body?.parameters?.[1] === 15,
+    'parameters 按驱动声明顺序（功率, 时长）',
+    JSON.stringify(call?.body?.parameters),
+  )
+  check(call?.body?.parameters?.every((p) => typeof p === 'number'), 'int 字段转成了数字')
+}
+
+
 if (interopNoise.length) {
-  console.log(`\n（忽略 ${interopNoise.length} 条 happy-dom 与 vue-router 的 dispatchEvent 互操作噪音）`)
+  console.log(`\n（忽略 ${interopNoise.length} 条 happy-dom 环境噪音：缺 canvas 与只认标准 Event）`)
 }
 await vite.close()
 console.log(failed ? `\n${failed} 项失败` : '\n✅ 壳层冒烟全部通过')
