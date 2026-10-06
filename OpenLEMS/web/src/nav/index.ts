@@ -66,14 +66,7 @@ export const NAV: NavTab[] = [
         panels: ['机组实时出力', '市场成员报价策略反演', '机组累计电量', '日前市场火电开机安排'],
       },
       { key: 'history', title: '历史信息', path: '/scene/history', status: 'ready' },
-      {
-        key: 'forecast',
-        title: '长周期电价预测',
-        path: '/scene/forecast',
-        status: 'planned',
-        note: '接口已就绪（/api/forecast/price，日均序列）；96 点分时待日报提取曲线',
-        panels: ['未来多日电价预测-分时', '未来多日电价预测-平均'],
-      },
+      { key: 'forecast', title: '长周期电价预测', path: '/scene/forecast', status: 'ready' },
     ],
   },
   {

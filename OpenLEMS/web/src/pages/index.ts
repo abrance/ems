@@ -11,6 +11,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   history: () => import('./scene/HistoryView.vue'),
   decision: () => import('./scene/DecisionView.vue'),
   clearing: () => import('./scene/ClearingView.vue'),
+  forecast: () => import('./scene/ForecastView.vue'),
   manual: () => import('./manage/ManualControlView.vue'),
   policies: () => import('./manage/PolicyListView.vue'),
   devices: () => import('./manage/DevicesView.vue'),

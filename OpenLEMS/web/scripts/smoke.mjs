@@ -1232,6 +1232,51 @@ for (const tab of NAV) {
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
 
+console.log('\n== 长周期电价预测页 ==')
+await clickTo('场景', '长周期电价预测')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('预测概览'))
+  check(bodyHas('目前只有「平均」视图'), '显式声明只有平均视图（不是分时）')
+  check(bodyHas('1683.20') || bodyHas('368.4'), '首日预测取到值（证明 { forecast } 拆包对）')
+  check(bodyHas('372.1'), '末日预测取到值')
+  check(bodyHas('历史 60 点'), '展示上下文点数')
+  check(bodyHas('缺数据 50 天'), '展示数据缺口')
+  check(bodyHas('2063ms'), '展示推理耗时')
+
+  // 明细表：含分位与区间宽度
+  const rows = [...doc.querySelectorAll('tbody tr')]
+  check(rows.length === 2, `明细 2 行（实际 ${rows.length}）`)
+  const cells = [...(rows[0]?.querySelectorAll('td') ?? [])].map((c) => c.textContent.trim())
+  check(cells[0] === '2026-09-22' && cells[1] === '368.40', '明细首行日期与中位', JSON.stringify(cells))
+  check(cells[2] === '341.20' && cells[3] === '401.70', '明细带出 10%/90% 分位', JSON.stringify(cells))
+  check(cells[4] === '60.50', '区间宽度 = 90% − 10%', cells[4])
+
+  // 切换市场会重新查询
+  const before = requests.filter((r) => r.url.includes('/api/forecast/price')).length
+  // 场景 Tab 的页头也有 .field select（场景切换器），所以限定在工具栏里找
+  const mktSel = [...doc.querySelectorAll('.toolbar .field select')][0]
+  const realOpt = [...mktSel.options].find((o) => o.textContent.trim() === '实时')
+  mktSel.selectedIndex = realOpt.index
+  mktSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/forecast/price')).length > before)
+  const call = requests.filter((r) => r.url.includes('/api/forecast/price')).pop()
+  check(call.url.includes('market=real') && call.url.includes('horizonDays=5'), '切换市场带上参数', call.url)
+  check(!call.url.includes('forceRefresh=true'), '普通切换不穿透缓存')
+
+  // 刷新预测要穿透
+  const before2 = requests.filter((r) => r.url.includes('/api/forecast/price')).length
+  // 上一次查询还在跑时按钮文案是「预测中…」，等它回到「刷新预测」再点
+  await waitFor(() => [...doc.querySelectorAll('.toolbar button')].some((b) => b.textContent.includes('刷新预测')))
+  const refreshBtn = [...doc.querySelectorAll('.toolbar button')].find((b) => b.textContent.includes('刷新预测'))
+  refreshBtn.click()
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/forecast/price')).length > before2)
+  const forced = requests.filter((r) => r.url.includes('/api/forecast/price')).pop()
+  check(forced.url.includes('forceRefresh=true'), '刷新预测带 forceRefresh=true', forced.url)
+
+  check(bodyHas('分时视图'), '点名待做的是分时视图，并说明怎么补')
+}
+
 console.log('\n== 市场出清页 ==')
 await clickTo('场景', '市场出清')
 {
