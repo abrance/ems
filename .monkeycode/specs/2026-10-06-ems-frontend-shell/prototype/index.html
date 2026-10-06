@@ -1,0 +1,1185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EMS 前端原型 · 场景 / 管理 / 配置</title>
+<style>
+/* ============ tokens（与设计稿 §4.1 一致，取自现网 Arco 变量） ============ */
+:root{
+  --bg-1:#f7f8fa; --bg-2:#fff; --bg-3:#f2f3f5;
+  --border:#e5e6eb; --border-2:#c9cdd4;
+  --text-1:#1d2129; --text-2:#4e5969; --text-3:#86909c;
+  --primary:rgb(255,125,0); --primary-1:#fff7e8; --primary-2:#ffe4ba;
+  --green:#00b42a; --green-1:#e8ffea; --green-6:#009a29;
+  --red:#f53f3f; --red-1:#ffece8;
+  --blue:#165dff; --blue-1:#e8f3ff;
+  --purple:#722ed1; --purple-1:#f5e8ff;
+  --cyan:#0fc6c2; --cyan-1:#e8fffb;
+  --gold:#b3873a;
+  --radius:10px; --accent:4px;
+  --h-appbar:56px; --h-tabs:44px; --h-pagehead:56px; --w-side:220px;
+  --shadow:0 2px 8px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg-1); color:var(--text-1);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+input,select,textarea{font:inherit;color:inherit}
+a{color:var(--primary);text-decoration:none}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#d5d8dd;border-radius:5px}
+
+/* ============ ① AppBar ============ */
+.appbar{
+  flex:0 0 var(--h-appbar); height:var(--h-appbar);
+  background:var(--bg-2); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:14px; padding:0 18px; z-index:30;
+}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:.2px}
+.brand .mark{
+  width:28px;height:28px;border-radius:8px;background:var(--primary);color:#fff;
+  display:grid;place-items:center;font-size:13px;font-weight:800
+}
+.site-switch{
+  display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;
+  background:var(--bg-3);color:var(--text-2);font-size:13px
+}
+.site-switch:hover{background:#e9eaee}
+.appbar .spacer{flex:1}
+.icon-btn{
+  width:32px;height:32px;border-radius:8px;display:grid;place-items:center;
+  color:var(--text-2);background:var(--bg-3)
+}
+.icon-btn:hover{background:#e9eaee}
+.user-menu{
+  display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:20px;
+  background:var(--bg-3);font-size:13px
+}
+.user-menu:hover{background:#e9eaee}
+.avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-2);color:#a4510a;
+  display:grid;place-items:center;font-size:12px;font-weight:700}
+
+/* ============ ② Tabs ============ */
+.tabs{
+  flex:0 0 var(--h-tabs); height:var(--h-tabs);
+  background:var(--bg-2); border-bottom:1px solid var(--border);
+  display:flex; align-items:stretch; gap:4px; padding:0 14px; z-index:20;
+  overflow-x:auto; white-space:nowrap;
+}
+.tab{
+  position:relative;padding:0 20px;display:flex;align-items:center;font-size:15px;color:var(--text-2)
+}
+.tab:hover{color:var(--text-1)}
+.tab.active{color:var(--primary);font-weight:600}
+.tab.active::after{
+  content:"";position:absolute;left:20px;right:20px;bottom:0;height:2px;background:var(--primary);border-radius:2px
+}
+
+/* ============ ③/④/⑤ body ============ */
+.body{flex:1;display:flex;min-height:0}
+.sidebar{
+  flex:0 0 var(--w-side);width:var(--w-side);background:var(--bg-2);
+  border-right:1px solid var(--border);overflow-y:auto;padding:10px 8px 24px;transition:width .15s
+}
+.sidebar.collapsed{flex-basis:56px;width:56px}
+.side-group{font-size:11px;letter-spacing:.14em;color:var(--text-3);padding:12px 10px 6px}
+.side-item{
+  display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;
+  color:var(--text-2);font-size:13.5px;cursor:pointer;white-space:nowrap
+}
+.side-item:hover{background:var(--bg-3)}
+.side-item.active{background:var(--primary-1);color:var(--primary);font-weight:600}
+.side-item .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.45;flex:0 0 auto}
+.side-item .badge{margin-left:auto;font-size:11px;background:var(--bg-3);color:var(--text-3);border-radius:9px;padding:1px 7px}
+.side-item.active .badge{background:#ffd9a8;color:#8a4a06}
+.side-item .badge.todo{background:#f2f3f5;color:#86909c;margin-left:6px}
+.side-item.is-todo{color:#a9aeb8}
+.side-item.is-todo.active{color:var(--primary)}
+.sidebar.collapsed .side-label,.sidebar.collapsed .side-group,.sidebar.collapsed .badge{display:none}
+.sidebar.collapsed .side-item{justify-content:center;padding:9px 0}
+
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.pagehead{
+  flex:0 0 var(--h-pagehead);height:var(--h-pagehead);background:var(--bg-2);
+  border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;
+  padding:0 18px;position:sticky;top:0;z-index:10
+}
+.pagehead .crumbs{font-size:12px;color:var(--text-3)}
+.pagehead h1{margin:0;font-size:16px;font-weight:600}
+.pagehead .spacer{flex:1}
+.content{flex:1;overflow-y:auto;padding:16px}
+
+/* ============ 控件 ============ */
+.radio-group{display:inline-flex;background:var(--bg-3);border-radius:8px;padding:2px}
+.radio-group button{padding:5px 14px;border-radius:6px;font-size:13px;color:var(--text-2)}
+.radio-group button.on{background:var(--bg-2);color:var(--primary);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.field{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-3)}
+.field input,.field select{
+  border:1px solid var(--border);border-radius:8px;padding:5px 9px;background:var(--bg-2);color:var(--text-1)
+}
+.btn{
+  border-radius:8px;padding:6px 14px;font-size:13px;background:var(--bg-3);color:var(--text-2)
+}
+.btn:hover{background:#e9eaee}
+.btn.primary{background:var(--primary);color:#fff}
+.btn.primary:hover{filter:brightness(1.05)}
+.btn.danger{background:var(--red-1);color:var(--red)}
+.btn.ghost{border:1px solid var(--border);background:transparent}
+.btn.sm{padding:3px 10px;font-size:12px}
+.chip{display:inline-block;font-size:11px;border-radius:9px;padding:1px 8px;line-height:18px}
+.chip.gray{background:var(--bg-3);color:var(--text-3)}
+.chip.green{background:var(--green-1);color:var(--green-6)}
+.chip.orange{background:var(--primary-1);color:#a4510a}
+.chip.red{background:var(--red-1);color:var(--red)}
+.chip.blue{background:var(--blue-1);color:var(--blue)}
+.chip.purple{background:var(--purple-1);color:var(--purple)}
+
+/* ============ 面板 ============ */
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+.panel{
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);
+  display:flex;flex-direction:column;overflow:hidden;min-width:0
+}
+.panel-head{
+  display:flex;align-items:center;gap:10px;padding:0 14px;min-height:44px;
+  border-bottom:1px solid var(--border)
+}
+.panel-head::before{
+  content:"";width:var(--accent);height:16px;border-radius:2px;background:var(--primary);flex:0 0 auto
+}
+.panel-title{font-size:15px;font-weight:600}
+.panel-sub{font-size:12px;color:var(--text-3)}
+.panel-head .spacer{flex:1}
+.panel-body{padding:14px;flex:1;min-width:0}
+.panel-body.tight{padding:0}
+.panel-foot{
+  padding:6px 14px;border-top:1px dashed var(--border);
+  font-size:11.5px;color:var(--text-3);display:flex;gap:12px;flex-wrap:wrap
+}
+.panel.empty .panel-body{display:grid;place-items:center;color:var(--text-3);min-height:140px;font-size:13px}
+
+/* ============ KPI ============ */
+.kpis{display:grid;gap:14px;grid-template-columns:repeat(6,1fr)}
+.kpis.c4{grid-template-columns:repeat(4,1fr)}
+.kpis.c3{grid-template-columns:repeat(3,1fr)}
+.kpi{
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0
+}
+.kpi .k{font-size:12px;color:var(--text-3);display:flex;align-items:center;gap:6px}
+.kpi .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25}
+.kpi .v small{font-size:12px;font-weight:500;color:var(--text-3);margin-left:3px}
+.kpi .d{font-size:11.5px;color:var(--text-3)}
+.kpi .v.up{color:var(--red)} .kpi .v.down{color:var(--green-6)}
+
+/* ============ 图表 ============ */
+.chart{width:100%;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:12px;color:var(--text-2)}
+.legend .lg{display:flex;align-items:center;gap:6px}
+.legend .sw{width:12px;height:3px;border-radius:2px}
+.legend .sw.dash{height:0;border-top:2px dashed currentColor}
+.axis{font-size:10px;fill:var(--text-3)}
+
+/* ============ 表 ============ */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  text-align:left;font-weight:500;color:var(--text-3);font-size:12px;
+  padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg-2);
+  position:sticky;top:0;z-index:1
+}
+td{padding:9px 10px;border-bottom:1px solid #f2f3f5;font-variant-numeric:tabular-nums}
+tbody tr:hover{background:#fafbfc}
+td.num,th.num{text-align:right}
+.scroll-y{max-height:320px;overflow:auto}
+
+/* ============ 其他组件 ============ */
+.rows{display:flex;flex-direction:column;gap:10px}
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 20px}
+.form-item{display:flex;flex-direction:column;gap:6px}
+.form-item label{font-size:12px;color:var(--text-3)}
+.form-item input,.form-item select,.form-item textarea{
+  border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg-2);width:100%
+}
+.form-item .hint{font-size:11.5px;color:var(--text-3)}
+.seg-bar{display:flex;border-radius:8px;overflow:hidden;height:56px}
+.seg{display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11.5px;color:#fff;gap:2px}
+.seg b{font-size:13px}
+.rule-list{display:flex;flex-direction:column;gap:10px}
+.rule{
+  border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;
+  background:var(--bg-2)
+}
+.rule .rname{font-weight:600;font-size:13.5px}
+.rule .rsub{font-size:12px;color:var(--text-3)}
+.rule .spacer{flex:1}
+.switch{width:40px;height:22px;border-radius:11px;background:var(--border-2);position:relative;transition:.15s;flex:0 0 auto}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
+.switch.on{background:var(--primary)}
+.switch.on::after{left:20px}
+.tabs-inline{display:flex;gap:18px;border-bottom:1px solid var(--border);margin:-14px -14px 14px;padding:0 14px}
+.tabs-inline button{padding:11px 0;font-size:13.5px;color:var(--text-2);position:relative}
+.tabs-inline button.on{color:var(--primary);font-weight:600}
+.tabs-inline button.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--primary)}
+.tree{font-size:13px}
+.tree .node{padding:6px 8px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.tree .node:hover{background:var(--bg-3)}
+.tree .node.on{background:var(--primary-1);color:var(--primary);font-weight:600}
+.tree .child{padding-left:16px}
+.matrix{display:grid;grid-template-columns:120px repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:12.5px}
+.matrix div{background:var(--bg-2);padding:8px 10px}
+.matrix .h{color:var(--text-3);font-size:12px;background:var(--bg-3)}
+.heat{display:grid;gap:2px}
+.heat i{display:block;border-radius:2px;background:var(--primary-2)}
+.notice{
+  display:flex;gap:10px;align-items:flex-start;border:1px solid var(--primary-2);
+  background:var(--primary-1);border-radius:8px;padding:10px 12px;font-size:12.5px;color:#8a4a06
+}
+.two-col{display:grid;grid-template-columns:minmax(260px,34%) 1fr;gap:14px;min-height:0}
+.h300{height:300px;overflow:auto}
+.muted{color:var(--text-3)}
+.mono{font-variant-numeric:tabular-nums}
+.link{color:var(--primary);cursor:pointer}
+</style>
+</head>
+<body>
+<div class="appbar">
+  <div class="brand"><span class="mark">EMS</span>能源管理系统</div>
+  <button class="site-switch" data-act="noop">站点：储能柜示范站 ▾</button>
+  <div class="spacer"></div>
+  <button class="icon-btn" data-act="collapse" title="收起侧栏">☰</button>
+  <button class="user-menu" data-act="noop"><span class="avatar">管</span>admin ▾</button>
+</div>
+<div class="tabs" id="tabs"></div>
+<div class="body">
+  <aside class="sidebar" id="sidebar"></aside>
+  <section class="main">
+    <header class="pagehead" id="pagehead"></header>
+    <div class="content" id="content"></div>
+  </section>
+</div>
+<script>
+/* =========================================================================
+   原型说明
+   - 单文件、无依赖、离线可开（file:// 直接打开）
+   - 数据全为 mock，仅演示信息架构与交互；数值不作业务依据
+   - 对应设计稿：.monkeycode/specs/2026-10-06-ems-frontend-shell/design.md
+   ========================================================================= */
+
+/* ---------------- mock 数据 ---------------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const R=mulberry32(20261006);
+function series(n,base,amp,{phase=0,clamp=null,dip=null}={}){
+  const out=[];
+  for(let i=0;i<n;i++){
+    const t=i/n;
+    const day=Math.sin((t*2-0.5)*Math.PI);            // 白天高
+    const v=base+amp*day*0.6+amp*(R()-0.5)*0.5+amp*0.25*Math.sin(t*8+phase);
+    let x=Math.round(v*10)/10;
+    if(dip&&i>dip[0]&&i<dip[1]) x=Math.round(x*0.55*10)/10;
+    if(clamp) x=Math.max(clamp[0],Math.min(clamp[1],x));
+    out.push(x);
+  }
+  return out;
+}
+const N96=96;
+const DATA={
+  boundary:{
+    newEnergy:series(N96,420,180,{phase:1,clamp:[80,900]}),
+    totalLoad:series(N96,3100,400,{phase:0,clamp:[2200,3900]}),
+  },
+  ratio:series(N96,1.32,0.18,{clamp:[1.0,1.7]}),
+  forecast:{
+    ahead:series(N96,380,90,{phase:.4,clamp:[60,760]}),
+    real:series(N96,365,100,{phase:.6,clamp:[40,820]}),
+    aheadPred:series(N96,372,88,{phase:.5,clamp:[60,720]}),
+    realPred:series(N96,358,96,{phase:.7,clamp:[40,780]}),
+  },
+  freq:{capPrice:series(N96,9.5,3.2,{clamp:[2,18]}),milePrice:series(N96,5.4,1.8,{clamp:[1,11]})},
+  similar:[
+    {date:"2026-09-14",sim:0.93},{date:"2026-09-07",sim:0.89},{date:"2026-08-31",sim:0.86},
+    {date:"2026-09-19",sim:0.82},{date:"2026-08-24",sim:0.78},{date:"2026-09-02",sim:0.74},
+    {date:"2026-08-17",sim:0.71},{date:"2026-09-11",sim:0.68},
+  ],
+  dispatch:series(N96,45,60,{clamp:[-50,50]}),      // 正=充电
+  energy:Array.from({length:N96},(_,i)=>Math.round((i+1)*1.8*10)/10),
+  output:series(N96,62,20,{clamp:[0,100]}),
+};
+DATA.boundary.netLoad=DATA.boundary.totalLoad.map((v,i)=>Math.round((v-DATA.boundary.newEnergy[i])*10)/10);
+DATA.stack=[
+  {name:"火电最小出力",color:"#86909c",data:Array(N96).fill(680)},
+  {name:"固定出力",color:"#4e5969",data:Array(N96).fill(520)},
+  {name:"风电出力",color:"#0fc6c2",data:series(N96,260,90,{phase:2,clamp:[60,460]})},
+  {name:"光伏出力",color:"#f7ba1e",data:series(N96,300,220,{phase:1.2,clamp:[0,600]})},
+  {name:"500MW+火电可调",color:"#ff7d00",data:series(N96,420,80,{phase:.3})},
+  {name:"300-500MW",color:"#ffa940",data:series(N96,300,60,{phase:.8})},
+  {name:"200-300MW",color:"#ffd591",data:series(N96,200,40,{phase:1.1})},
+  {name:"<200MW",color:"#ffe7ba",data:series(N96,120,30,{phase:1.5})},
+  {name:"燃气可调",color:"#722ed1",data:series(N96,90,30,{phase:1.9})},
+];
+const COLORS={orange:"#ff7d00",blue:"#165dff",green:"#00b42a",red:"#f53f3f",cyan:"#0fc6c2",gray:"#86909c",purple:"#722ed1",gold:"#f7ba1e",dark:"#4e5969"};
+
+/* ---------------- 通用工具 ---------------- */
+const h=(s)=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const f=(v,d=1)=>v==null||isNaN(v)?"—":Number(v).toFixed(d);
+const pct=(v,d=1)=>`${f(v*100,d)}%`;
+
+/* ---------------- SVG 图表 ---------------- */
+function niceLabel(i,n){const hh=String(Math.floor(i/4)).padStart(2,"0");const mm=(i%4)*15;return `${hh}:${String(mm).padStart(2,"0")}`}
+function axisTicks(n,count=7){const out=[];for(let i=0;i<count;i++)out.push(Math.round(i*(n-1)/(count-1)));return out}
+function svgLine({series:ser,yMin,yMax,hgt=240,unit="",area=false,zero=false}){
+  const W=740,H=hgt,padL=46,padR=12,padT=12,padB=24;
+  const n=ser[0].data.length;
+  const lo=zero?Math.min(0,yMin??Math.min(...ser.flatMap(s=>s.data.filter(v=>v!=null)))):(yMin??Math.min(...ser.flatMap(s=>s.data.filter(v=>v!=null))));
+  const hi=yMax??Math.max(...ser.flatMap(s=>s.data.filter(v=>v!=null)));
+  const y0=lo-(hi-lo)*0.08, y1=hi+(hi-lo)*0.08;
+  const X=i=>padL+(W-padL-padR)*(i/(n-1));
+  const Y=v=>padT+(H-padT-padB)*(1-(v-y0)/(y1-y0));
+  let g="";
+  for(let k=0;k<=4;k++){
+    const v=y0+(y1-y0)*k/4, y=Y(v);
+    g+=`<line x1="${padL}" x2="${W-padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#eef0f3"/>`;
+    g+=`<text class="axis" x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end">${f(v,0)}</text>`;
+  }
+  axisTicks(n).forEach(i=>{
+    g+=`<text class="axis" x="${X(i).toFixed(1)}" y="${H-6}" text-anchor="middle">${niceLabel(i,n)}</text>`;
+  });
+  let paths="";
+  ser.forEach(s=>{
+    const pts=s.data.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+    if(area){
+      paths+=`<polygon points="${padL},${Y(y0)} ${pts} ${X(n-1)},${Y(y0)}" fill="${s.color}" opacity=".14"/>`;
+    }
+    paths+=`<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"`
+         + (s.dash?` stroke-dasharray="6 4"`:"")
+         + (s.mute?` opacity=".45"`:"") + `/>`;
+  });
+  const band = ser.band ? (()=>{const lo2=ser.band.lo.data,hi2=ser.band.hi.data;
+    const top=hi2.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+    const bot=lo2.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).reverse().join(" ");
+    return `<polygon points="${top} ${bot}" fill="${ser.band.color}" opacity=".12"/>`})() : "";
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    ${g}${band}${paths}
+    ${unit?`<text class="axis" x="${padL}" y="${padT+8}">${unit}</text>`:""}
+  </svg>`;
+}
+function svgStack({layers,hgt=260,unit=""}){
+  const W=740,H=hgt,padL=46,padR=12,padT=12,padB=24;
+  const n=layers[0].data.length;
+  const cum=layers[0].data.map(()=>0);
+  const totals=layers[0].data.map((_,i)=>layers.reduce((a,l)=>a+l.data[i],0));
+  const hi=Math.max(...totals)*1.06;
+  const X=i=>padL+(W-padL-padR)*(i/(n-1));
+  const Y=v=>padT+(H-padT-padB)*(1-v/hi);
+  let g="";
+  for(let k=0;k<=4;k++){const v=hi*k/4,y=Y(v);
+    g+=`<line x1="${padL}" x2="${W-padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#eef0f3"/>`;
+    g+=`<text class="axis" x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end">${f(v,0)}</text>`;}
+  axisTicks(n).forEach(i=>g+=`<text class="axis" x="${X(i).toFixed(1)}" y="${H-6}" text-anchor="middle">${niceLabel(i,n)}</text>`);
+  let areas="";
+  layers.forEach(l=>{
+    const lo=[],up=[];
+    l.data.forEach((v,i)=>{const a=cum[i],b=cum[i]+v;lo.push(`${X(i).toFixed(1)},${Y(a).toFixed(1)}`);up.push(`${X(i).toFixed(1)},${Y(b).toFixed(1)}`);cum[i]=b});
+    areas+=`<polygon points="${up.join(" ")} ${lo.reverse().join(" ")}" fill="${l.color}" opacity=".82"/>`;
+  });
+  areas+=`<polyline points="${totals.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ")}" fill="none" stroke="${COLORS.dark}" stroke-width="2" stroke-dasharray="6 4"/>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    ${g}${areas}${unit?`<text class="axis" x="${padL}" y="${padT+8}">${unit}</text>`:""}</svg>`;
+}
+function svgBars({groups,labels,yMax,hgt=220,unit="",stacked=false}){
+  const W=740,H=hgt,padL=46,padR=12,padT=12,padB=26;
+  const n=labels.length;
+  const slot=(W-padL-padR)/n;
+  const hi=yMax??Math.max(...groups.flatMap(g=>stacked?g.data.map((v,i)=>v):g.data))*1.1;
+  const Y=v=>padT+(H-padT-padB)*(1-v/hi);
+  let g="";
+  for(let k=0;k<=4;k++){const v=hi*k/4,y=Y(v);
+    g+=`<line x1="${padL}" x2="${W-padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#eef0f3"/>`;
+    g+=`<text class="axis" x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end">${f(v,0)}</text>`}
+  let bars="";
+  labels.forEach((lab,i)=>{
+    const cx=padL+slot*(i+0.5);
+    if(stacked){
+      let acc=0;
+      groups.forEach((gr,gi)=>{
+        const v=gr.data[i],x=cx-slot*0.3, w=slot*0.6;
+        const y=Y(acc+v), hh=Y(acc)-Y(acc+v);
+        bars+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0,hh).toFixed(1)}" fill="${gr.color}" opacity=".85"/>`;
+        void gi; acc+=v;
+      });
+    }else{
+      const bw=(slot*0.72)/groups.length;
+      groups.forEach((gr,gi)=>{
+        const v=gr.data[i],x=cx-slot*0.36+gi*bw;
+        bars+=`<rect x="${x.toFixed(1)}" y="${Y(v).toFixed(1)}" width="${(bw-2).toFixed(1)}" height="${(Y(0)-Y(v)).toFixed(1)}" rx="2" fill="${gr.color}" opacity=".85"/>`;
+      });
+    }
+    if(i%Math.ceil(n/14)===0) bars+=`<text class="axis" x="${cx.toFixed(1)}" y="${H-8}" text-anchor="middle">${lab}</text>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${g}${bars}${unit?`<text class="axis" x="${padL}" y="${padT+8}">${unit}</text>`:""}</svg>`;
+}
+function svgDonut({items,size=170,center="",sub=""}){
+  const total=items.reduce((a,b)=>a+b.value,0)||1;
+  const r=size/2, ir=r*0.62, cx=r, cy=r;
+  let a0=-Math.PI/2, paths="";
+  items.forEach(it=>{
+    const a1=a0+(it.value/total)*Math.PI*2;
+    const large=a1-a0>Math.PI?1:0;
+    const p=(ang,rad)=>[cx+rad*Math.cos(ang),cy+rad*Math.sin(ang)];
+    const [x0,y0]=p(a0,r),[x1,y1]=p(a1,r),[x2,y2]=p(a1,ir),[x3,y3]=p(a0,ir);
+    paths+=`<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)} L${x2.toFixed(1)} ${y2.toFixed(1)} A${ir} ${ir} 0 ${large} 0 ${x3.toFixed(1)} ${y3.toFixed(1)} Z" fill="${it.color}" opacity=".9"/>`;
+    a0=a1;
+  });
+  return `<svg class="chart" viewBox="0 0 ${size} ${size}" style="max-width:${size}px;margin:0 auto">
+    ${paths}
+    <text x="${cx}" y="${cy-2}" text-anchor="middle" style="font-size:20px;font-weight:700;fill:#1d2129">${h(center)}</text>
+    <text x="${cx}" y="${cy+16}" text-anchor="middle" style="font-size:11px;fill:#86909c">${h(sub)}</text>
+  </svg>`;
+}
+function legend(items){
+  return `<div class="legend">${items.map(i=>`<span class="lg" style="color:${i.color}">
+    <span class="sw ${i.dash?"dash":""}"></span><span style="color:var(--text-2)">${h(i.name)}</span></span>`).join("")}</div>`;
+}
+function heatGrid({rows,cols,fn,cell=13}){
+  let s=`<div class="heat" style="grid-template-columns:repeat(${cols},${cell}px)">`;
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const o=fn(r,c);s+=`<i title="${h(o.t)}" style="height:${cell}px;background:${o.c}"></i>`}
+  return s+`</div>`;
+}
+
+/* ---------------- 面板 ---------------- */
+function panel(o){
+  return `<section class="panel ${o.empty?"empty":""}" style="grid-column:span ${o.span||12}">
+    <div class="panel-head">
+      <span class="panel-title">${h(o.title)}</span>
+      ${o.sub?`<span class="panel-sub">${h(o.sub)}</span>`:""}
+      <span class="spacer"></span>
+      ${o.actions||""}
+    </div>
+    <div class="panel-body ${o.tight?"tight":""}">${o.body||`<span class="muted">暂无数据</span>`}</div>
+    ${o.foot===false?"":`<div class="panel-foot">${o.foot||"数据来源：mock · 更新于 18:58"}</div>`}
+  </section>`;
+}
+function kpi(o){
+  return `<div class="kpi"><div class="k">${h(o.k)}${o.tag||""}</div>
+    <div class="v ${o.dir||""}">${o.v}${o.unit?`<small>${h(o.unit)}</small>`:""}</div>
+    <div class="d">${o.d||""}</div></div>`;
+}
+function kpis(list,cols){return `<div class="kpis ${cols?"c"+cols:""}">${list.join("")}</div>`}
+function table({cols,rows,cls=""}){
+  return `<div class="scroll-y"><table class="${cls}"><thead><tr>${cols.map(c=>`<th class="${c.num?"num":""}">${h(c.title??c)}</th>`).join("")}</tr></thead>
+  <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${cols[i]&&cols[i].num?"num":""}">${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function radio(name,opts,value){
+  return `<span class="radio-group" data-radio="${name}">${opts.map(o=>
+    `<button class="${value===o.v?"on":""}" data-act="radio" data-name="${name}" data-value="${o.v}">${h(o.t)}</button>`).join("")}</span>`;
+}
+function sw(on){return `<span class="switch ${on?"on":""}" data-act="switch"></span>`}
+
+/* =========================================================================
+   导航配置（唯一真源 · 对应设计稿 §3.2）
+   ========================================================================= */
+const NAV={
+  scene:{title:"场景",pages:[
+    {k:"disclosure",t:"信息披露"},{k:"decision",t:"决策支持"},{k:"clearing",t:"市场出清"},
+    {k:"review",t:"预测复盘"},{k:"inference",t:"策略反演",todo:true},{k:"history",t:"历史信息"},
+    {k:"forecast",t:"长周期电价预测"},
+  ]},
+  manage:{title:"管理",pages:[
+    {k:"manual",t:"手动控制"},{k:"policies",t:"策略管理"},
+    {k:"automation",t:"自动化联动",todo:true},
+    {k:"devices",t:"设备管理",badge:1},{k:"drivers",t:"协议与驱动",todo:true},{k:"remote",t:"远程调度",todo:true},
+    {k:"network",t:"网络配置",todo:true},{k:"price",t:"电价管理"},{k:"collect",t:"采集管理",badge:8},
+    {k:"statistics",t:"统计分析",todo:true},{k:"audit",t:"审计"},{k:"exports",t:"报表导出",todo:true},
+    {k:"users",t:"用户与权限",todo:true},
+  ]},
+  config:{title:"配置",pages:[
+    {k:"ess",t:"储能参数"},{k:"info",t:"系统信息"},{k:"storage",t:"存储管理",todo:true},
+    {k:"operations",t:"系统操作",todo:true},{k:"credentials",t:"采集与凭据"},{k:"retention",t:"数据保留",todo:true},
+    {k:"time",t:"时间与时区"},{k:"ui",t:"界面与语言",todo:true},{k:"logging",t:"日志级别",todo:true},
+  ]},
+};
+
+/* =========================================================================
+   状态
+   ========================================================================= */
+const ST={tab:"scene",page:"disclosure",collapsed:false,
+  scene:"广东现货日报",date:"2026-09-21",
+  market:"ahead",      // ahead | real
+  disp:"pu",           // 分时离散度：pu | raw
+  fcView:"intraday",   // forecast：intraday | avg
+  histGran:"day",
+  histOn:{stop:true,start:true,reserve:true,freq:true,price:true,energy:true},
+  inlineTab:{},        // 页内二级 Tab
+  selDevice:"ess_1", selUnit:"王家岭1#",
+};
+
+/* =========================================================================
+   页面渲染（对应设计稿 §5.x / §11.x）
+   ========================================================================= */
+const P={};
+
+/* ---------- 场景 ---------- */
+function sceneHead(extra=""){
+  return `${radio("market",[{v:"ahead",t:"日前"},{v:"real",t:"实时"}],ST.market)}
+    <label class="field">运行日 <input type="date" value="${ST.date}" data-act="date"></label>
+    ${extra}`;
+}
+function boundaryChart(){
+  return svgLine({series:[
+    {name:"新能源出力",color:COLORS.cyan,data:DATA.boundary.newEnergy,area:true},
+    {name:"总负荷",color:COLORS.orange,data:DATA.boundary.totalLoad},
+    {name:"净负荷",color:COLORS.blue,data:DATA.boundary.netLoad},
+  ],unit:"MW"})+legend([
+    {name:"新能源出力",color:COLORS.cyan},{name:"总负荷",color:COLORS.orange},{name:"净负荷",color:COLORS.blue}]);
+}
+function ratioChart(){
+  return svgLine({series:[
+    {name:"净负荷",color:COLORS.blue,data:DATA.boundary.netLoad},
+    {name:"供需比(净负荷口径)",color:COLORS.purple,data:DATA.ratio.map(v=>v*1000)},
+  ],unit:"MW / 比值×1000"})+legend([
+    {name:"净负荷(MW)",color:COLORS.blue},{name:"供需比(净负荷口径)",color:COLORS.purple}]);
+}
+const MACHINES=["王家岭电厂1#机","王家岭电厂2#机","河曲1#","河曲2#","恒北1#","房山","雁门关","淮安","明海","保北","忻州","桂山"];
+function stopTable(mode){
+  return table({cols:["机组名称","机组状态","容量(MW)","时段"],
+    rows:MACHINES.map((m,i)=>{
+      const st=["必开","必停","市场竞争已开","市场竞争已停"][i%4];
+      const chip={"必开":"green","必停":"red","市场竞争已开":"orange","市场竞争已停":"gray"}[st];
+      return [m,`<span class="chip ${chip}">${st}</span>`,300+i*10, mode==="t96"?`t${20+i*3}–t${24+i*3}`:"全天"];
+    })});
+}
+
+P.disclosure=()=>`
+  ${kpis([
+    kpi({k:"天气",v:"晴",d:"18~27 ℃ · 东南风 2 级"}),
+    kpi({k:"新能源",v:"1 280",unit:"MWh",d:"风电+光伏 · 发电量"}),
+    kpi({k:"最大负荷",v:"3 460",unit:"MW",d:"当日峰值"}),
+    kpi({k:"最大净负荷",v:"2 980",unit:"MW",d:"总负荷−新能源 峰值"}),
+    kpi({k:"供需比（总负荷）",v:"1.16 : 1",d:"供给能力 : 总负荷"}),
+    kpi({k:"供需比（净负荷）",v:"1.41 : 1",d:"供给能力 : 净负荷"}),
+  ])}
+  <div style="height:14px"></div>
+  <div class="grid">
+    ${panel({span:8,title:"市场运行边界",sub:"新能源出力 / 总负荷 / 净负荷",body:boundaryChart(),
+      foot:"数据来源：日报 OCR · 未复核项已标注 · 日 96 点（15min）"})}
+    ${panel({span:4,title:"市场供需比",sub:"净负荷 + 供需比（净负荷口径）",body:ratioChart(),
+      foot:"双 Y 轴 · 右轴为比值"})}
+    ${panel({span:4,title:"火电机组启停状态统计",sub:"四分类",body:
+      svgDonut({items:[
+        {value:14,color:COLORS.green},{value:6,color:COLORS.red},
+        {value:22,color:COLORS.orange},{value:9,color:COLORS.gray}],center:"51",sub:"台"
+      })+legend([{name:"必开",color:COLORS.green},{name:"必停",color:COLORS.red},
+        {name:"市场竞争已开",color:COLORS.orange},{name:"市场竞争已停",color:COLORS.gray}]),
+      actions:`<button class="btn sm">导出</button>`})}
+    ${panel({span:8,title:"火电机组启停状态统计表",sub:"点击左侧扇区可过滤",
+      tight:true,body:stopTable(),actions:`<button class="btn sm">全选</button><button class="btn sm">导出 CSV</button>`})}
+  </div>`;
+
+P.decision=()=>`
+  <div class="grid">
+    ${panel({span:12,title:"市场价格预测",sub:"日前市场预测价格 / 实时市场预测价格",body:
+      svgLine({series:[
+        {name:"日前市场预测价格",color:COLORS.orange,data:DATA.forecast.aheadPred},
+        {name:"实时市场预测价格",color:COLORS.blue,data:DATA.forecast.realPred,dash:true},
+      ],unit:"元/MWh"})+legend([{name:"日前市场预测价格",color:COLORS.orange},{name:"实时市场预测价格",color:COLORS.blue,dash:true}]),
+      foot:"预测曲线为虚线；数据来源：预测模型（待接入）"})}
+    ${panel({span:12,title:"日前市场竞争空间",sub:"分档堆叠 + 总负荷参考线",body:
+      svgStack({layers:DATA.stack,unit:"MW"})+legend(DATA.stack.map(s=>({name:s.name,color:s.color}))),
+      foot:"图例可逐项勾选 · 堆叠合值 = 供给能力（与供需比分子同源）"})}
+    ${panel({span:4,title:"历史相似日分析",sub:"按相似度排序",tight:true,body:
+      table({cols:[{title:"日期"},{title:"相似度",num:true}],
+        rows:DATA.similar.map(s=>[`<span class="link" data-act="noop">${s.date}</span>`,
+          `<b class="mono">${f(s.sim*100,0)}%</b>`])}),
+      foot:"点击某日 → 右侧图叠加对比"})}
+    ${panel({span:8,title:"历史相似日情况分析",sub:"日前价格 / 实时价格",body:
+      svgLine({series:[
+        {name:"相似日 09-14 日前价格",color:COLORS.orange,data:series(N96,360,95,{phase:.5,clamp:[50,760]})},
+        {name:"相似日 09-14 实时价格",color:COLORS.blue,data:series(N96,345,105,{phase:.7,clamp:[40,800]}),dash:true},
+        {name:"本地日前价格",color:COLORS.gray,data:series(N96,372,88,{phase:.4,clamp:[60,720]}),mute:true},
+      ],unit:"元/MWh"})+legend([
+        {name:"相似日-日前",color:COLORS.orange},{name:"相似日-实时",color:COLORS.blue,dash:true},{name:"本地日前",color:COLORS.gray}]),
+      foot:"最多叠加 3 个相似日"})}
+  </div>`;
+
+P.clearing=()=>`
+  <div class="grid">
+    ${panel({span:8,title:"日前市场火电启停状态统计图",sub:"t96 时刻（15min）",body:
+      svgBars({labels:Array.from({length:N96},(_,i)=>`t${i+1}`),stacked:true,unit:"台",
+        groups:[
+          {color:COLORS.green,data:Array.from({length:N96},()=>10+Math.round(R()*6))},
+          {color:COLORS.red,data:Array.from({length:N96},()=>3+Math.round(R()*4))},
+          {color:COLORS.orange,data:Array.from({length:N96},()=>16+Math.round(R()*8))},
+          {color:COLORS.gray,data:Array.from({length:N96},()=>5+Math.round(R()*5))},
+        ]})+legend([{name:"必开",color:COLORS.green},{name:"必停",color:COLORS.red},
+        {name:"市场竞争已开",color:COLORS.orange},{name:"市场竞争已停",color:COLORS.gray}]),
+      foot:"点击某个时刻 → 下表过滤该时段"})}
+    ${panel({span:4,title:"日前调频价格",sub:"调频容量价格 / 调频里程价格",body:
+      svgLine({series:[
+        {name:"调频容量价格",color:COLORS.purple,data:DATA.freq.capPrice},
+        {name:"调频里程价格",color:COLORS.cyan,data:DATA.freq.milePrice},
+      ],unit:"元/MW"})+legend([{name:"调频容量价格",color:COLORS.purple},{name:"调频里程价格",color:COLORS.cyan}]),
+      foot:"数据来源：日报出清结果"})}
+    ${panel({span:12,title:"日前火电机组启停状态统计表",sub:"共 51 台",tight:true,
+      body:stopTable("t96"),
+      actions:`<button class="btn sm">全选</button><button class="btn sm">导出 CSV</button>`,
+      foot:"搜索 / 状态筛选 / 导出"})}
+    ${panel({span:12,title:"日前输电约束及阻塞情况",sub:"越限行标红",tight:true,body:
+      table({cols:["日期","时点","越限","断面名称","限额(MW)","潮流(MW)"],rows:[
+        ["2026-09-21","t42","<span class='chip red'>越限</span>","湖关三回线",1200,"1246"],
+        ["2026-09-21","t43","<span class='chip red'>越限</span>","湖关三回线",1200,"1231"],
+        ["2026-09-21","t58","<span class='chip gray'>正常</span>","雁同双回线",900,"812"],
+        ["2026-09-21","t70","<span class='chip orange'>接近</span>","桂山—忻州",800,"781"],
+      ]}),
+      foot:"数据来源：日报出清结果"})}
+  </div>`;
+
+P.review=()=>`
+  <div class="grid">
+    ${panel({span:12,title:"市场出清与预测价格",sub:"日前出清价格 / 日前预测价格",body:
+      svgLine({series:[
+        {name:"日前出清价格",color:COLORS.orange,data:DATA.forecast.ahead},
+        {name:"日前预测价格",color:COLORS.blue,data:DATA.forecast.aheadPred,dash:true},
+      ],unit:"元/MWh"})+legend([{name:"日前出清价格",color:COLORS.orange},{name:"日前预测价格",color:COLORS.blue,dash:true}]),
+      foot:"悬停显示偏差与偏差率"})}
+    ${panel({span:6,title:"趋势相关度",sub:"峰 / 平 / 谷 / 全天",body:
+      `<div class="matrix">
+        <div class="h">时段</div><div class="h">峰</div><div class="h">平</div><div class="h">谷</div><div class="h">全天</div>
+        <div>相关系数</div><div class="mono">0.94</div><div class="mono">0.91</div><div class="mono">0.88</div><div class="mono">0.92</div>
+      </div>`,foot:"口径：预测价 vs 出清价相关系数（公式 TODO）"})}
+    ${panel({span:6,title:"峰平谷平均离散度",sub:"单位：标幺",body:
+      svgBars({labels:["峰","平","谷","全天"],unit:"标幺",
+        groups:[{color:COLORS.orange,data:[0.084,0.062,0.051,0.066]}]}),
+      foot:"口径：时段内分时离散度均值"})}
+    ${panel({span:12,title:"分时离散度",sub:"逐时刻 |预测−出清| / 出清",
+      actions:`显示 ${radio("disp",[{v:"pu",t:"标幺"},{v:"raw",t:"数值"}],ST.disp)}`,
+      body:svgBars({labels:Array.from({length:N96},(_,i)=>`t${i+1}`),unit:ST.disp==="pu"?"标幺":"元/MWh",
+        groups:[{color:COLORS.orange,data:Array.from({length:N96},()=>Math.round((0.02+R()*0.12)*1000)/1000)}]}),
+      foot:"峰/平/谷 底色分段 · 峰平谷时段与「管理·电价管理」共用"})}
+  </div>`;
+
+P.inference=()=>`
+  <div class="grid">
+    ${panel({span:6,title:"机组实时出力",sub:"96 点 · MW",body:svgLine({series:[
+      {name:"实时出力",color:COLORS.orange,data:DATA.output,area:true}],unit:"MW"})})}
+    ${panel({span:6,title:"机组累计电量",sub:"累计 · MWh",body:svgLine({series:[
+      {name:"累计电量",color:COLORS.cyan,data:DATA.energy,area:true}],unit:"MWh"})})}
+    ${panel({span:12,title:"市场成员报价策略反演",sub:"报价段一…十（MW, 元/MWh）· 估计值",body:
+      svgLine({series:[
+        {name:"自身策略",color:COLORS.orange,data:Array.from({length:12},(_,i)=>i*32)},
+        {name:"保守",color:COLORS.gray,data:Array.from({length:12},(_,i)=>i*31),dash:true},
+        {name:"激进",color:COLORS.red,data:Array.from({length:12},(_,i)=>i*34),dash:true},
+        {name:"边际成本 285",color:COLORS.dark,data:Array(12).fill(285),mute:true},
+      ],unit:"元/MWh"})+legend([
+        {name:"自身策略",color:COLORS.orange},{name:"保守",color:COLORS.gray,dash:true},
+        {name:"激进",color:COLORS.red,dash:true},{name:"边际成本",color:COLORS.dark,dash:true}]),
+      actions:`<button class="btn sm">导出 CSV</button>`,
+      foot:"⚠ 反演为估计值，非实际报价；数据来源：待接入（空态占位）"})}
+    ${panel({span:12,title:"日前市场火电开机安排",sub:"机组 × 时段 开停矩阵",body:
+      heatGrid({rows:12,cols:48,fn:(r,c)=>({c:(R()>0.45?COLORS.orange:"#eef0f3"),t:`机组${r+1} · t${c*2+1}`}),cell:14}),
+      foot:"点单元格看时段详情"})}
+  </div>`;
+
+P.history=()=>`
+  <div class="grid" style="margin-bottom:14px">
+    ${panel({span:12,title:"指标多选",sub:"勾选控制下方面板显隐",foot:false,body:
+      `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        ${[["stop","火电启停状态统计"],["start","日前市场火电开机安排"],["reserve","日前系统备用需求"],
+           ["freq","日前系统调频辅助服务需求"],["price","日前-实时出清与预测价格"],["energy","日前-实时出清电量"]]
+          .map(([k,t])=>`<button class="btn sm ${ST.histOn[k]?"primary":""}" data-act="hist" data-value="${k}">${ST.histOn[k]?"☑":"☐"} ${t}</button>`).join("")}
+        <span style="flex:1"></span>
+        <label class="field">粒度 <select data-act="gran">${[["day","按日"],["week","按周"],["month","按月"]].map(([v,t])=>`<option value="${v}" ${ST.histGran===v?"selected":""}>${t}</option>`).join("")}</select></label>
+        <button class="btn sm">导出</button>
+      </div>`})}
+  </div>
+  <div class="grid">
+    ${ST.histOn.stop?panel({span:6,title:"火电启停状态统计（多日）",body:
+      svgBars({labels:["09-15","09-16","09-17","09-18","09-19","09-20","09-21"],stacked:true,unit:"台",
+        groups:[{color:COLORS.green,data:[14,15,13,16,14,15,14]},{color:COLORS.red,data:[6,5,7,4,6,5,6]},
+          {color:COLORS.orange,data:[22,21,23,20,22,24,22]},{color:COLORS.gray,data:[9,10,8,11,9,7,9]}]}),
+      foot:"按运行日聚合"}) : ""}
+    ${ST.histOn.start?panel({span:6,title:"日前市场火电开机安排（多日）",body:
+      heatGrid({rows:10,cols:14,fn:(r,c)=>({c:(R()>0.4?COLORS.orange:"#eef0f3"),t:`机组${r+1} · 第${c+1}日`}),cell:16}),
+      foot:"机组 × 日期 开停时长"}) : ""}
+    ${ST.histOn.reserve?panel({span:12,title:"日前系统备用需求",body:
+      svgLine({series:[
+        {name:"系统负备用",color:COLORS.blue,data:series(N96,320,70,{phase:.3})},
+        {name:"系统正备用",color:COLORS.orange,data:series(N96,360,80,{phase:.6})},
+        {name:"新能源负荷备用",color:COLORS.cyan,data:series(N96,180,60,{phase:.9})},
+      ],unit:"MW"})+legend([{name:"系统负备用",color:COLORS.blue},{name:"系统正备用",color:COLORS.orange},{name:"新能源负荷备用",color:COLORS.cyan}])}) : ""}
+    ${ST.histOn.freq?panel({span:12,title:"日前系统调频辅助服务需求",body:
+      svgBars({labels:["时段1","时段2","时段3","时段4","时段5"],unit:"MW",
+        groups:[{color:COLORS.orange,data:[220,265,240,205,150]}]}),
+      foot:"「时段1…5」划分定义 TODO"}) : ""}
+    ${ST.histOn.price?panel({span:12,title:"日前-实时市场出清与预测价格",body:
+      svgLine({series:[
+        {name:"日前出清价",color:COLORS.orange,data:DATA.forecast.ahead},
+        {name:"实时出清电价",color:COLORS.red,data:DATA.forecast.real},
+        {name:"日前预测电价",color:COLORS.orange,data:DATA.forecast.aheadPred,dash:true},
+        {name:"实时预测电价",color:COLORS.red,data:DATA.forecast.realPred,dash:true},
+      ],unit:"元/MWh"})+legend([{name:"日前出清价",color:COLORS.orange},{name:"实时出清电价",color:COLORS.red},
+        {name:"日前预测电价",color:COLORS.orange,dash:true},{name:"实时预测电价",color:COLORS.red,dash:true}]),
+      foot:"实线=出清实际，虚线=预测"}) : ""}
+    ${ST.histOn.energy?panel({span:12,title:"日前-实时市场出清电量",body:
+      svgBars({labels:["09-15","09-16","09-17","09-18","09-19","09-20","09-21"],unit:"MWh",
+        groups:[{color:COLORS.blue,data:[820,845,790,860,830,850,840]},{color:COLORS.cyan,data:[805,838,782,851,824,842,833]}]}),
+      foot:"「实时用量」口径待统一为实时电量"}) : ""}
+  </div>`;
+
+P.forecastHeadExtra=()=>radio("fcView",[{v:"intraday",t:"分时"},{v:"avg",t:"平均"}],ST.fcView);
+P.forecast=()=>{
+  if(ST.fcView==="intraday"){
+    const days=[0,1,2,3,4].map(i=>series(N96,360+i*8,90,{phase:.4+i*0.3,clamp:[50,780]}));
+    return panel({span:12,title:"未来多日电价预测-分时",sub:"每日 96 点 · 日前价格（预测）",body:
+      svgLine({series:days.map((d,i)=>({name:`D+${i+1}`,color:[COLORS.orange,COLORS.blue,COLORS.cyan,COLORS.purple,COLORS.gray][i],
+        data:d,dash:true,mute:i>0}))})+legend(days.map((_,i)=>({name:`D+${i+1}`,color:[COLORS.orange,COLORS.blue,COLORS.cyan,COLORS.purple,COLORS.gray][i],dash:true}))),
+      foot:"预测曲线一律虚线并标「预测」；滚动更新 · 生成于 18:58"});
+  }
+  return panel({span:12,title:"未来多日电价预测-平均",sub:"日均日前价格（预测）",body:
+    svgBars({labels:["D+1","D+2","D+3","D+4","D+5"],unit:"元/MWh",
+      groups:[{color:COLORS.orange,data:[372,381,365,344,358]}]}),
+    foot:"可叠历史同期均值参考线 · 日均口径 TODO"});
+};
+
+/* ---------- 管理 ---------- */
+P.manual=()=>`
+  <div class="grid">
+    ${panel({span:12,title:"目标设备",sub:"实时下发，谨慎操作",foot:false,body:
+      `<div class="rows">
+        <div class="notice">⚠ 手动指令会立即下发到现场设备。执行受 SOC / 功率上限 / 变压器过载保护约束，越限将被拒绝。</div>
+        <div class="grid" style="gap:10px">
+          ${kpi({k:"目标设备",v:"储能柜 1",d:"ess_demo_v1.0.0 · Modbus TCP · 在线"})}
+          ${kpi({k:"当前 SOC",v:"80",unit:"%",d:"min 10 / max 95"})}
+          ${kpi({k:"当前功率",v:"+20",unit:"kW",d:"充电中"})}
+          ${kpi({k:"可用容量",v:"200",unit:"kWh",d:"额定"})}
+        </div>
+      </div>`})}
+    ${panel({span:6,title:"充电",body:
+      `<div class="form-grid">
+        <div class="form-item"><label>功率 (kW)</label><input value="40"><span class="hint">上限 50 kW</span></div>
+        <div class="form-item"><label>时长 (min)</label><input value="30"></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn primary" data-act="noop">开始充电</button></div>`})}
+    ${panel({span:6,title:"放电",body:
+      `<div class="form-grid">
+        <div class="form-item"><label>功率 (kW)</label><input value="40"><span class="hint">上限 50 kW</span></div>
+        <div class="form-item"><label>时长 (min)</label><input value="30"></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn primary" data-act="noop">开始放电</button>
+      <button class="btn danger" data-act="noop" style="margin-left:8px">停止</button></div>`})}
+    ${panel({span:12,title:"实时充放",sub:"功率 / SOC / 今日套利",body:
+      svgLine({series:[
+        {name:"充放功率",color:COLORS.orange,data:DATA.dispatch,zero:true},
+        {name:"SOC",color:COLORS.cyan,data:series(N96,78,8,{clamp:[10,95]})},
+      ],unit:"kW / %",zero:true})+legend([{name:"充放功率(+充 / −放)",color:COLORS.orange},{name:"SOC",color:COLORS.cyan}])})}
+  </div>`;
+
+P.policies=()=>{
+  const list=[
+    {n:"tou-rule",st:"运行中",on:true,d:"峰充谷放 · 生效 10-01~10-31"},
+    {n:"tou-rule+demand",st:"已停用",on:false,d:"叠加需量控制"},
+    {n:"idle",st:"基线",on:false,d:"对照组，不动作"},
+    {n:"peak-shaving",st:"运行中",on:true,d:"削峰为主"},
+  ];
+  return `<div class="two-col">
+    ${panel({span:12,title:"策略列表",sub:`共 ${list.length} 条`,tight:true,
+      actions:`<button class="btn primary sm" data-act="noop">+ 新建策略</button>`,
+      body:`<div style="padding:12px" class="rule-list">${list.map((p,i)=>`
+        <div class="rule ${i===0?"":""}">
+          <div><div class="rname">${p.n}</div><div class="rsub">${p.d}</div></div>
+          <div class="spacer"></div>
+          <span class="chip ${p.st==="运行中"?"green":p.st==="基线"?"blue":"gray"}">${p.st}</span>
+          ${sw(p.on)}
+        </div>`).join("")}</div>`,
+      foot:"点击条目在右侧编辑（原型用下方固定展示）"})}
+    ${panel({span:12,title:"策略详情 / 编辑",sub:"tou-rule · 参数表单（本期先简单实现，不做规则树）",
+      actions:`<button class="btn sm">试运行</button><button class="btn primary sm">保存</button>`,
+      body:`<div class="form-grid">
+        <div class="form-item"><label>策略名称</label><input value="tou-rule"></div>
+        <div class="form-item"><label>生效区间</label><input value="2026-10-01 → 2026-10-31"></div>
+        <div class="form-item"><label>储能柜</label><select><option>储能柜 1</option></select></div>
+        <div class="form-item"><label>关口电表</label><select><option>关口电表</option></select></div>
+        <div class="form-item"><label>最小 SOC (%)</label><input value="10"><span class="hint">全局默认 10%，此处覆盖</span></div>
+        <div class="form-item"><label>最大 SOC (%)</label><input value="95"></div>
+        <div class="form-item"><label>充电功率上限 (kW)</label><input value="50"></div>
+        <div class="form-item"><label>放电功率上限 (kW)</label><input value="50"></div>
+        <div class="form-item"><label>峰谷价差阈值 (元/kWh)</label><input value="0.4"><span class="hint">低于不动作，避免损失</span></div>
+        <div class="form-item"><label>需量阈值 (kW)</label><input value="500"></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="panel-sub" style="margin-bottom:6px">充放计划预览（给定价格预测 + 约束）</div>
+        ${svgLine({series:[
+          {name:"计划充放功率",color:COLORS.orange,data:DATA.dispatch,zero:true},
+          {name:"价格预测",color:COLORS.purple,data:DATA.forecast.aheadPred,mute:true,dash:true},
+        ],hgt:180,unit:"kW / 元/MWh",zero:true})}
+      </div>`,
+      foot:"保存前做约束冲突校验：时段重叠 / SOC 矛盾 / 需量阈值低于基础负荷"})}
+  </div>`;
+};
+
+P.automation=()=>{
+  const rules=[
+    {t:"派能BMS SOC>100% → 红灯高电平",on:true},
+    {t:"星星充电PCS 总有功功率=4kW → 派能BMS 测试温度告警触发",on:true},
+    {t:"左开关 状态满足触发 → 红灯高电平",on:true},
+    {t:"关口电表 总有功功率>88kW → 负荷零功率",on:false},
+  ];
+  return `<div class="grid">${panel({span:12,title:"自动化规则",sub:"IF 条件 → THEN 动作",tight:true,
+    actions:`<button class="btn primary sm" data-act="noop">+ 新建规则</button>`,
+    body:`<div style="padding:12px" class="rule-list">${rules.map(r=>`
+      <div class="rule">
+        <div><div class="rname">${r.t}</div><div class="rsub">触发：设备+点位+比较+值 · 时间条件：计划/星期</div></div>
+        <div class="spacer"></div>
+        <button class="btn sm">编辑</button>${sw(r.on)}
+      </div>`).join("")}</div>`,
+    foot:"保护类联动示例：过温停充、SOC 过低停放"})}</div>`;
+};
+
+P.devices=()=>`
+  <div class="two-col">
+    ${panel({span:12,title:"设备树",sub:"本期只接 mock",tight:true,body:
+      `<div class="tree" style="padding:10px">
+        <div class="node">▾ 储能柜示范站</div>
+        <div class="child">
+          <div class="node">▾ 储能柜 1</div>
+          <div class="child">
+            <div class="node on">▪ PCS（ess_demo_v1.0.0）</div>
+            <div class="node">▪ BMS</div>
+            <div class="node">▪ 电表</div>
+            <div class="node">▪ 消防/空调</div>
+          </div>
+        </div>
+      </div>`,
+      foot:"driver ess_demo_v1.0.0 · modbus_tcp · unitId 1"})}
+    ${panel({span:12,title:"点表 · PCS",sub:"holding 0xC8–0xD5（FC03/FC06）",tight:true,
+      actions:`<button class="btn sm">导入 CSV</button><button class="btn sm">导出</button>`,
+      body:table({cols:["地址","点位","类型","单位","读写","当前值"],rows:[
+        ["0xC8","工作状态","uint16","—","R",`<span class="chip green">运行</span>`],
+        ["0xC9","有功功率","int16","kW","R/W","+5.0"],
+        ["0xCA","SOC","uint16","%","R","80"],
+        ["0xCB","SOH","uint16","%","R","98"],
+        ["0xCC","最大充电功率","uint16","kW","R","50"],
+        ["0xCD","最大放电功率","uint16","kW","R","50"],
+        ["0xD4","充电电量","uint32","kWh","R","150"],
+        ["0xD5","放电电量","uint32","kWh","R","120"],
+      ]}),
+      foot:"mock live 模式：SOC/功率围绕 targetPower 抖动"})}
+  </div>`;
+
+P.drivers=()=>`<div class="grid">${panel({span:12,title:ST.inlineTab.drivers==="proto"?"协议配置":"驱动管理",
+  actions:`<button class="btn sm">上传驱动</button><button class="btn primary sm" data-act="noop">新增</button>`,
+  tight:true,body:`<div style="padding:0 14px">
+    <div class="tabs-inline">
+      <button class="${ST.inlineTab.drivers!=="proto"?"on":""}" data-act="itab" data-name="drivers" data-value="drv">驱动管理</button>
+      <button class="${ST.inlineTab.drivers==="proto"?"on":""}" data-act="itab" data-name="drivers" data-value="proto">协议配置</button>
+    </div></div>`+
+  (ST.inlineTab.drivers==="proto"
+    ? table({cols:["名称","IP 地址","端口","超时(ms)","日志级别","状态","操作"],rows:[
+        ["modbus_tcp_1","100.64.0.3",2509,3000,"Info",`<span class="chip red">未启用</span>`,`<button class="btn sm">编辑</button>`],
+        ["acr","100.64.0.3",3502,3000,"Warn",`<span class="chip red">未启用</span>`,`<button class="btn sm">编辑</button>`],
+        ["demo","100.64.0.7",11502,3000,"Info",`<span class="chip green">启用</span>`,`<button class="btn sm">编辑</button>`],
+      ]})
+    : table({cols:["品牌","型号","版本","设备类型","协议类型","更新时间","操作"],rows:[
+        ["HEX","Demo","v1.0.0","Ammeter",`<span class="chip green">Modbus</span>`,"2025-09-01","<button class='btn sm'>详情</button>"],
+        ["Pylon","TechUs108","v1.0.0","Battery Management System",`<span class="chip green">Modbus</span>`,"2024-09-07","<button class='btn sm'>详情</button>"],
+        ["HEX","Demo","v1.0.0","Energy Storage Cabinet",`<span class="chip green">Modbus</span>`,"2025-09-01","<button class='btn sm'>详情</button>"],
+        ["Hex","Basic-GPIO-In","v1.0.0","DIDO Input",`<span class="chip blue">gpio_in</span>`,"2025-09-12","<button class='btn sm'>详情</button>"],
+        ["Elecod","MAC","v1.0.0","PCS",`<span class="chip purple">Canbus</span>`,"2025-08-10","<button class='btn sm'>详情</button>"],
+      ]})),
+  foot:"AI 生成驱动本期不做，仅保留上传入口"})}</div>`;
+
+P.remote=()=>`<div class="grid">${panel({span:12,title:"远程调度",sub:"MQTT / Modbus / 远程日志",tight:true,body:
+  `<div style="padding:0 14px"><div class="tabs-inline">
+    ${["MQTT","Modbus","远程日志"].map((t,i)=>`<button class="${(ST.inlineTab.remote??"MQTT")===t?"on":""}" data-act="itab" data-name="remote" data-value="${t}">${t}</button>`).join("")}
+  </div></div>
+  <div style="padding:14px">
+    <div class="form-grid">
+      <div class="form-item"><label>端口</label><input value="502"></div>
+      <div class="form-item"><label>绑定设备</label><input value="派能BMS / 红灯 / 右开关"></div>
+    </div>
+    <div style="margin-top:14px" class="rows">
+      ${[["派能BMS","在线","Modbus 地址 3 / 起始 400 / 允许控制"],["红灯","在线","Modbus 地址 1 / 起始 300 / 允许控制"],["右开关","离线","Modbus 地址 3 / 起始 200 / 禁止控制"]]
+        .map(([n,st,d])=>`<div class="rule"><div><div class="rname">${n}</div><div class="rsub">${d}</div></div>
+          <div class="spacer"></div><span class="chip ${st==="在线"?"green":"gray"}">${st}</span>
+          <button class="btn sm">查看遥测</button></div>`).join("")}
+    </div>
+  </div>`,foot:"设备寄存器映射 · Allow Control 开关"})}</div>`;
+
+P.network=()=>`<div class="grid">${panel({span:12,title:"网卡配置",actions:`<button class="btn primary sm">应用</button>`,body:
+  `<div class="notice" style="margin-bottom:14px">⚠ 修改网络配置可能导致连接中断；仅重启网卡，不整机重启。</div>
+  <div class="form-grid">
+    <div class="form-item"><label>网卡</label><select><option>eth0</option><option>eth1</option></select></div>
+    <div class="form-item"><label>模式</label><select><option>DHCP</option><option>静态</option></select></div>
+    <div class="form-item"><label>IP 地址</label><input value="192.168.1.100"></div>
+    <div class="form-item"><label>子网掩码</label><input value="255.255.255.0"></div>
+    <div class="form-item"><label>网关</label><input value="192.168.1.1"></div>
+    <div class="form-item"><label>DNS</label><input value="223.5.5.5"></div>
+  </div>`,
+  foot:"改前会弹 diff 预览"})}</div>`;
+
+P.price=()=>{
+  const segs=[["谷","0:00–8:00","#00b42a",0.5],["尖峰","8:00–11:00","#f53f3f",1.5],["峰","11:00–13:00","#ff7d00",1.2],
+    ["平","13:00–20:00","#165dff",0.8],["谷","20:00–24:00","#00b42a",0.5]];
+  return `<div class="grid">
+    ${panel({span:12,title:"电价配置",sub:"生效区间 + 优先级 + 星期",tight:true,
+      actions:`<button class="btn primary sm" data-act="noop">+ 新增配置</button>`,
+      body:`<div style="padding:14px" class="rows">
+        <div class="rule"><div><div class="rname">2026-10-28 ~ 2026-10-31</div><div class="rsub">周五 / 周四 / 周三</div></div>
+          <div class="spacer"></div><span class="chip green">启用</span><span class="chip orange">中优先</span></div>
+        <div class="seg-bar">${Array.from({length:4},(_,i)=>`<div class="seg" style="flex:1;background:#a9c7ff"><b>平</b>0.5</div>`).join("")}</div>
+        <div class="rule"><div><div class="rname">2026-10-20</div><div class="rsub">全周</div></div>
+          <div class="spacer"></div><span class="chip green">启用</span><span class="chip orange">中优先</span><span class="chip blue">当前生效</span></div>
+        <div class="seg-bar">${segs.map(s=>`<div class="seg" style="flex:${parseInt(s[1].split("–")[1])-parseInt(s[1].split("–")[0])};background:${s[2]}">
+          <b>${s[0]}</b>${s[3]} 元/kWh</div>`).join("")}</div>
+      </div>`,
+      foot:"甘特条可拖拽调时段 · 峰/平/谷/尖峰分色 · 峰平谷时段与预测复盘共用"})}
+  </div>`;
+};
+
+P.collect=()=>`<div class="grid">
+  ${panel({span:12,title:"采集台",body:
+    `<div class="form-item"><label>微信公众号文章链接</label>
+      <input value="https://mp.weixin.qq.com/s/pxdJ0CyMva1evGOKsCpE0w"></div>
+    <div style="margin-top:12px"><button class="btn primary" data-act="noop">采集入库</button>
+      <span class="chip gray" style="margin-left:8px">存储：本地</span></div>`,
+    foot:"采集 → 抽标题/日期 → 抽 4 页图 → 归档 → OCR 解析"})}
+  ${panel({span:8,title:"日报档案",sub:"按运行日降序",tight:true,body:
+    table({cols:["运行日","页数","存储","采集时间","状态"],rows:[
+      ["2026-09-21",4,"本地","09-21 22:10",`<span class="chip green">已复核</span>`],
+      ["2026-09-20",4,"本地","09-20 21:40",`<span class="chip green">已复核</span>`],
+      ["2026-09-19",4,"本地","09-19 20:55",`<span class="chip orange">未复核</span>`],
+      ["2026-09-18",4,"本地","09-18 22:02",`<span class="chip orange">未复核</span>`],
+    ]}),
+    actions:`<button class="btn sm" data-act="noop">重新解析（OCR）</button>`})}
+  ${panel({span:4,title:"复核队列",sub:"未复核 8 项",body:
+    `<div class="rows">
+      ${["09-19 正文摘要 · 日前加权平均电价","09-19 表1(二) · 燃煤均价","09-18 表1(一) · 自主申报台数","09-18 表2(二) · 燃气平均电价"]
+        .map((x,i)=>`<div class="rule"><div class="rsub" style="font-size:12.5px;color:var(--text-1)">${x}</div><div class="spacer"></div>
+          <button class="btn sm" data-act="noop">修订</button></div>`).join("")}
+    </div>`,
+    foot:"复核后 origin=manual 才计入统计"})}
+</div>`;
+
+P.statistics=()=>`<div class="grid">${panel({span:12,title:"统计分析",tight:true,body:
+  `<div style="padding:0 14px"><div class="tabs-inline">
+    ${["设备对比","系统监控","协议统计"].map(t=>`<button class="${(ST.inlineTab.stats??"设备对比")===t?"on":""}" data-act="itab" data-name="stats" data-value="${t}">${t}</button>`).join("")}
+  </div></div>
+  <div style="padding:14px">
+    <div class="form-grid">
+      <div class="form-item"><label>选择设备</label><input value="关口电表 ×"></div>
+      <div class="form-item"><label>选择点位</label><input value="功率因数 / 反向有功电量(kWh) ×"></div>
+      <div class="form-item"><label>时间范围</label><input value="今天"></div>
+      <div class="form-item"><label>时间间隔</label><select><option>5 分钟</option><option>15 分钟</option></select></div>
+    </div>
+    <div style="margin-top:14px">${svgLine({series:[
+      {name:"功率因数",color:COLORS.orange,data:series(N96,0.9,0.06,{clamp:[0.6,1]})},
+      {name:"反向有功电量",color:COLORS.blue,data:series(N96,700,60)}],unit:"— / kWh"})}</div>
+    <div style="margin-top:10px"><label class="muted" style="font-size:12px"><input type="checkbox"> 保存为模板</label></div>
+  </div>`,foot:"可存为模板 · 导出"})}</div>`;
+
+P.audit=()=>`<div class="grid">${panel({span:12,title:"审计",tight:true,body:
+  `<div style="padding:0 14px"><div class="tabs-inline">
+    ${["操作审计","运行日志"].map(t=>`<button class="${(ST.inlineTab.audit??"操作审计")===t?"on":""}" data-act="itab" data-name="audit" data-value="${t}">${t}</button>`).join("")}
+  </div></div>`+
+  ((ST.inlineTab.audit??"操作审计")==="操作审计"
+    ? table({cols:["时间","用户","对象","动作","旧值 → 新值"],rows:[
+        ["10-06 18:52","admin","策略 tou-rule","修改","最大SOC 90% → 95%"],
+        ["10-06 18:31","admin","储能参数（默认）","修改","需量阈值 480 → 500 kW"],
+        ["10-06 17:58","admin","电价配置 2026-10-20","新增","—"],
+        ["10-06 16:20","admin","日报 2026-09-19","复核","未复核 → 已确认"],
+        ["10-06 15:02","admin","驱动 ess_demo","上传","v1.0.0"],
+      ]})
+    : table({cols:["时间","级别","类型","名称","日志"],rows:[
+        ["18:29:01.576",`<span class="chip green">Debug</span>`,"Remote","mqtt","成功推送设备数据：设备ID=pcs_1"],
+        ["18:28:31.581",`<span class="chip green">Debug</span>`,"Remote","mqtt","成功推送设备数据：设备ID=pylon_bms"],
+        ["18:27:02.010",`<span class="chip blue">Info</span>`,"Policy","tou-rule","策略触发：峰时段充电 40kW"],
+        ["18:20:44.221",`<span class="chip orange">Warn</span>`,"Device","ess_demo","SOC 接近上限 95%"],
+      ]})),
+  actions:`<label class="field">模块 <select><option>全部</option></select></label>
+    <label class="field">级别 <select><option>全部</option></select></label>
+    <label class="field"><input type="checkbox"> 只看配置变更</label>
+    <button class="btn sm">导出</button>`,
+  foot:"每次增/改/删写一条审计（谁/何时/对象/旧值→新值）"})}</div>`;
+
+P.exports=()=>`<div class="grid">${panel({span:12,title:"报表导出",tight:true,
+  actions:`<button class="btn primary sm" data-act="noop">新建导出任务</button>`,
+  body:table({cols:["报表","范围","格式","生成时间","状态","文件"],rows:[
+    ["现货出清日报","2026-09-21","xlsx","10-06 18:40",`<span class="chip green">完成</span>`,`<span class="link">下载</span>`],
+    ["储能效果月报","2026-09","pdf","10-01 09:00",`<span class="chip green">完成</span>`,`<span class="link">下载</span>`],
+    ["历史多日节点电价","09-01 ~ 09-21","csv","10-06 18:55",`<span class="chip orange">生成中 42%</span>`,"—"],
+  ]}),foot:"异步任务，完成后通知；文件保留期见配置·数据保留"})}</div>`;
+
+P.users=()=>`<div class="grid">${panel({span:12,title:"用户与权限",sub:"本期不做，仅结构占位",tight:true,body:
+  table({cols:["用户","角色","状态","最近登录"],rows:[
+    ["admin","管理员",`<span class="chip green">启用</span>`,"10-06 18:58"],
+    ["operator","普通用户",`<span class="chip gray">—</span>`,"—"],
+  ]}),
+  foot:"默认 admin / admin；角色两级：管理员 / 普通用户"})}</div>`;
+
+/* ---------- 配置 ---------- */
+P.ess=()=>`<div class="grid">
+  ${panel({span:6,title:"电池保护",body:
+    `<div class="form-grid">
+      <div class="form-item"><label>最小 SOC (%)</label><input value="10"></div>
+      <div class="form-item"><label>最大 SOC (%)</label><input value="95"></div>
+      <div class="form-item"><label>允许充电温度 (℃)</label><input value="0 ~ 45"></div>
+      <div class="form-item"><label>允许放电温度 (℃)</label><input value="-10 ~ 50"></div>
+    </div>`})}
+  ${panel({span:6,title:"功率约束",body:
+    `<div class="form-grid">
+      <div class="form-item"><label>充电功率上限 (kW)</label><input value="50"></div>
+      <div class="form-item"><label>放电功率上限 (kW)</label><input value="50"></div>
+      <div class="form-item"><label>变压器容量 (kVA)</label><input value="100"></div>
+      <div class="form-item"><label>最大负荷率 (%)</label><input value="80"></div>
+    </div>`})}
+  ${panel({span:6,title:"需量控制",body:
+    `<div class="form-grid">
+      <div class="form-item"><label>需量阈值 (kW)</label><input value="500"><span class="hint">低于基础负荷会阻断保存</span></div>
+      <div class="form-item"><label>控制死区 (%)</label><input value="5"></div>
+    </div>`})}
+  ${panel({span:6,title:"套利默认",body:
+    `<div class="form-grid">
+      <div class="form-item"><label>峰谷价差阈值 (元/kWh)</label><input value="0.4"></div>
+      <div class="form-item"><label>不动作阈值 (元/kWh)</label><input value="0.2"><span class="hint">价差小于此值不动作，避免损失</span></div>
+    </div>`})}
+  ${panel({span:12,title:"",foot:"生效语义：立即生效。已启用策略在下一个调度周期采纳。",body:
+    `<div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn">恢复默认</button><button class="btn primary">保存并应用</button></div>`,sub:"储能参数（全局默认）"})}
+</div>`;
+
+P.info=()=>`<div class="grid">
+  ${panel({span:6,title:"CPU 信息",body:`<div class="kpi"><div class="k"><span>CPU 使用率</span><span class="spacer" style="flex:1"></span><span style="color:var(--red)">41%</span></div>
+    <div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden;margin:8px 0"><i style="display:block;height:100%;width:41%;background:var(--primary)"></i></div>
+    <div class="d">1 分钟 4.73 · 5 分钟 5.58 · 15 分钟 5.78</div></div>`})}
+  ${panel({span:6,title:"网络流量",body:`<div class="kpis c3" style="gap:10px">
+    ${kpi({k:"上传",v:"3.23",unit:"KB/s",d:"累计 33.41 GB"})}
+    ${kpi({k:"下载",v:"3.58",unit:"KB/s",d:"累计 24.02 GB"})}</div>`})}
+  ${panel({span:6,title:"内存信息",body:`<div class="kpi"><div class="k"><span>内存使用</span><span class="spacer" style="flex:1"></span><span>57%</span></div>
+    <div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden;margin:8px 0"><i style="display:block;height:100%;width:57%;background:var(--primary)"></i></div>
+    <div class="d">总计 15.37 GB · 已用 8.76 GB · 空闲 6.60 GB</div></div>`})}
+  ${panel({span:6,title:"磁盘信息",body:`<div class="kpi"><div class="k"><span>磁盘使用</span><span class="spacer" style="flex:1"></span><span style="color:var(--red)">84%</span></div>
+    <div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden;margin:8px 0"><i style="display:block;height:100%;width:84%;background:var(--primary)"></i></div>
+    <div class="d">总计 219.99 GB · 已用 185.24 GB · 空闲 34.75 GB</div></div>`})}
+  ${panel({span:6,title:"运行时长",body:table({cols:["项","值"],rows:[["系统运行","172 天 2 小时 34 分"],["EMS 运行","140 天 0 小时 44 分"]]})})}
+  ${panel({span:6,title:"其他信息",body:table({cols:["项","值"],rows:[["主机名","e186166d6694"],["OS","alpine"],["内核","6.6.68-20-oc9.x86_64"]]})})}
+</div>`;
+
+function cfgForm(title,note,items,foot){
+  return `<div class="grid">${panel({span:12,title,actions:`<button class="btn primary sm">保存</button>`,
+    body:`${note?`<div class="notice" style="margin-bottom:14px">${note}</div>`:""}
+      <div class="form-grid">${items.map(([l,v,tip])=>`<div class="form-item"><label>${l}</label>
+        <input value="${v}">${tip?`<span class="hint">${tip}</span>`:""}</div>`).join("")}</div>`,
+    foot})}</div>`;
+}
+P.storage=()=>cfgForm("存储管理","修改存储路径需重启后生效。",
+  [["数据目录","/data/lems"],["用量","65% · 142 GB / 220 GB"],["SQLite 占用","8.2 GB"],["InfluxDB 占用","121 GB"],
+   ["时序保留天数","365","与「数据保留」联动"],["自动清理","开启"]],
+  "生效语义：路径改动重启后生效；清立即生效");
+P.operations=()=>`<div class="grid">${panel({span:12,title:"系统操作",
+  body:`<div class="notice" style="margin-bottom:14px">危险操作需输入对象名确认。升级/重启会中断服务。</div>
+  <div class="rows">
+    ${[["备份配置","导出当前配置与策略为压缩包"],["恢复配置","从备份包恢复（覆盖当前）"],
+       ["固件升级","上传固件包，升级后自动重启"],["重启服务","重启 EMS 服务"],
+       ["恢复出厂","清空数据与配置（不可撤销）"]].map(([t,d],i)=>`
+      <div class="rule"><div><div class="rname">${t}</div><div class="rsub">${d}</div></div><div class="spacer"></div>
+      <button class="btn ${i>=2?"danger":"sm"}">${i>=2?"执行":"导出"}</button></div>`).join("")}
+  </div>`,foot:"生效语义：重启后生效"})}</div>`;
+P.credentials=()=>`<div class="grid">${panel({span:12,title:"采集与凭据",
+  body:`<div class="notice" style="margin-bottom:14px">密钥保存后不可回显，更新需重新输入。</div>
+  <div class="form-grid">
+    <div class="form-item"><label>七牛 AccessKey</label><input value="••••••••••••"></div>
+    <div class="form-item"><label>七牛 SecretKey</label><input value="••••••••••••"></div>
+    <div class="form-item"><label>七牛 Bucket</label><input value="tos-me"></div>
+    <div class="form-item"><label>OCR 服务地址</label><input value="http://ocr:8000"></div>
+    <div class="form-item"><label>微信来源白名单</label><input value="mp.weixin.qq.com"></div>
+    <div class="form-item"><label>存储方式</label><select><option>本地</option><option>七牛云</option></select></div>
+  </div>`,foot:"生效语义：立即生效"})}</div>`;
+P.retention=()=>cfgForm("数据保留","",
+  [["遥测数据 (天)","365"],["日报与图片 (天)","730"],["运行日志 (天)","90"],["审计日志 (天)","365"],
+   ["清理时间","每日 03:00"],["磁盘预警阈值 (%)","85"]],
+  "生效语义：下次清理任务生效");
+P.time=()=>cfgForm("时间与时区","",
+  [["NTP 同步","开启"],["NTP 服务器","ntp.aliyun.com"],["时区","Asia/Shanghai"],["当前时间","2026-10-06 18:58"]],
+  "生效语义：立即生效");
+P.ui=()=>cfgForm("界面与语言","",
+  [["主题","浅色"],["语言","简体中文"],["信息密度","标准"],["默认首页","场景 · 信息披露"],["侧栏默认收起","否"]],
+  "生效语义：立即生效，存 localStorage");
+P.logging=()=>`<div class="grid">${panel({span:12,title:"日志级别",actions:`<button class="btn primary sm">保存</button>`,
+  body:table({cols:["模块","级别"],rows:[
+    ["Web / API","<select><option>Info</option><option>Debug</option><option>Warn</option></select>"],
+    ["采集 / 驱动","<select><option>Info</option><option>Debug</option><option>Warn</option></select>"],
+    ["策略 / 算法","<select><option>Debug</option><option>Info</option><option>Warn</option></select>"],
+    ["远程推送","<select><option>Warn</option><option>Info</option><option>Debug</option></select>"],
+  ]}),foot:"生效语义：立即生效，不需重启"})}</div>`;
+
+/* =========================================================================
+   渲染
+   ========================================================================= */
+const app={tabs:document.getElementById("tabs"),side:document.getElementById("sidebar"),
+  head:document.getElementById("pagehead"),content:document.getElementById("content")};
+
+function renderTabs(){
+  app.tabs.innerHTML=Object.entries(NAV).map(([k,v])=>
+    `<button class="tab ${ST.tab===k?"active":""}" data-act="tab" data-value="${k}">${h(v.title)}</button>`).join("");
+}
+function renderSide(){
+  const group=NAV[ST.tab];
+  app.side.className="sidebar"+(ST.collapsed?" collapsed":"");
+  app.side.innerHTML=`<div class="side-group">${h(group.title)}</div>`+group.pages.map(p=>
+    `<div class="side-item ${ST.page===p.k?"active":""} ${p.todo?"is-todo":""}" data-act="page" data-value="${p.k}" title="${h(p.t)}${p.todo?" · 本期不做":""}">
+      <span class="dot"></span><span class="side-label">${h(p.t)}</span>
+      ${p.badge?`<span class="badge">${p.badge}</span>`:""}
+      ${p.todo?`<span class="badge todo">TODO</span>`:""}</div>`).join("");
+}
+function renderHead(){
+  const group=NAV[ST.tab],page=group.pages.find(p=>p.k===ST.page)||group.pages[0];
+  let actions="";
+  if(ST.tab==="scene"){
+    actions=`<label class="field">场景
+        <select data-act="scene"><option>广东现货日报</option><option>山西现货交易</option><option>储能套利</option></select></label>`
+      +sceneHead()
+      + (ST.page==="forecast"?P.forecastHeadExtra():"")
+      +`<button class="btn ghost">导出</button>`;
+  }
+  app.head.innerHTML=`<div><div class="crumbs">${h(group.title)} / ${h(page.t)}</div><h1>${h(page.t)}</h1></div>
+    <span class="spacer"></span>${actions}`;
+}
+function renderContent(){
+  const page=NAV[ST.tab].pages.find(p=>p.k===ST.page);
+  const fn=P[ST.page]||(()=>`<div class="grid">${panel({span:12,title:page.t,empty:true,
+    body:"<span class='muted'>原型占位：结构同设计稿，内容待补</span>"})}</div>`);
+  const banner=page&&page.todo
+    ? `<div class="notice" style="margin-bottom:14px"><b>本期不做</b>　设计已留，后续版本再实现（不影响充放电主线条）。</div>`
+    : "";
+  app.content.innerHTML=banner+fn();
+  app.content.scrollTop=0;
+}
+function render(){renderTabs();renderSide();renderHead();renderContent()}
+
+/* ---------------- 事件 ---------------- */
+document.body.addEventListener("click",e=>{
+  const el=e.target.closest("[data-act]"); if(!el) return;
+  const act=el.dataset.act;
+  if(act==="tab"){ST.tab=el.dataset.value;ST.page=NAV[ST.tab].pages[0].k;render()}
+  else if(act==="page"){ST.page=el.dataset.value;render()}
+  else if(act==="collapse"){ST.collapsed=!ST.collapsed;renderSide()}
+  else if(act==="radio"){ST[el.dataset.name]=el.dataset.value;render()}
+  else if(act==="switch"){el.classList.toggle("on")}
+  else if(act==="itab"){ST.inlineTab[el.dataset.name]=el.dataset.value;renderContent()}
+  else if(act==="hist"){ST.histOn[el.dataset.value]=!ST.histOn[el.dataset.value];renderContent()}
+  else if(act==="noop"){/* 原型占位 */}
+});
+document.body.addEventListener("change",e=>{
+  const el=e.target.closest("[data-act]"); if(!el) return;
+  if(el.dataset.act==="date"){ST.date=el.value;renderContent()}
+  if(el.dataset.act==="scene"){ST.scene=el.value;renderContent()}
+  if(el.dataset.act==="gran"){ST.histGran=el.value}
+});
+
+render();
+</script>
+</body>
+</html>
