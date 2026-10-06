@@ -1,0 +1,29 @@
+{
+  "name": "lems-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run typecheck && npm run build && npm run smoke",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@arco-design/web-vue": "^2.58.0",
+    "echarts": "^6.1.0",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.43",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.3",
+    "vue-tsc": "^2.2.10"
+  }
+}

@@ -1,0 +1,24 @@
+@import './tokens.css';
+@import './arco-override.css';
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
+    'Noto Sans SC', sans-serif;
+}
+
+a { color: var(--brand-ink); text-decoration: none; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #d5d8dd; border-radius: var(--r-pill); }
+
+/* 通用原子类（只在多处复用时才加，不滥开） */
+.muted { color: var(--text-3); }
+.mono { font-variant-numeric: tabular-nums; }

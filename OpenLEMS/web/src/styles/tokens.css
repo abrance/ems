@@ -1,0 +1,78 @@
+/* ============================================================================
+   Design tokens（与 .monkeycode/specs/2026-10-06-ems-frontend-shell/design.md §4.1 一致）
+
+   硬性约束：
+   1. 间距 / 字号 / 圆角 / 字重一律取下面的阶梯，不写 14px、13.5px、9px 这类一次性值。
+   2. --brand（亮橙）不承载文字；文字用 --brand-ink，按钮底用 --brand-btn。
+   3. 正文与辅助文字对比 ≥ 4.5:1（已按此校准，改色前先算）。
+   4. 彩色底不用白字（除 --brand-btn）：标签 / 甘特条用「浅底 + 深字」。
+   5. 边框只做一层：面板有边框，内部卡片用浅底，不再叠第二层边框。
+   ========================================================================== */
+:root {
+  /* 间距：6 级 */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  /* 字号：6 级 */
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-18: 18px;
+  --fs-22: 22px;
+
+  /* 圆角：3 级 + 胶囊 */
+  --r-xs: 2px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-pill: 999px;
+
+  /* 底色 */
+  --bg-1: #f7f8fa;
+  --bg-2: #ffffff;
+  --bg-3: #f2f3f5;
+  --bg-4: #fafbfc;
+  --border: #e8eaee;
+  --divider: #f0f1f4;
+
+  /* 文字：正文 / 次要 / 辅助（对比 16.1 / 7.1 / 5.3 于白底） */
+  --text-1: #1d2129;
+  --text-2: #4e5969;
+  --text-3: #626c78;
+
+  /* 品牌橙：亮档只做填充·竖条·图表；文字与按钮底用深档 */
+  --brand: #ff7d00;
+  --brand-ink: #b85000;
+  --brand-btn: #c25400;
+  --brand-btn-h: #b85000;
+  --brand-soft: #fff7e8;
+  --brand-line: #ffd9a8;
+
+  /* 语义色：浅底 + 深字成对使用 */
+  --green: #00b42a;
+  --green-ink: #046a24;
+  --green-soft: #e8ffea;
+  --red: #f53f3f;
+  --red-ink: #a8071a;
+  --red-soft: #ffece8;
+  --blue: #165dff;
+  --blue-ink: #0e42d2;
+  --blue-soft: #e8f3ff;
+  --purple: #722ed1;
+  --purple-ink: #4b1f91;
+  --purple-soft: #f5e8ff;
+  --gold: #f7ba1e;
+  --gray-ink: #4e5969;
+  --gray-soft: #f2f3f5;
+
+  /* 骨架尺寸 */
+  --h-appbar: 56px;
+  --h-tabs: 44px;
+  --h-pagehead: 56px;
+  --w-side: 220px;
+  --w-side-rail: 56px;
+}
