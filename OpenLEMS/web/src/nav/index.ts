@@ -43,19 +43,7 @@ export const NAV: NavTab[] = [
         status: 'ready',
       },
       { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
-      {
-        key: 'clearing',
-        title: '市场出清',
-        path: '/scene/clearing',
-        status: 'planned',
-        note: '等日报提取出清结果（表1(二)/表2）',
-        panels: [
-          '日前市场火电启停状态统计图（t96）',
-          '日前火电机组启停状态统计表',
-          '日前调频价格（容量 / 里程）',
-          '日前输电约束及阻塞情况',
-        ],
-      },
+      { key: 'clearing', title: '市场出清', path: '/scene/clearing', status: 'ready' },
       {
         key: 'review',
         title: '预测复盘',

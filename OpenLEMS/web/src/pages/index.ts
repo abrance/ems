@@ -10,6 +10,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   disclosure: () => import('./scene/DisclosureView.vue'),
   history: () => import('./scene/HistoryView.vue'),
   decision: () => import('./scene/DecisionView.vue'),
+  clearing: () => import('./scene/ClearingView.vue'),
   manual: () => import('./manage/ManualControlView.vue'),
   policies: () => import('./manage/PolicyListView.vue'),
   price: () => import('./manage/PriceView.vue'),

@@ -275,6 +275,17 @@ const FAKE_METRICS = [
   { runDate: '2026-09-21', dataset: 'summary', scope: '市场', metric: '日前加权平均电价', value: 0, unit: '元/MWh', atTime: '', textValue: '', momPct: null, sharePct: null, source: '正文', conf: 0.5, origin: 'ocr', editedBy: '', editedAt: '' },
 ]
 
+const FAKE_CLEARING_METRICS = [
+  { runDate: '2026-09-21', dataset: 'node_price_peak', scope: '广州', metric: '价格档位', value: 4, unit: '', atTime: '', textValue: '[600,800)', momPct: null, sharePct: null, source: '图2-1', conf: 0.72, origin: 'cv', editedBy: '', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'node_price_peak', scope: '深圳', metric: '价格档位', value: 5, unit: '', atTime: '', textValue: '[800,+inf)', momPct: null, sharePct: null, source: '图2-1', conf: 0.66, origin: 'cv', editedBy: '', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'node_price_peak', scope: '韶关', metric: '价格档位', value: 2, unit: '', atTime: '', textValue: '[200,400)', momPct: null, sharePct: null, source: '图2-1', conf: 0.9, origin: 'manual', editedBy: 'admin', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'node_price_valley', scope: '广州', metric: '价格档位', value: 1, unit: '', atTime: '', textValue: '[-inf,200)', momPct: null, sharePct: null, source: '图2-2', conf: 0.8, origin: 'cv', editedBy: '', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'node_price_valley', scope: '深圳', metric: '价格档位', value: 2, unit: '', atTime: '', textValue: '[200,400)', momPct: null, sharePct: null, source: '图2-2', conf: 0.8, origin: 'cv', editedBy: '', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', value: 400.5, unit: '元/MWh', atTime: '', textValue: '', momPct: 1.2, sharePct: null, source: '表1(二)', conf: 0.98, origin: 'manual', editedBy: 'admin', editedAt: '' },
+  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '燃煤', metric: '最高电价', value: 480, unit: '元/MWh', atTime: '19:15', textValue: '', momPct: null, sharePct: null, source: '表1(二)', conf: 0.95, origin: 'manual', editedBy: '', editedAt: '' },
+  { runDate: '2026-09-19', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', value: 365.2, unit: '元/MWh', atTime: '', textValue: '', momPct: null, sharePct: null, source: '表2(二)', conf: 0.94, origin: 'manual', editedBy: '', editedAt: '' },
+]
+
 const FAKE_EXTRACT = { status: 'ok', ocrModel: 'pp-ocr', pageCount: 4, ocrMs: 3200, warnings: ['表2 与历史值有 1 处不一致'], updatedAt: '2026-09-21 22:12', extractorVersion: 'tpl-1' }
 
 const FAKE_AUDIT = [
@@ -386,7 +397,13 @@ globalThis.fetch = async (url, init) => {
   }
   if (u.includes('/api/spot-report/collect')) return json({ report: FAKE_REPORTS[0] })
   if (u.includes('/api/spot-report/data')) {
-    return json({ date: '2026-09-21', tradeDate: '2026-09-19', metrics: FAKE_METRICS, extract: FAKE_EXTRACT })
+    const date = new URL(u, 'http://x').searchParams.get('date')
+    return json({
+      date: date || '2026-09-21',
+      tradeDate: '2026-09-19',
+      metrics: date === '2026-09-21' ? [...FAKE_METRICS, ...FAKE_CLEARING_METRICS] : FAKE_METRICS,
+      extract: FAKE_EXTRACT,
+    })
   }
   if (u.includes('/api/spot-report/audit')) return json({ list: FAKE_AUDIT })
   if (u.includes('/api/spot-report/confirm')) return json({ confirmed: 2 })
@@ -520,6 +537,54 @@ for (const tab of NAV) {
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
 
+console.log('\n== 市场出清页 ==')
+await clickTo('场景', '市场出清')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('高峰时刻地市节点电价档位'))
+  check(bodyHas('图2-1') && bodyHas('图2-2'), '高峰/低谷两块都在')
+  check(bodyHas('广州') && bodyHas('深圳') && bodyHas('韶关'), '按城市列出档位')
+  check(bodyHas('[200,400)'), '显示档位区间文本')
+  check(bodyHas('2 市') || bodyHas('1 市'), '统计各档位命中城市数')
+  check(bodyHas('未复核'), '标注采样预填需人工确认')
+  check(bodyHas('图像采样预填'), '脚注说明数据来源性质')
+
+  // 档位顺序由区间下界推导：[-inf,200) 应排在 [200,400) 前面。
+  // 注意按面板分别取 —— 两个面板里都有 [200,400)，跨面板 indexOf 会串。
+  const panels = [...doc.querySelectorAll('.buckets')].map((b) =>
+    [...b.querySelectorAll('.bucket b')].map((e) => e.textContent.trim()),
+  )
+  const valley = panels[1] ?? []
+  check(
+    valley[0] === '[-inf,200)' && valley.indexOf('[200,400)') === 1,
+    '低谷档位按区间下界排序（-inf 在前）',
+    JSON.stringify(panels),
+  )
+
+  // 成交电价两张表
+  check(bodyHas('日前成交电价') && bodyHas('400.5'), '日前成交电价表')
+  check(bodyHas('19:15'), '带出出现时刻')
+  check(bodyHas('实时成交电价'), '实时成交电价表')
+  check(bodyHas('滞后运行日'), '提示实时表是滞后运行日')
+
+  // 待数据源逐条点名
+  check(bodyHas('火电启停状态统计图'), '点名缺启停统计图')
+  check(bodyHas('调频容量价格'), '点名缺调频价格')
+  check(bodyHas('输电约束及阻塞'), '点名缺阻塞')
+
+  // 切换运行日会重新拉数据
+  const before = requests.filter((r) => r.url.includes('/api/spot-report/data')).length
+  // 场景 Tab 的页头也有一个 select（场景切换器），所以要限定在内容区里找
+  const sel = [...doc.querySelectorAll('.content .field select')][0]
+  const opt = [...sel.options].find((o) => o.textContent.trim() === '2026-09-19')
+  check(!!opt, '运行日下拉里有 2026-09-19')
+  sel.selectedIndex = opt.index
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/spot-report/data')).length > before)
+  const last = requests.filter((r) => r.url.includes('/api/spot-report/data')).pop()
+  check(last.url.includes('date=2026-09-19'), '按运行日切换重新查询', last.url)
+}
+
 console.log('\n== 决策支持页 ==')
 await clickTo('场景', '决策支持')
 {
@@ -647,8 +712,13 @@ await clickTo('管理', '采集管理')
   check(bodyHas('解析告警'), '展示解析告警')
 
   // 逐条修订：填值 → 写入 → POST /metric 带正确的定位键
+  // 期望值跟着桩数据走，别写死 —— /api/spot-report/data 同时供采集管理与市场出清使用
+  const expectedRows = FAKE_METRICS.length + FAKE_CLEARING_METRICS.length
   const editInputs = [...doc.querySelectorAll('td.edit input')]
-  check(editInputs.length === 3, `每行都有修订输入（实际 ${editInputs.length}）`)
+  check(
+    editInputs.length === expectedRows,
+    `每行都有修订输入（期望 ${expectedRows}，实际 ${editInputs.length}）`,
+  )
   // 按行内容定位「燃煤」那一行，不按下标猜（数据集顺序由 DATASET_LABELS 决定）
   const rows = [...doc.querySelectorAll('tbody tr')].filter((r) => r.querySelector('td.edit input'))
   const coalRow = rows.find((r) => (r.textContent ?? '').includes('燃煤'))
