@@ -652,6 +652,12 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 自动化联动 | `GET /api/automation/page`、`POST /api/automation`、`PUT\|DELETE /api/automation/{id}`、`POST .../toggle` |
 | 配置 · 采集与凭据 | `GET /api/system/credentials`（**只读**，密钥打码不回显） |
 | 配置 · 界面与语言 | 纯前端：主题 / 密度 / 默认首页，存 localStorage |
+| 场景 · 长周期电价预测 | `GET /api/forecast/price` |
+
+**长周期电价预测页目前只有「平均」视图。** 日报未提取 96 点价格曲线，后端给的是
+**日均序列**预测，所以出的是「未来多日日均价 + 10~90% 分位带 + 明细表」。
+设计稿 §5.8 的「分时」视图待图4 价格曲线纳入提取（届时把 `horizonDays` 换成点数即可，
+天数 × 96 ≤ 服务端 `max_horizon` 512，接口与模型都不用改）。页面上按待做标明，不画假曲线。
 
 **新增 `GET /api/system/credentials`（admin）**：只回答「配了没有、从哪来」，
 不回显密钥值。七牛密钥在**配置文件或环境变量**里（`QINIU_ACCESS_KEY` 等），
