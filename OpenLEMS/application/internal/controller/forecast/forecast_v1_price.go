@@ -16,7 +16,13 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
 	}
 
-	result, err := forecastlogic.LoadPrice(ctx, req.Market, req.HistoryDays, req.HorizonDays, quantiles)
+	result, err := forecastlogic.LoadPrice(ctx, forecastlogic.PriceRequest{
+		Market:       req.Market,
+		HistoryDays:  req.HistoryDays,
+		HorizonDays:  req.HorizonDays,
+		Quantiles:    quantiles,
+		ForceRefresh: req.ForceRefresh,
+	})
 	if err != nil {
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "电价预测失败")
 	}

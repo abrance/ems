@@ -1228,8 +1228,13 @@ GET /api/forecast/price?market=ahead|real&historyDays=60&horizonDays=5&quantiles
 
 - 口径：`dataset = day_ahead_trade | realtime_trade`、`scope = 发电侧`、`metric = 平均电价`；
   日前优先 `表1(二)`，缺失回落 `表2(一)`；实时取 `表2(二)`；只看已确认。
+- **缓存**：两个接口（`load` / `price`）都按请求参数缓存 **5 分钟**，`?forceRefresh=1` 穿透。
+  原因：TimesFM 是 CPU 推理（单次≈2s，服务端 `max_concurrency=2`、`queue_timeout=60s`），
+  而同一份结果会被多个面板共用；不缓存的话切几个 Tab 就是几次推理，两人同时用就开始排队。
+  实现：`internal/logic/forecast/cache.go`（`gcache` + 泛型 `withForecastCache`，与现网
+  `controller/network` / `s_db_impl_setting_service_s` 同一套路）。
 - 实现位置：`api/forecast/v1/forecast_price.go`、`internal/controller/forecast/forecast_v1_price.go`、
-  `internal/logic/forecast/price.go`（+ `price_test.go`）。
+  `internal/logic/forecast/price.go`（+ `price_test.go` / `price_http_test.go` / `cache_test.go`）。
 - 场景·决策支持、场景·长周期、场景·预测复盘 三处共用这个接口；不要各自调 TimesFM。
 - 服务健康状态（`/healthz`）放「配置 · 系统信息」或「采集与凭据」一栏。
 

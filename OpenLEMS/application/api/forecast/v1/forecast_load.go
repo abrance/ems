@@ -9,6 +9,7 @@ type GetLoadForecastReq struct {
 	LookbackHours int    `json:"lookbackHours" dc:"送入模型的历史小时数，默认 168"`
 	HistoryHours  int    `json:"historyHours" dc:"返回展示的历史小时数，默认 24"`
 	Horizon       int    `json:"horizon" dc:"预测步数，缺省取策略配置（默认 4）"`
+	ForceRefresh  bool   `json:"forceRefresh" dc:"跳过缓存，手动刷新用"`
 }
 
 // LoadForecast 负荷预测结果

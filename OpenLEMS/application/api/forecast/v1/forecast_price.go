@@ -8,11 +8,12 @@ import "github.com/gogf/gf/v2/frame/g"
 // 96 点分时曲线目前日报未提取（见图4 全省发电侧加权价格曲线，提取器标为不提取），
 // 因此本期输出的是「未来多日日均价」，与前端「长周期电价预测-平均」视图对应。
 type GetPriceForecastReq struct {
-	g.Meta      `path:"/forecast/price" method:"get" tags:"电价预测" summary:"现货电价预测（TimesFM）" role:"user"`
-	Market      string `json:"market" dc:"市场：ahead=日前（默认）/ real=实时"`
-	HistoryDays int    `json:"historyDays" dc:"送入模型的历史天数，默认 60"`
-	HorizonDays int    `json:"horizonDays" dc:"预测天数，默认 5，上限 30"`
-	Quantiles   string `json:"quantiles" dc:"分位点，逗号分隔，默认 0.1,0.5,0.9"`
+	g.Meta       `path:"/forecast/price" method:"get" tags:"电价预测" summary:"现货电价预测（TimesFM）" role:"user"`
+	Market       string `json:"market" dc:"市场：ahead=日前（默认）/ real=实时"`
+	HistoryDays  int    `json:"historyDays" dc:"送入模型的历史天数，默认 60"`
+	HorizonDays  int    `json:"horizonDays" dc:"预测天数，默认 5，上限 30"`
+	Quantiles    string `json:"quantiles" dc:"分位点，逗号分隔，默认 0.1,0.5,0.9"`
+	ForceRefresh bool   `json:"forceRefresh" dc:"跳过缓存，手动刷新用"`
 }
 
 // PriceForecastPoint 单日预测结果

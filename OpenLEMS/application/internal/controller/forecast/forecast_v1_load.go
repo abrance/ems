@@ -11,7 +11,13 @@ import (
 
 // GetLoadForecast 读取设备历史负荷并调用 TimesFM 预测
 func (c *ControllerV1) GetLoadForecast(ctx context.Context, req *v1.GetLoadForecastReq) (res *v1.GetLoadForecastRes, err error) {
-	result, err := forecastlogic.Load(ctx, req.DeviceId, req.LookbackHours, req.HistoryHours, req.Horizon)
+	result, err := forecastlogic.Load(ctx, forecastlogic.LoadRequest{
+		DeviceId:      req.DeviceId,
+		LookbackHours: req.LookbackHours,
+		HistoryHours:  req.HistoryHours,
+		Horizon:       req.Horizon,
+		ForceRefresh:  req.ForceRefresh,
+	})
 	if err != nil {
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "负荷预测失败")
 	}
