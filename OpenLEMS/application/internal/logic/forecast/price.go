@@ -42,12 +42,30 @@ const (
 )
 
 // PriceRequest 电价预测请求。ForceRefresh=true 跳过缓存（前端手动刷新用）。
+//
+// Grain 决定序列源，不只是步长：
+//
+//	day（默认）—— 日报已确认成交价，一天一个点，出未来多日日均
+//	intraday    —— 电网日指标 CSV 的 15 分钟电价，出未来 5 日 × 96 点
 type PriceRequest struct {
 	Market       string
+	Grain        string
 	HistoryDays  int
 	HorizonDays  int
 	Quantiles    []float64
 	ForceRefresh bool
+}
+
+// ParseGrain 解析粒度参数；空值默认 day。
+func ParseGrain(grain string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(grain)) {
+	case "", s_db_model.ForecastGrainDay, "daily":
+		return s_db_model.ForecastGrainDay, nil
+	case s_db_model.ForecastGrainIntraday, "intra-day", "96":
+		return s_db_model.ForecastGrainIntraday, nil
+	default:
+		return "", errors.Errorf("不支持的粒度: %s（可用 day / intraday）", grain)
+	}
 }
 
 // priceSpec 一种市场对应的指标口径。

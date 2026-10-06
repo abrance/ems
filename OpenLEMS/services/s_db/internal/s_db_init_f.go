@@ -321,6 +321,37 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	// 电价预测留痕：复盘要回答「当时发的预测准不准」，所以必须落库。
+	// 唯一键 (generated_on, market, grain, target_time)：同一天对同一目标时刻只留一条。
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_price_forecast (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			generated_on TEXT NOT NULL,
+			market TEXT NOT NULL,
+			grain TEXT NOT NULL,
+			target_time TEXT NOT NULL,
+			point REAL NOT NULL DEFAULT 0,
+			q10 REAL NOT NULL DEFAULT 0,
+			q50 REAL NOT NULL DEFAULT 0,
+			q90 REAL NOT NULL DEFAULT 0,
+			model TEXT NOT NULL DEFAULT '',
+			unit TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (generated_on, market, grain, target_time)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+	_, err = g.DB().Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_price_forecast_target ON gd_price_forecast (market, grain, target_time)`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	c_log.Info(ctx, "Database tables created successfully")
 
 	// 初始化系统设置数据

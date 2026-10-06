@@ -1,0 +1,222 @@
+package forecast
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"application/internal/logic/gdmetric"
+	"s_db"
+	"s_db/s_db_model"
+	"s_forecast"
+
+	"common/c_log"
+	"github.com/pkg/errors"
+)
+
+// 96 点（日内）电价预测：序列源换成电网日指标 CSV 里的 15 分钟日前/实时电价。
+//
+// 与 day 粒度的区别不只是步长：
+//
+//	day      —— 序列来自日报已确认成交价（一天一个点），只能出未来多日日均
+//	intraday —— 序列来自 gd_metric.csv（15 分钟，CSV 里已有 5 年多），能出未来 5 日 × 96 点
+//
+// 为什么上限是 5 天：服务端 TimesFM max_horizon=512，而 96×5=480 是能整日覆盖的最大值。
+const (
+	IntradayStepMinutes = 15.0
+	// MaxIntradayHorizonDays 96 × 5 = 480 ≤ max_horizon(512)
+	MaxIntradayHorizonDays = 5
+	// defaultIntradayHistoryDays 送入模型的历史天数（30 天 = 2880 点 ≤ max_context 4096）
+	defaultIntradayHistoryDays = 30
+)
+
+// TPriceForecastPoint 一个预测点（含目标时刻，留痕也要用）
+type TPriceForecastPoint struct {
+	TargetTime time.Time
+	Point      float64
+	Q10        float64
+	Q50        float64
+	Q90        float64
+}
+
+// SPriceForecastIntraday 96 点预测结果
+type SPriceForecastIntraday struct {
+	Market         string
+	Grain          string
+	Dataset        string
+	Unit           string
+	Model          string
+	From           string
+	To             string
+	HistoryTimes   []time.Time
+	HistoryValues  []float64
+	Points         []TPriceForecastPoint
+	ContextPoints  int
+	InputTruncated bool
+	// CoveredDays 源数据里真实覆盖的自然日数。
+	// 不能用时间戳去数：CSV 的一天写作 00:15…24:00，最后一点落在次日 00:00，
+	// 按时间戳数会多算一天（MissingDays 因此可能算成负数）。
+	CoveredDays int
+	TimeMs      float64
+	GeneratedOn string
+}
+
+// LoadPriceIntraday 用电网日指标 CSV 的 15 分钟序列做 96 点预测。
+func LoadPriceIntraday(ctx context.Context, market string, historyDays, horizonDays int, quantiles []float64) (*SPriceForecastIntraday, error) {
+	spec, err := resolvePriceSpec(market)
+	if err != nil {
+		return nil, err
+	}
+	kind := gdmetric.KindDayAhead
+	if spec.Market == "real" {
+		kind = gdmetric.KindRealtime
+	}
+	if historyDays <= 0 {
+		historyDays = defaultIntradayHistoryDays
+	}
+	if horizonDays <= 0 {
+		horizonDays = MaxIntradayHorizonDays
+	}
+	if horizonDays > MaxIntradayHorizonDays {
+		horizonDays = MaxIntradayHorizonDays
+	}
+	if len(quantiles) == 0 {
+		quantiles = defaultQuantiles
+	}
+
+	baseURL, _, _, err := loadForecastConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if baseURL == "" {
+		return nil, errors.New("策略未配置预测服务地址")
+	}
+
+	loc := priceLocation()
+	today := time.Now().In(loc)
+	// 电网日指标 CSV 的滞后：最新一般到昨天，取到今天也不会报错（没数据就少一天）
+	to := today.Format(priceDateLayout)
+	from := today.AddDate(0, 0, -historyDays+1).Format(priceDateLayout)
+
+	series, err := gdmetric.GetSeries(ctx, from, to, kind)
+	if err != nil {
+		return nil, errors.Wrap(err, "读取电网日指标序列失败")
+	}
+	if len(series) < 96 {
+		return nil, errors.Errorf("15 分钟%s电价数据不足（%d 点，至少需要一天 96 点）",
+			marketLabel(spec.Market), len(series))
+	}
+
+	times := make([]time.Time, 0, len(series))
+	values := make([]float64, 0, len(series))
+	daySet := make(map[string]bool, 32)
+	for _, s := range series {
+		ts, err := parseSampleClock(s.Date, s.Time, loc)
+		if err != nil {
+			continue // 个别时刻格式异常就跳过，不因一个点废掉整段
+		}
+		daySet[s.Date] = true
+		times = append(times, ts)
+		values = append(values, s.Value)
+	}
+
+	// 截断到模型上下文上限（按尾部保留，最近的更重要）
+	truncated := false
+	if len(values) > maxContextPoints {
+		times = times[len(times)-maxContextPoints:]
+		values = values[len(values)-maxContextPoints:]
+		truncated = true
+	}
+
+	horizon := horizonDays * 96
+	client := s_forecast.NewClient(baseURL, forecastTimeout)
+	resp, err := client.Forecast(ctx, &s_forecast.SForecastRequest{
+		Series:    []*s_forecast.SSeries{{Id: spec.Market, Values: values}},
+		Horizon:   horizon,
+		Quantiles: quantiles,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "调用预测服务失败")
+	}
+	item := pickForecast(resp.Forecasts, spec.Market)
+	if item == nil || len(item.Point) == 0 {
+		return nil, errors.New("预测服务未返回点预测")
+	}
+
+	step := time.Duration(IntradayStepMinutes) * time.Minute
+	last := times[len(times)-1]
+	points := make([]TPriceForecastPoint, 0, len(item.Point))
+	for i, p := range item.Point {
+		points = append(points, TPriceForecastPoint{
+			TargetTime: last.Add(time.Duration(i+1) * step),
+			Point:      p,
+			Q10:        quantileAt(item.Quantiles, "0.1", i),
+			Q50:        quantileAt(item.Quantiles, "0.5", i),
+			Q90:        quantileAt(item.Quantiles, "0.9", i),
+		})
+	}
+
+	return &SPriceForecastIntraday{
+		Market:         spec.Market,
+		Grain:          s_db_model.ForecastGrainIntraday,
+		Dataset:        spec.Dataset,
+		Unit:           intradayPriceUnit,
+		Model:          resp.Model,
+		From:           series[0].Date,
+		To:             series[len(series)-1].Date,
+		HistoryTimes:   times,
+		HistoryValues:  values,
+		Points:         points,
+		ContextPoints:  len(values),
+		InputTruncated: truncated,
+		CoveredDays:    len(daySet),
+		TimeMs:         resp.TimeMs,
+		GeneratedOn:    today.Format(priceDateLayout),
+	}, nil
+}
+
+// parseSampleClock 把 CSV 的 (日期, "HH:MM") 组成时间点；"24:00" 归到次日 00:00。
+// CSV 的时间戳是 00:15 … 24:00 这种写法，24:00 不属于当天。
+func parseSampleClock(date, clock string, loc *time.Location) (time.Time, error) {
+	d, err := time.ParseInLocation(priceDateLayout, date, loc)
+	if err != nil {
+		return time.Time{}, err
+	}
+	clock = strings.TrimSpace(clock)
+	// CSV 把当天最后一个 15 分钟点写成 24:00，它属于次日 00:00
+	if clock == "24:00" {
+		return d.AddDate(0, 0, 1), nil
+	}
+	t, err := time.ParseInLocation("15:04", clock, loc)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Date(d.Year(), d.Month(), d.Day(), t.Hour(), t.Minute(), 0, 0, loc), nil
+}
+
+func quantileAt(m map[string][]float64, key string, i int) float64 {
+	if m == nil {
+		return 0
+	}
+	series := m[key]
+	if i < 0 || i >= len(series) {
+		return 0
+	}
+	return series[i]
+}
+
+// intradayPriceUnit 电网日指标 CSV 里电价是「元/兆瓦时」，统一写成 元/MWh 与 day 粒度一致
+const intradayPriceUnit = "元/MWh"
+
+// RecordPriceForecast 写留痕。失败只记日志、不影响本次返回 ——
+// 预测是主流程，留痕是附带产物，不能因为它写不进去就让用户看不到结果。
+func RecordPriceForecast(ctx context.Context, rows []*s_db_model.SPriceForecastModel) (int, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	if err := s_db.GetPriceForecastService().UpsertBatch(ctx, rows); err != nil {
+		c_log.Warningf(ctx, "写入电价预测留痕失败: %+v", err)
+		return 0, err
+	}
+	return len(rows), nil
+}

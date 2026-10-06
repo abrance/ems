@@ -9,15 +9,17 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
-// GetPriceForecast 读取日报已确认的日均成交价并调用 TimesFM 预测未来多日
+// GetPriceForecast 电价预测。grain 决定序列源：day=日报日均价，intraday=电网日指标 96 点。
+// 每次成功预测都会写留痕（复盘用），写失败只告警、不影响返回。
 func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceForecastReq) (res *v1.GetPriceForecastRes, err error) {
 	quantiles, err := forecastlogic.ParsePriceQuantiles(req.Quantiles)
 	if err != nil {
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
 	}
 
-	result, err := forecastlogic.LoadPrice(ctx, forecastlogic.PriceRequest{
+	result, err := forecastlogic.LoadPriceAny(ctx, forecastlogic.PriceRequest{
 		Market:       req.Market,
+		Grain:        req.Grain,
 		HistoryDays:  req.HistoryDays,
 		HorizonDays:  req.HorizonDays,
 		Quantiles:    quantiles,
@@ -27,51 +29,48 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "电价预测失败")
 	}
 
-	forecast := make([]*v1.PriceForecastPoint, 0, len(result.ForecastPoint))
-	for i, point := range result.ForecastPoint {
-		date := ""
-		if i < len(result.ForecastDates) {
-			date = result.ForecastDates[i]
+	points := make([]*v1.PriceForecastPoint, 0, len(result.Points))
+	for _, p := range result.Points {
+		target := p.TargetTime
+		runDate, atTime := "", ""
+		if !target.IsZero() {
+			runDate = target.Format("2006-01-02")
+			if result.Grain != "day" {
+				atTime = target.Format("15:04")
+			}
 		}
-		forecast = append(forecast, &v1.PriceForecastPoint{
-			RunDate:   date,
-			Point:     point,
-			Quantiles: quantileAt(result.ForecastQuantiles, i),
+		points = append(points, &v1.PriceForecastPoint{
+			RunDate:    runDate,
+			TargetTime: forecastlogic.FormatTargetTimeForDTO(result.Grain, target),
+			Point:      p.Point,
+			Quantiles: map[string]float64{
+				"0.1": p.Q10,
+				"0.5": p.Q50,
+				"0.9": p.Q90,
+			},
+			AtTime: atTime,
 		})
 	}
 
 	return &v1.GetPriceForecastRes{Forecast: &v1.PriceForecast{
 		Market:         result.Market,
+		Grain:          result.Grain,
 		Dataset:        result.Dataset,
 		Scope:          result.Scope,
 		Metric:         result.Metric,
 		Unit:           result.Unit,
 		Model:          result.Model,
+		StepMinutes:    result.StepMinutes,
 		From:           result.From,
 		To:             result.To,
 		HistoryDates:   result.HistoryDates,
 		HistoryValues:  result.HistoryValues,
-		Forecast:       forecast,
+		Forecast:       points,
 		ContextPoints:  result.ContextPoints,
 		InputTruncated: result.InputTruncated,
 		MissingDays:    result.MissingDays,
 		TimeMs:         result.TimeMs,
+		GeneratedOn:    result.GeneratedOn,
+		Recorded:       result.Recorded,
 	}}, nil
-}
-
-// quantileAt 把「分位键 → 整条序列」转成第 i 点的「分位键 → 值」。
-func quantileAt(all map[string][]float64, i int) map[string]float64 {
-	if len(all) == 0 {
-		return nil
-	}
-	out := make(map[string]float64, len(all))
-	for key, series := range all {
-		if i < len(series) {
-			out[key] = series[i]
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
