@@ -647,6 +647,16 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 协议与驱动 | `GET /api/protocol/list`、`GET /api/driver/list`、`GET /api/driver/get` |
 | 管理 · 远程调度 | `GET /api/remote/modbus\|mqtt/status`、`PUT .../enabled/{enabled}`、`POST .../reload` |
 | 管理 · 网络配置 | `GET /api/network/interface/list`、`POST .../interface/update\|state`、`.../ping` |
+| 管理 · 统计分析 | `POST /api/device/compare`、`POST /api/protocol/monitor/{overview,distribution,trend,metrics}`、`POST /api/system/resource/chart` |
+| 管理 · 审计 | `GET /api/log/biz`、`.../biz/info`、`.../biz/statistics`、`DELETE /api/log/biz` |
+
+**协议趋势的 `metricKeys` 取值来自后端映射表**
+（`internal/controller/protocol/protocol_v1_post_monitor_trend.go`）：
+`ProtocolMetricTotal / Success / Failed / SuccessRate / AvgResponseMs`。前端按这 5 个提供勾选。
+
+**审计页现在只有「运行日志」，不是「变更审计」。** 设计稿 §11.4 规矩 5 想要的
+「谁把哪个配置从 A 改成 B」需要一张变更审计表，后端还没有。页面上明确声明这一局限，
+不拿运行日志冒充合规审计。
 
 **远程调度页把两个方向写清楚**：Modbus 是 EMS 作**服务端**（上层来读），
 MQTT 是 EMS 作**客户端**（主动推送）。开关会实际启停服务，走二次确认；
