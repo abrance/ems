@@ -20,6 +20,74 @@ export interface TelemetryData {
   telemetryValues: Record<string, unknown>
 }
 
+/** 设备详细列表（扁平，带 pid 与协议/驱动信息）—— 前端自己拼树，一次请求拿全 */
+export interface DeviceDetailedInfo {
+  id: string
+  pid: string
+  name: string
+  protocolId: string
+  driver: string
+  enableDebug: boolean
+  strategy: string
+  storageEnable: boolean
+  storageIntervalSec: number
+  sort: number
+  enabled: boolean
+  params: Record<string, unknown>
+  createdAt?: string
+  updatedAt?: string
+  deviceType: string
+  isVirtualDevice: boolean
+  driverType: string
+  driverBrand: string
+  driverModel: string
+  driverVersion: string
+  protocolName: string
+  protocolType: string
+  protocolAddress: string
+  failedMessage?: string
+}
+
+export function fetchDetailedList(signal?: AbortSignal): Promise<DeviceDetailedInfo[]> {
+  return api
+    .get<{ devices: DeviceDetailedInfo[]; total: number }>('/api/device/detailed-list', undefined, signal)
+    .then((r) => r.devices ?? [])
+}
+
+/** 点位定义（按 group 分组，字段用 groupKey 关联） */
+export interface PointField {
+  key: string
+  name?: string
+  groupKey?: string
+  valueType: string
+  componentType: string
+  step?: number
+  required: boolean
+  unit?: string
+  min?: number
+  max?: number
+  default?: string
+  description?: string
+}
+
+export interface PointDefinitions {
+  isVirtualDevice: boolean
+  groups: { key: string; name: string; sort?: number }[]
+  fields: PointField[]
+}
+
+export function fetchPointDefinitions(deviceId: string, signal?: AbortSignal): Promise<PointDefinitions> {
+  return api.get<PointDefinitions>(
+    `/api/device/${encodeURIComponent(deviceId)}/points/definitions`,
+    undefined,
+    signal,
+  )
+}
+
+export function setDeviceEnabled(deviceId: string, enabled: boolean): Promise<void> {
+  return api.post<void>(enabled ? '/api/device/enable' : '/api/device/disable', { deviceId })
+}
+
 /** GET /api/device/telemetry */
 export function fetchTelemetry(
   deviceId: string,

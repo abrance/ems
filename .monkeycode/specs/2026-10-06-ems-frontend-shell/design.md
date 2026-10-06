@@ -643,6 +643,15 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 配置 · 系统信息 | `GET /api/system/summary`、`GET /api/system/net/traffic`、`POST /api/system/resource/chart` |
 | 配置 · 存储管理 | `GET /api/system/storage/stats`、`POST /api/system/storage-time` |
 | 配置 · 系统操作 | `POST /api/system/hostname/update`、`/system/time/update`、`/system/reboot/apply`、`/system/reboot/execute` |
+| 管理 · 设备管理 | `GET /api/device/detailed-list`、`GET /api/device/{id}/points/definitions`、`POST /api/device/enable\|disable` |
+| 管理 · 协议与驱动 | `GET /api/protocol/list`、`GET /api/driver/list`、`GET /api/driver/get` |
+
+**设备树在前端组装**：`/device/tree` 返回嵌套结构，但 `/device/detailed-list` 一次就给出
+扁平列表 + 协议/驱动/存储全量信息。用后者 + 按 `pid` 拼树，少一次请求也不丢字段。
+孤儿节点（`pid` 指向不存在的设备）挂到根上，不静默丢失。
+
+**协议与驱动本批只读**：创建/编辑/删除协议会触发后台协议服务热重载，属于有副作用的操作，
+需要先确认重载语义（是否要重启采集）再开放，不顺手加上。
 
 **IA 调整：「数据保留」并入「存储管理」。** 后端把保留天数放在
 `POST /system/storage-time`（与存储统计同一组接口），单开一页会变成同一功能两个入口。
