@@ -180,6 +180,47 @@ const FAKE_POLICY_CONFIG = {
   transformerCapacity: 200,
 }
 
+const FAKE_STRATEGIES = [
+  {
+    id: 7,
+    name: 'tou-rule',
+    description: '峰充谷放',
+    priority: 1,
+    status: 'Enable',
+    dateRange: { startDate: '2026-10-01', isLongTerm: true },
+    timeRange: { type: 'weekday', weekdayType: 'all' },
+    config: { points: [[0, 50], [8, 100], [22, 30]] },
+    isActive: true,
+  },
+  {
+    id: 8,
+    name: 'idle-基线',
+    description: '对照组',
+    priority: 5,
+    status: 'Disable',
+    dateRange: { startDate: '2026-10-01', endDate: '2026-10-31', isLongTerm: false },
+    timeRange: { type: 'custom', customDays: [1, 2, 3] },
+    config: { points: [] },
+    isActive: false,
+  },
+]
+
+const FAKE_BACKTEST = {
+  start: '2026-09-15',
+  end: '2026-09-21',
+  points: 672,
+  gridDeviceId: 'grid_1',
+  essDeviceIds: ['ess_1'],
+  demandTarget: 0,
+  demandPrice: 40,
+  ratedPowerKw: 50,
+  capacityKwh: 200,
+  results: [
+    { algorithm: 'idle', chargeEnergy: 0, dischargeEnergy: 0, chargeCost: 0, dischargeRevenue: 0, arbitrageProfit: 0, actualMaxDemand: 120, baselineMaxDemand: 120, demandSaving: 0, totalSaving: 0, finalSocPct: 80 },
+    { algorithm: 'tou-rule', chargeEnergy: 420, dischargeEnergy: 380, chargeCost: 168, dischargeRevenue: 402, arbitrageProfit: 234, actualMaxDemand: 118, baselineMaxDemand: 120, demandSaving: 80, totalSaving: 314, finalSocPct: 62 },
+  ],
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -220,6 +261,16 @@ globalThis.fetch = async (url, init) => {
   }
   if (u.includes('/api/setting/update')) {
     return json({})
+  }
+  if (u.includes('/api/strategy/energy-storage/activate')) {
+    return json({})
+  }
+  if (u.includes('/api/strategy/energy-storage')) {
+    if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
+    return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
+  }
+  if (u.includes('/api/effect/backtest')) {
+    return json({ backtest: FAKE_BACKTEST })
   }
   const body = u.includes('/api/gd-metric')
     ? {
@@ -331,6 +382,63 @@ for (const tab of NAV) {
   }
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
+
+console.log('\n== 策略管理页 ==')
+await clickTo('管理', '策略管理')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  check(bodyHas('tou-rule') && bodyHas('idle-基线'), '列表渲染后端返回的策略')
+  check(bodyHas('长期 · 自 2026-10-01'), '日期范围按长期/区间分别展示')
+  check(bodyHas('2026-10-01 → 2026-10-31'), '非长期显示区间')
+  check(bodyHas('按星期 · 每天'), '时间范围 weekday 文案')
+  check(bodyHas('自定义日期 · 周一/周二/周三'), '时间范围 custom 文案（星期名映射）')
+  check(bodyHas('命中') && bodyHas('未命中'), '显示当前是否命中时间范围')
+
+  // 抽屉：编辑第二条策略，验证表单从后端数据回填
+  const editButtons = [...doc.querySelectorAll('tbody button')].filter((b) => b.textContent.trim() === '编辑')
+  check(editButtons.length === 2, '每行都有编辑按钮')
+  editButtons[1].click()
+  await tick()
+  check(!!doc.querySelector('.drawer'), '打开右侧抽屉')
+  const nameInput = doc.querySelector('.drawer input')
+  check(nameInput?.value === 'idle-基线', '抽屉按 id 回填名称', String(nameInput?.value))
+  const drawerHas = (t) => (doc.querySelector('.drawer')?.textContent ?? '').includes(t)
+  check(drawerHas('功率点位'), '抽屉含点位编辑区')
+  check(!doc.querySelector('.drawer .pt'), '空点位表不渲染行')
+
+  // 加点位 → 点位行出现，且小时不重复
+  const addBtn = [...doc.querySelectorAll('.drawer button')].find((b) => b.textContent.trim() === '+ 加点位')
+  addBtn?.click()
+  await tick()
+  addBtn?.click()
+  await tick()
+  const rows = doc.querySelectorAll('.drawer .pt')
+  check(rows.length === 2, `加两次得到 2 个点位（实际 ${rows.length}）`)
+
+  // 保存 → PUT，且 config.points 按小时升序
+  const saveBtn = [...doc.querySelectorAll('.drawer-foot button')].find((b) => b.textContent.trim() === '保存')
+  saveBtn?.click()
+  await tick()
+  await tick()
+  const put = requests.filter((r) => r.url.includes('/api/strategy/energy-storage/8') && r.body?.name).pop()
+  check(!!put, '发出更新请求')
+  check(put?.body?.config?.points?.length === 2, 'payload 带点位', JSON.stringify(put?.body?.config))
+  const hours = (put?.body?.config?.points ?? []).map((p) => p[0])
+  check(
+    hours.every((h, i) => i === 0 || hours[i - 1] <= h),
+    '点位按小时升序',
+    JSON.stringify(hours),
+  )
+  check(put?.body?.dateRange?.isLongTerm === false && put?.body?.dateRange?.endDate === '2026-10-31', '日期范围原样保留')
+
+  // 试运行：同一套成本模型，首个是 idle 基线
+  const runBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '跑一次')
+  runBtn?.click()
+  await waitFor(() => bodyHas('额定 50 kW'))
+  check(bodyHas('314.00'), '试运行表格带出总节省')
+  check(bodyHas('idle') && bodyHas('基线'), '首个算法标为 idle 基线')
+  check(bodyHas('额定 50 kW / 200 kWh'), '展示回测使用的电池参数')
+}
 
 console.log('\n== 储能参数页 ==')
 await clickTo('配置', '储能参数')

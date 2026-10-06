@@ -87,4 +87,5 @@ export const api = {
     request<T>(path, { method: 'GET', query, signal }),
   post: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
     request<T>(path, { method: 'POST', body, signal }),
+  request: <T>(path: string, options: RequestOptions) => request<T>(path, options),
 }

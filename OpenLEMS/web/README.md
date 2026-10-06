@@ -65,6 +65,7 @@ src/
 | 场景 · 信息披露 | `GET /api/gd-metric`（负荷 / 日前价 / 实时价，15min） |
 | 管理 · 手动控制 | `GET /api/device/name-list` `GET /api/control/custom-services` `GET /api/device/telemetry` `POST /api/device/history` `POST /api/control/device` |
 | 配置 · 储能参数 | `GET /api/policy/config-fields` `GET /api/policy/config` `POST /api/setting/update` |
+| 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage` `PUT/DELETE .../{id}` `POST .../activate` `GET /api/effect/backtest` |
 
 手动控制页的两条硬规则：
 
@@ -79,7 +80,10 @@ src/
 手动控制页叠加两层保护：驱动声明的 `min/max`，以及从储能参数推导的
 「功率上限 = 设备额定 × 配置比例」。被拦时会说清是哪一条拦的。
 
-其它 26 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+策略管理页刻意复用 `/api/effect/backtest` 做「试运行」，与效果评估同一套成本模型 ——
+另写一套估算会让同一个策略在两个页面给出两个收益。
+
+其它 25 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系

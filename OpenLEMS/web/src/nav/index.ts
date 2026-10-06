@@ -120,7 +120,7 @@ export const NAV: NavTab[] = [
         status: 'ready',
         perm: 'manage:control',
       },
-      { key: 'policies', title: '策略管理', path: '/manage/policies', status: 'planned', perm: 'manage:policy', panels: ['策略列表', '策略详情 / 编辑', '充放计划预览'] },
+      { key: 'policies', title: '策略管理', path: '/manage/policies', status: 'ready', perm: 'manage:policy' },
       { key: 'automation', title: '自动化联动', path: '/manage/automation', status: 'todo', perm: 'manage:automation', panels: ['自动化规则'] },
       { key: 'devices', title: '设备管理', path: '/manage/devices', status: 'planned', perm: 'manage:device', note: '本期只接 emsdevice mock', panels: ['设备树', '点表（holding 0xC8–0xD5）'] },
       { key: 'drivers', title: '协议与驱动', path: '/manage/drivers', status: 'todo', perm: 'manage:driver', panels: ['驱动管理', '协议配置'] },
