@@ -221,6 +221,35 @@ const FAKE_BACKTEST = {
   ],
 }
 
+const FAKE_PRICES = [
+  {
+    id: 3,
+    description: '2026 秋季工商业',
+    priority: 1,
+    status: 'Enable',
+    isActive: true,
+    dateRange: { startDate: '2026-10-01', isLongTerm: true },
+    timeRange: { type: 'weekday', weekdayType: 'all' },
+    priceSegments: [
+      { startTime: '00:00', endTime: '08:00', priceType: 'Valley', price: 0.5 },
+      { startTime: '08:00', endTime: '11:00', priceType: 'Sharp', price: 1.5 },
+      { startTime: '11:00', endTime: '13:00', priceType: 'Peak', price: 1.2 },
+      { startTime: '13:00', endTime: '20:00', priceType: 'Flat', price: 0.8 },
+      { startTime: '20:00', endTime: '00:00', priceType: 'Valley', price: 0.5 },
+    ],
+  },
+  {
+    id: 4,
+    description: '对照组固定价',
+    priority: 3,
+    status: 'Disable',
+    isActive: false,
+    dateRange: { startDate: '2026-10-01', endDate: '2026-10-31', isLongTerm: false },
+    timeRange: { type: 'custom', customDays: [1, 2] },
+    priceSegments: [{ startTime: '00:00', endTime: '00:00', priceType: 'Flat', price: 0.6 }],
+  },
+]
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -268,6 +297,13 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/strategy/energy-storage')) {
     if (init?.method === 'PUT' || init?.method === 'DELETE' || init?.method === 'POST') return json({})
     return json({ list: FAKE_STRATEGIES, total: FAKE_STRATEGIES.length })
+  }
+  if (u.includes('/api/price/current')) {
+    return json({ price: FAKE_PRICES[0] })
+  }
+  if (u.includes('/api/price')) {
+    if (init?.method === 'POST' || init?.method === 'PUT' || init?.method === 'DELETE') return json({})
+    return json({ list: FAKE_PRICES, total: FAKE_PRICES.length })
   }
   if (u.includes('/api/effect/backtest')) {
     return json({ backtest: FAKE_BACKTEST })
@@ -382,6 +418,64 @@ for (const tab of NAV) {
   }
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
+
+console.log('\n== 电价管理页 ==')
+await clickTo('管理', '电价管理')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  check(bodyHas('2026 秋季工商业') && bodyHas('对照组固定价'), '列表渲染电价配置')
+  check(bodyHas('长期 · 自 2026-10-01'), '日期范围文案')
+  check(bodyHas('按星期 · 每天'), '时间范围文案')
+  check(bodyHas('当前生效'), '标出当前生效的电价')
+  check(bodyHas('全站唯一来源'), '声明时段是全站唯一来源')
+
+  // 甘特条：5 段，宽度按时长比例
+  const bars = [...doc.querySelectorAll('.card .gantt .bar')]
+  check(bars.length === 6, `甘特条数量 = ${bars.length}（5 + 对照组 1）`)
+  const widths = bars.slice(0, 5).map((b) => parseFloat(b.style.width))
+  check(
+    Math.abs(widths[0] - (8 / 24) * 100) < 0.01 && Math.abs(widths[1] - (3 / 24) * 100) < 0.01,
+    '甘特条宽度按分钟比例',
+    JSON.stringify(widths),
+  )
+  // 20:00-00:00 这种跨夜写法要按 24:00 算，否则宽度为 0
+  check(Math.abs(widths[4] - (4 / 24) * 100) < 0.01, '结束时间 00:00 按 24:00 处理', JSON.stringify(widths))
+
+  // 抽屉：回填 + 重叠校验
+  const editButtons = [...doc.querySelectorAll('.card button')].filter((b) => b.textContent.trim() === '编辑')
+  editButtons[0].click()
+  await tick()
+  check(!!doc.querySelector('.drawer'), '打开抽屉')
+  const segs = doc.querySelectorAll('.drawer .seg')
+  check(segs.length === 5, `抽屉回填 5 个时段（实际 ${segs.length}）`)
+
+  // 制造重叠：把第二段起点改到第一段中间
+  const startInput = segs[1].querySelector('input[type="time"]')
+  startInput.value = '04:00'
+  startInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  check((doc.querySelector('.drawer')?.textContent ?? '').includes('重叠'), '检出时段重叠')
+  const saveBtn = [...doc.querySelectorAll('.drawer-foot button')].find((b) => b.textContent.trim() === '保存')
+  check(saveBtn?.disabled === true, '有 error 时保存按钮禁用')
+
+  // 改回不重叠，保存 → PUT，priceSegments 按开始时间排序
+  startInput.value = '08:00'
+  startInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  saveBtn?.click()
+  await tick()
+  await tick()
+  const put = requests.filter((r) => r.url.includes('/api/price/3') && r.body?.description).pop()
+  check(!!put, '发出更新请求')
+  check(put?.body?.description === '2026 秋季工商业', 'payload 带描述', JSON.stringify(put?.body?.description))
+  const starts = (put?.body?.priceSegments ?? []).map((s) => s.startTime)
+  check(
+    starts.every((t, i) => i === 0 || starts[i - 1] <= t),
+    '时段按开始时间升序',
+    JSON.stringify(starts),
+  )
+  check(put?.body?.priceSegments?.[0]?.priceType === 'Valley', 'priceType 以字符串发送（与后端 MarshalJSON 一致）', JSON.stringify(put?.body?.priceSegments?.[0]))
+}
 
 console.log('\n== 策略管理页 ==')
 await clickTo('管理', '策略管理')

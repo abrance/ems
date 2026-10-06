@@ -641,6 +641,14 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 | 管理 · 手动控制 | `name-list` / `control/custom-services` / `device/telemetry` / `device/history` / `control/device` |
 | 配置 · 储能参数 | `GET /api/policy/config-fields`（字段元数据）+ `GET /api/policy/config`（当前值）+ `POST /api/setting/update`（保存） |
 | 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage`、`PUT/DELETE .../{id}`、`POST .../activate`、`GET /api/effect/backtest`（试运行） |
+| 管理 · 电价管理 | `GET /api/price`、`GET /api/price/current`、`POST /api/price`、`PUT /api/price/{id}`、`DELETE`、`PUT /api/price/{id}/toggle` |
+
+**电价管理页的口径**：这里配置的峰平谷时段是**全站唯一来源** —— 策略套利阈值、
+预测复盘的分时段相关度/离散度都读它，页面上明写这句话。
+`priceSegment.priceType` 的线格式是**字符串**（后端 `EPriceType` 自定义了 MarshalJSON，
+值为 `Valley`/`Peak`/`Flat`/`Sharp`/`DeepValley`）。校验分两级：起止非法 / 重叠 / 负价 =
+`error` 阻断保存；未铺满 24 小时 = `warning` 只提醒（业务上是否允许留空不由前端拍板）。
+甘特条把 `00:00` 当天的结束当 `24:00` 处理，否则 `20:00-00:00` 这种写法会被画成零宽。
 
 **策略管理页的两个口径**（写死在代码注释里）：
 

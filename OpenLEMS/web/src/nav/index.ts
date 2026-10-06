@@ -126,7 +126,7 @@ export const NAV: NavTab[] = [
       { key: 'drivers', title: '协议与驱动', path: '/manage/drivers', status: 'todo', perm: 'manage:driver', panels: ['驱动管理', '协议配置'] },
       { key: 'remote', title: '远程调度', path: '/manage/remote', status: 'todo', perm: 'manage:remote', panels: ['MQTT', 'Modbus', '远程日志'] },
       { key: 'network', title: '网络配置', path: '/manage/network', status: 'todo', perm: 'manage:network', panels: ['网卡配置'] },
-      { key: 'price', title: '电价管理', path: '/manage/price', status: 'planned', perm: 'manage:price', note: '峰平谷时段要与预测复盘共用同一份配置', panels: ['电价配置', '24h 时段甘特条'] },
+      { key: 'price', title: '电价管理', path: '/manage/price', status: 'ready', perm: 'manage:price' },
       { key: 'collect', title: '采集管理', path: '/manage/collect', status: 'planned', perm: 'manage:collect', note: '迁移 overlay 能力：采集台 + 日报档案 + 复核队列', panels: ['采集台', '日报档案', '复核队列'] },
       { key: 'statistics', title: '统计分析', path: '/manage/statistics', status: 'todo', perm: 'manage:statistics', panels: ['设备对比', '系统监控', '协议统计'] },
       { key: 'audit', title: '审计', path: '/manage/audit', status: 'planned', perm: 'manage:audit', panels: ['操作审计', '运行日志'] },

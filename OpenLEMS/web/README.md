@@ -66,6 +66,7 @@ src/
 | 管理 · 手动控制 | `GET /api/device/name-list` `GET /api/control/custom-services` `GET /api/device/telemetry` `POST /api/device/history` `POST /api/control/device` |
 | 配置 · 储能参数 | `GET /api/policy/config-fields` `GET /api/policy/config` `POST /api/setting/update` |
 | 管理 · 策略管理 | `GET/POST /api/strategy/energy-storage` `PUT/DELETE .../{id}` `POST .../activate` `GET /api/effect/backtest` |
+| 管理 · 电价管理 | `GET /api/price` `GET /api/price/current` `POST /api/price` `PUT/DELETE /api/price/{id}` `PUT /api/price/{id}/toggle` |
 
 手动控制页的两条硬规则：
 
@@ -83,7 +84,11 @@ src/
 策略管理页刻意复用 `/api/effect/backtest` 做「试运行」，与效果评估同一套成本模型 ——
 另写一套估算会让同一个策略在两个页面给出两个收益。
 
-其它 25 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+电价管理页配置的峰平谷时段是**全站唯一来源**（策略套利、预测复盘的分时段指标都读它）。
+`priceType` 走字符串（后端 `EPriceType.MarshalJSON`）。校验分两级：重叠/负价/起止非法阻断保存，
+未铺满 24 小时只提醒。
+
+其它 24 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系
