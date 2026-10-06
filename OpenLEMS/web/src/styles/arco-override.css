@@ -1,0 +1,28 @@
+/* ============================================================================
+   Arco 主题对齐
+   Arco 的 --primary-6 同时用于「填充底」和「文字色」，单一取值要两边都过对比：
+   白字在 #b85000 上 5.0:1、#b85000 作文字在白底 5.0:1 —— 都达标。
+   亮橙 --brand #ff7d00 留给自家的竖条 / 图表 / 强调线（2.6:1，不能承载文字）。
+   ========================================================================== */
+:root {
+  --primary-1: 255, 247, 232;
+  --primary-2: 255, 230, 189;
+  --primary-3: 255, 217, 168;
+  --primary-4: 226, 138, 45;
+  --primary-5: 214, 103, 0;
+  --primary-6: 184, 80, 0;
+  --primary-7: 154, 68, 0;
+  --primary-8: 140, 62, 0;
+  --primary-9: 122, 53, 0;
+  --primary-10: 102, 44, 0;
+
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-border: var(--border);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --border-radius-small: var(--r-sm);
+  --border-radius-medium: var(--r-md);
+  --border-radius-large: var(--r-md);
+}

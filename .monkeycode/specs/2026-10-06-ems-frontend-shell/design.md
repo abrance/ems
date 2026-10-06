@@ -615,6 +615,21 @@ export const SCENES: Scene[] = [ /* 广东现货日报 / 山西现货交易 / �
 
 理由：与现网 `web.zip`（Arco/Vue）同源，视觉零迁移成本；overlay 脚本依赖的 CSS var、`ems:user:token`、`/api` 全部保持不变。
 
+**源码位置：`OpenLEMS/web/`**（`npm run build` 的 `dist/` 与现网 web.zip 同构，打包后覆盖 `application/manifest/web.zip`）。CI：`.github/workflows/web-ci.yml`（typecheck + build + 壳层冒烟）。
+
+**P0 已落地**（本篇写完时）：
+
+- `src/nav/index.ts` 导航唯一真源 → 路由表由它生成，不手写第二份
+- AppBar / TabBar / SideNav / PageHeader / PanelBox / KpiCard / StatusTag + AppShell
+- `src/styles/tokens.css`：间距·字号·圆角阶梯 + 对比度达标色板（与 §4.1 一致）
+- 信息披露页接了真实数据（`GET /api/gd-metric`）；其余 28 页落 `PlaceholderView`，按 nav 里声明的面板列结构 + 标状态
+- 壳层冒烟：happy-dom 加载**构建产物**，逐个点过 29 页断言标题 / 占位面板 / 顶栏约束
+
+**Arco 的取舍**：P0 不注册 Arco 全局组件。实测 `import ArcoVue` + `arco.css` 会让 CSS
+从 **8KB 涨到 404KB**、JS 从 **108KB 涨到 872KB**，而 P0 一个 Arco 组件都没用到。
+依赖仍声明（下一批表单/表格页要用），`styles/arco-override.css` 已把 Arco 变量对齐到本项目色板，
+届时按需引入即可，不会产生视觉漂移。
+
 分期：
 
 | 期 | 交付 | 验收 |
