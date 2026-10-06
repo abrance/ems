@@ -12,4 +12,5 @@ import (
 
 type IForecastV1 interface {
 	GetLoadForecast(ctx context.Context, req *v1.GetLoadForecastReq) (res *v1.GetLoadForecastRes, err error)
+	GetPriceForecast(ctx context.Context, req *v1.GetPriceForecastReq) (res *v1.GetPriceForecastRes, err error)
 }
