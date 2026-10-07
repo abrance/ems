@@ -2,12 +2,23 @@ package internal
 
 import (
 	"common"
+	"common/c_enum"
 	"common/c_log"
 	"context"
 	"time"
 
 	"github.com/pkg/errors"
 )
+
+// priceTypeLabel 电价类型枚举 → 存储用的字符串标签。
+//
+// 千万别写成 string(t)：那是把整数当码点转字符，Valley(1) 会变成 "" 这个控制字符。
+// 存储侧拿到它再经 c_enum.ParsePriceType 解析，匹配不上任何分支 → 一律落到默认的「平电」，
+// 于是**所有落库的电价类型都成了平电**，而且是静默的（类型字段看起来有个值）。
+// 用 String()（stringer 生成），它与 ParsePriceType 互逆。
+func priceTypeLabel(t c_enum.EPriceType) string {
+	return t.String()
+}
 
 // SaveCurrentPriceToStorage 保存当前电价到Storage
 func SaveCurrentPriceToStorage(ctx context.Context) error {
@@ -37,7 +48,7 @@ func SaveCurrentPriceToStorage(ctx context.Context) error {
 	currentPrice := &SCurrentPrice{
 		PriceId:   activePrice.Id,
 		Price:     currentSegment.Price,
-		PriceType: string(currentSegment.PriceType),
+		PriceType: priceTypeLabel(currentSegment.PriceType),
 		Timestamp: time.Now().Unix(),
 	}
 
