@@ -568,6 +568,18 @@ globalThis.fetch = async (url, init) => {
     return json({ token: 'smoke-session-1', role: b.role, expireAt: Math.floor(Date.now() / 1000) + 7200 })
   }
   if (u.includes('/api/auth/logout')) return json({})
+  if (u.includes('/api/auth/current')) return json({ role: localStorage.getItem('ems:user:role') || 'admin' })
+  if (u.includes('/api/auth/change-password')) {
+    const b = init?.body ? JSON.parse(String(init.body)) : {}
+    // 与真实后端一致：控制器返回 gerror.NewCode(gcode.CodeNotAuthorized, ...)，
+    // GoFrame 的响应中间件**始终写 HTTP 200**，真正的错误码在 body 里（61 = Not Authorized）。
+    // 这里一度写成 HTTP 401 —— 那会被前端当成「会话过期」把人踢回登录页，
+    // 于是测出的是桩的错，不是页面的错。
+    if (b.oldPassword !== 'admin') {
+      return json({}, 200, { code: 61, message: '当前密码不正确' })
+    }
+    return json({})
+  }
   if (u.includes('/api/device/name-list')) {
     // 自动化规则会引用 BMS 与 DIDO，设备桩里要有
     return json({ deviceNames: { ess_1: '储能柜 1', pcs_1: 'PCS 1', bms_1: '派能BMS', dido_1: '红灯' } })
@@ -727,9 +739,10 @@ globalThis.fetch = async (url, init) => {
   return json(body)
 }
 
-function json(data) {
-  return new Response(JSON.stringify({ code: 0, data }), {
-    status: 200,
+function json(data, status = 200, envelope = {}) {
+  // 默认 code=0；需要模拟业务错误码时用第三参（GoFrame 把错误码放 body，HTTP 仍是 200）
+  return new Response(JSON.stringify({ code: 0, ...envelope, data }), {
+    status,
     headers: { 'Content-Type': 'application/json' },
   })
 }
@@ -1351,6 +1364,80 @@ for (const [from, to] of [['/programs', '手动控制'], ['/effect', '决策支�
     `${from} → ${to}`,
     doc.querySelector('.pagehead h1')?.textContent ?? '(空)',
   )
+}
+
+console.log('\n== 用户与权限页 ==')
+await clickTo('管理', '用户与权限')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('内置账号'))
+  check(bodyHas('本系统没有用户表') || bodyHas('两个角色本身就是账号'), '说清「账号即角色」这个前提')
+  check(bodyHas('当前会话') && bodyHas('正常登录'), '显示当前会话类型（非绕过）')
+  check(bodyHas('只能改自己的密码') || bodyHas('可重置普通用户'), '按角色给出改密范围')
+  check(bodyHas('admin ⊇ user'), '权限规则写明 admin 包含 user')
+  check(bodyHas('界面不做权限隐藏'), '说明界面不隐藏入口、权威判定在后端')
+
+  // 权限矩阵：user 的管理类接口必须是 ✗
+  const matrix = [...doc.querySelectorAll('.table')].pop()
+  const cells = [...matrix.querySelectorAll('div')].map((d) => d.textContent.replace(/\s+/g, '').trim())
+  check(JSON.stringify(cells) === JSON.stringify(['账号','说明','读接口','管理类接口','admin','管理员','✓','✓','user','普通用户','✓','✗']),
+    '权限矩阵：user 无管理类权限', JSON.stringify(cells))
+
+  const form = doc.querySelector('.form')
+  const inputs = [...form.querySelectorAll('input')]
+  const setVal = (el, v) => {
+    el.value = v
+    el.dispatchEvent(new window.Event('input', { bubbles: true }))
+  }
+  const btn = [...doc.querySelectorAll('.actions button')].find((b) => b.textContent.includes('修改密码'))
+  const changeCalls = () => requests.filter((r) => r.url.includes('/api/auth/change-password')).length
+
+  // 两次新密码不一致 → 本地拦下，不发请求
+  const before = changeCalls()
+  setVal(inputs[0], 'admin')
+  setVal(inputs[1], 'newpass1')
+  setVal(inputs[2], 'newpass2')
+  btn.click()
+  await tick()
+  check(bodyHas('两次输入的新密码不一致'), '两次新密码不一致时本地拦下')
+  check(changeCalls() === before, '本地校验失败时根本不发请求')
+
+  // 新密码与当前密码相同 → 也拦下
+  setVal(inputs[1], 'admin')
+  setVal(inputs[2], 'admin')
+  btn.click()
+  await tick()
+  check(bodyHas('新密码不能与当前密码相同'), '新旧密码相同时拦下')
+
+  // 当前密码错 → 后端 401，页面显示原因
+  setVal(inputs[0], 'wrong')
+  setVal(inputs[1], 'newpass1')
+  setVal(inputs[2], 'newpass1')
+  btn.click()
+  await waitFor(() => bodyHas('当前密码不正确'), 800)
+  check(bodyHas('当前密码不正确'), '当前密码错误时显示后端返回的原因')
+  // 关键：业务错误（code=61）不能被当成「会话过期」。曾经因为桩错用 HTTP 401，
+  // 页面把人踢回登录页，而下面的断言又在登录页上「通过」了。
+  check(!!doc.querySelector('.form') && h1Text() === '用户与权限', '打错当前密码后仍留在本页（没被当成会话过期）', h1Text())
+
+  // 正确 → 提交请求体必须是 {role, oldPassword, newPassword}，且成功提示讲清「不吊销其它会话」
+  setVal(inputs[0], 'admin')
+  btn.click()
+  await waitFor(() => (doc.body.textContent ?? '').includes('已修改'), 800)
+  const call = requests.filter((r) => r.url.includes('/api/auth/change-password')).pop()
+  check(
+    JSON.stringify(call?.body) === JSON.stringify({ role: 'admin', oldPassword: 'admin', newPassword: 'newpass1' }),
+    '改密请求体 = {role, oldPassword, newPassword}',
+    JSON.stringify(call?.body),
+  )
+  check(bodyHas('不会因此失效'), '成功提示讲清「其它会话不会失效」')
+  check(!form.querySelector('input[type=password]').value, '成功后清空密码输入框')
+
+  // 限制清单必须常驻（不假装有能力）
+  check(bodyHas('password_length') && bodyHas('不生效'), '写明 password_length 设置不生效')
+  check(bodyHas('session_admin_timeout'), '写明会话时长设置不生效（且因此没做控件）')
+  check(!bodyHas('保存会话时长'), '没有给不生效的设置做假控件')
+  check(bodyHas('没有失败次数限制'), '写明登录没有频率限制 / 锁定')
 }
 
 console.log('\n== 导航结构 ==')

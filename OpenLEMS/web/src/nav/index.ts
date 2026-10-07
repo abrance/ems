@@ -78,7 +78,14 @@ export const NAV: NavTab[] = [
       { key: 'statistics', title: '统计分析', path: '/manage/statistics', status: 'ready', perm: 'manage:statistics' },
       { key: 'audit', title: '审计', path: '/manage/audit', status: 'ready', perm: 'manage:audit' },
       { key: 'exports', title: '报表导出', path: '/manage/exports', status: 'todo', perm: 'manage:export', panels: ['报表模板', '生成任务'] },
-      { key: 'users', title: '用户与权限', path: '/manage/users', status: 'todo', perm: 'manage:user', note: '本期不做；只分管理员 / 普通用户两级', panels: ['用户列表', '角色'] },
+      {
+        key: 'users',
+        title: '用户与权限',
+        path: '/manage/users',
+        status: 'ready',
+        perm: 'manage:user',
+        note: '本系统没有用户表：admin / user 两个角色本身就是账号（登录页也要填这两个词之一）',
+      },
     ],
   },
   {

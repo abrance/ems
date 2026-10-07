@@ -20,6 +20,23 @@ export function logout(): Promise<Record<string, unknown>> {
   return api.post<Record<string, unknown>>('/api/auth/logout', {})
 }
 
-export function changePassword(body: { role?: string; newPassword: string }): Promise<Record<string, unknown>> {
+/**
+ * 改密码。
+ *
+ * - `role` 是**要改哪个账号**（留空 = 当前会话自己）。后端会做权限判定：
+ *   普通用户只能改自己；管理员可以重置普通用户；任何情况下都不能改别人的 admin。
+ * - `oldPassword` 是**当前会话角色本人**的密码，用于证明是你本人在操作 ——
+ *   管理员替普通用户重置时，填的也是管理员自己的密码。
+ */
+export function changePassword(body: {
+  role?: string
+  oldPassword: string
+  newPassword: string
+}): Promise<Record<string, unknown>> {
   return api.post<Record<string, unknown>>('/api/auth/change-password', body)
+}
+
+/** 当前会话的角色（服务端确认，比读 localStorage 可靠） */
+export function fetchCurrentUser(signal?: AbortSignal): Promise<{ role: string }> {
+  return api.get<{ role: string }>('/api/auth/current', undefined, signal)
 }
