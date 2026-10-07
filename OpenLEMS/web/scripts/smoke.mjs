@@ -1825,6 +1825,32 @@ check(sceneTab?.pages.length === 7, `场景页 7 个（实际 ${sceneTab?.pages.
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
 check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${totalPages}）`)
 
+// 部署产物是否跟得上源码。
+// web.zip 是**真正部署出去的东西**（dist/ 被 gitignore），所以「改源码忘了打包」
+// 会静默地把旧界面发出去 —— 这个仓库就出现过一次：源码 31 页、zip 里只有 16 个页面 chunk。
+// 打包脚本会写 .packed.json，这里拿它跟导航对账。
+{
+  const packedPath = resolve(root, '.packed.json')
+  let packed = null
+  try {
+    packed = JSON.parse(readFileSync(packedPath, 'utf-8'))
+  } catch {
+    check(false, '找到 .packed.json（没打过包？跑 npm run pack）')
+  }
+  if (packed) {
+    // 登录页不在导航里，所以 +1；改这里要同时想清楚有没有别的非导航页
+    const NON_NAV_PAGES = 1
+    // 比的是**真实导航页数**（totalPages），不是 EXPECTED_PAGES：
+    // 后者是「防止有人悄悄改导航」的常量，拿它比就测不出「加了页没打包」。
+    check(
+      packed.pageChunks?.length === totalPages + NON_NAV_PAGES,
+      `web.zip 里的页面 chunk 数跟上导航（期望 ${totalPages + NON_NAV_PAGES}，实际 ${packed.pageChunks?.length}）`,
+      '不一致说明 web.zip 是旧的：跑 npm run pack',
+    )
+    check(packed.files?.includes('index.html'), 'web.zip 含 index.html（后端按根路径提供静态资源）')
+  }
+}
+
 /** 点 Tab 再点侧栏项 */
 async function clickTo(tabTitle, pageTitle) {
   const tabEl = findTab(tabTitle)
