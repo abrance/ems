@@ -474,7 +474,10 @@ const FAKE_BACKTEST_RESULT = {
   to: '2026-09-21',
   sampleDays: 3,
   targetDates: ['2026-09-20', '2026-09-21'],
-  skipped: ['2026-09-18'],
+  // 没有跳过日期时 Go 序列化 nil 切片为 **null**（不是 []）——
+  // 页面以前直接读 .skipped.length 就抛，整个组件 setup 失败、页面全白。
+  skipped: null,
+  orderedDates: null,
   timeMs: 4210,
   points: [
     { targetTime: '2026-09-20 00:00', predicted: 100, actual: 100, q10: 90, q50: 100, q90: 110 },
@@ -944,6 +947,22 @@ console.log('\n== 顶栏约束（设计稿 §2 原则 6）==')
 const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
+
+console.log('\n== 历史信息：默认区间锚到最新日报日 ==')
+await clickTo('场景', '历史信息')
+{
+  await waitFor(() => doc.querySelectorAll('input[type=date]').length >= 3, 1500)
+  // 页头有一个「运行日」，页面自己还有起/止两个
+  const dates = [...doc.querySelectorAll('input[type=date]')].map((i) => i.value).filter(Boolean)
+  // 夹具里最新日报是 2026-09-21 → 默认区间右端必须是它，不能是「今天」
+  check(dates.includes('2026-09-21'), '默认区间右端 = 最新日报日（夹具 09-21）', JSON.stringify(dates))
+  check(!dates.some((d) => d.startsWith('2026-10-0')), '不再是「今天」当右端', JSON.stringify(dates))
+  // 关键：请求必须**带上**这个区间。后端缺省是「本月 1 日~今天」，
+  // 以前只有自定义模式才传 from/to，于是预设走的是后端缺省 → 整段落在数据之外（页面全空）
+  const trendCall = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
+  check(!!trendCall?.url.includes('from=2026-09-01') && trendCall?.url.includes('to=2026-09-21'),
+    '趋势请求带上锚定后的区间（09-01~09-21）', trendCall?.url ?? '没发请求')
+}
 
 console.log('\n== 默认区间的锚点（数据滞后时不能落在空区间）==')
 {
@@ -2026,6 +2045,16 @@ await clickTo('场景', '预测复盘')
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('事后回测'))
   check(bodyHas('回测：用') || bodyHas('用**当前模型**在历史数据上重跑'), '回测模式显式声明「不是当时预测」')
+
+  // 默认区间必须锚到「数据最新日」（夹具里 gd-metric 的 latestDate=2026-09-21），
+  // 否则「今天往前 7 天」整段落在数据之外 → 线上就是这么报
+  // 「区间 ... 内没有完整（96 点）的日前电价数据」的。
+  const btCall = requests.filter((r) => r.url.includes('/api/forecast/backtest')).pop()
+  check(
+    btCall?.url.includes('from=2026-09-15') && btCall?.url.includes('to=2026-09-21'),
+    '回测请求带上锚定后的区间（09-15~09-21，7 天档）',
+    btCall?.url ?? '没发请求',
+  )
 
   await waitFor(() => bodyHas('对比点数'))
   // 等数据真的加载完再断言 —— 否则看到的是加载前的占位文案，断言会因为错的原因通过

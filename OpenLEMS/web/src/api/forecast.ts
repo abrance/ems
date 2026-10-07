@@ -95,10 +95,26 @@ export function fetchLoadForecast(
 ): Promise<LoadForecast> {
   return api
     .get<{ forecast: LoadForecast }>('/api/forecast/load', params, signal)
-    .then((r) => r.forecast)
+    .then((r) => ({
+      ...r.forecast,
+      historyTimes: r.forecast?.historyTimes ?? [],
+      historyValues: r.forecast?.historyValues ?? [],
+      forecastTimes: r.forecast?.forecastTimes ?? [],
+      forecastPoint: r.forecast?.forecastPoint ?? [],
+    }))
 }
 
 /** GET /api/forecast/price → { forecast } */
+/** 归一化：nil 切片 → []（见 fetchPriceBacktest 的注释） */
+function normalizeForecast(f: PriceForecast): PriceForecast {
+  return {
+    ...f,
+    historyDates: f.historyDates ?? [],
+    historyValues: f.historyValues ?? [],
+    forecast: f.forecast ?? [],
+  }
+}
+
 export function fetchPriceForecast(
   params: {
     market?: string
@@ -113,19 +129,31 @@ export function fetchPriceForecast(
 ): Promise<PriceForecast> {
   return api
     .get<{ forecast: PriceForecast }>('/api/forecast/price', params, signal)
-    .then((r) => r.forecast)
+    .then((r) => normalizeForecast(r.forecast))
 }
 
 export function fetchRecordedForecast(
   params: { from: string; to: string; market?: string; grain?: string },
   signal?: AbortSignal,
 ): Promise<RecordedForecast> {
-  return api.get<RecordedForecast>('/api/forecast/recorded', params, signal)
+  return api.get<RecordedForecast>('/api/forecast/recorded', params, signal).then((r) => ({
+    ...r,
+    points: r.points ?? [],
+    generatedDates: r.generatedDates ?? [],
+  }))
 }
 
 export function fetchPriceBacktest(
   params: { market?: string; from: string; to: string; sampleDays?: number; forceRefresh?: boolean },
   signal?: AbortSignal,
 ): Promise<PriceBacktest> {
-  return api.get<PriceBacktest>('/api/forecast/backtest', params, signal)
+  // 归一化数组字段：**Go 的 nil 切片序列化成 null**（不是 []），页面里 `.length` 会直接抛，
+  // 而组件 setup 一抛就是整页空白（预测复盘页线上就是这么白的）。
+  // 统一在 api 层收口，别让每个页面各自记得加 ?. 和 ?? []。
+  return api.get<PriceBacktest>('/api/forecast/backtest', params, signal).then((r) => ({
+    ...r,
+    targetDates: r.targetDates ?? [],
+    skipped: r.skipped ?? [],
+    points: r.points ?? [],
+  }))
 }
