@@ -556,6 +556,18 @@ const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
   const u = String(url)
+  if (u.includes('/api/auth/login')) {
+    const b = init?.body ? JSON.parse(String(init.body)) : {}
+    if (b.password !== 'admin') {
+      // 与后端一致：密码错时 HTTP 401 + 响应体 code 401
+      return new Response(JSON.stringify({ code: 401, message: '用户名或密码错误' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return json({ token: 'smoke-session-1', role: b.role, expireAt: Math.floor(Date.now() / 1000) + 7200 })
+  }
+  if (u.includes('/api/auth/logout')) return json({})
   if (u.includes('/api/device/name-list')) {
     // 自动化规则会引用 BMS 与 DIDO，设备桩里要有
     return json({ deviceNames: { ess_1: '储能柜 1', pcs_1: 'PCS 1', bms_1: '派能BMS', dido_1: '红灯' } })
@@ -730,6 +742,12 @@ doc.body.appendChild(rootEl)
 const vite = await createServer({ root, server: { middlewareMode: true }, appType: 'custom', logLevel: 'error' })
 const { NAV } = await vite.ssrLoadModule(resolve(root, 'src/nav/index.ts'))
 
+// 页面测试需要「已登录」这个前提，否则守卫会把 27 页全挡在登录页外。
+// 这里直接播种 localStorage，等价于 AUTH_BYPASS_ROLE 注入的会话；
+// 真正的登录/退出路径由下面的「登录与退出」一节端到端跑。
+localStorage.setItem('ems:user:token', 'smoke-boot-token')
+localStorage.setItem('ems:user:role', 'admin')
+
 console.log('\n== 加载构建产物 ==')
 try {
   await import(pathToFileURL(entry).href)
@@ -746,6 +764,90 @@ console.log('\n== 顶栏约束（设计稿 §2 原则 6）==')
 const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
+
+console.log('\n== 登录与退出 ==')
+{
+  const loginForm = () => doc.querySelector('.login')
+  const setInput = (el, v) => {
+    el.value = v
+    el.dispatchEvent(new window.Event('input', { bubbles: true }))
+  }
+  const loginFields = () => {
+    const card = doc.querySelector('.login .card')
+    return {
+      account: card?.querySelector('input[name=account]'),
+      password: card?.querySelector('input[name=password]'),
+      submit: [...(card?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim().startsWith('登录')),
+    }
+  }
+
+  check(!!doc.querySelector('.appbar .user-menu'), '顶栏有账号入口')
+  const authBefore = requests.filter((r) => r.url.includes('/api/auth/')).length
+
+  // 退出登录
+  doc.querySelector('.appbar .user-menu').click()
+  await tick()
+  const logoutBtn = [...doc.querySelectorAll('.appbar .menu-item')].find((b) => b.textContent.includes('退出登录'))
+  check(!!logoutBtn, '用户菜单里有退出登录')
+  logoutBtn.click()
+  await waitFor(() => !!loginForm(), 800)
+  check(!!loginForm(), '退出后回到登录页')
+  check(!localStorage.getItem('ems:user:token'), '退出后清掉本地令牌')
+  check(requests.some((r) => r.url.includes('/api/auth/logout')), '退出时调用后端 logout')
+  check(!doc.querySelector('.appbar'), '登录页不套壳层（没有顶栏/侧栏）')
+
+  // 守卫：未登录时访问内页要弹回登录页，并记住原本要去哪
+  window.history.pushState({}, '', '/scene/clearing')
+  window.dispatchEvent(new window.Event('popstate'))
+  await waitFor(() => !!loginForm(), 800)
+  check(!!loginForm(), '未登录访问内页被弹回登录页')
+  // 不查 location.search：happy-dom 下 vue-router 的 pushState 不会同步 location，
+  // 查它只会查到自己宿主实现的脾气。「redirect 有没有生效」由下面登录后落到
+  // 市场出清（≠ 默认首页信息披露）来证明 —— 那才是真的验证。
+
+  // 账号不在内置列表 → 本地拦下，不打后端
+  {
+    const f = loginFields()
+    setInput(f.account, 'root')
+    setInput(f.password, 'admin')
+    f.submit.click()
+    await tick()
+    check((doc.body.textContent ?? '').includes('内置账号'), '账号不存在时给出明确提示')
+    check(
+      requests.filter((r) => r.url.includes('/api/auth/login')).length === 0,
+      '账号不合法时根本不发登录请求',
+    )
+  }
+
+  // 密码错 → 后端 401 → 页面显示错误，且仍停在登录页
+  {
+    const f = loginFields()
+    setInput(f.account, 'admin')
+    setInput(f.password, 'wrong')
+    f.submit.click()
+    await waitFor(() => (doc.body.textContent ?? '').includes('用户名或密码错误'), 800)
+    check((doc.body.textContent ?? '').includes('用户名或密码错误'), '密码错误时显示后端返回的原因')
+    check(!!loginForm(), '密码错误后仍停在登录页')
+    check(!localStorage.getItem('ems:user:token'), '密码错误不会写入令牌')
+  }
+
+  // 正确账密 → 回到登录前想去的那一页，而不是被扔回首页。
+  // 用「市场出清」当目标是有讲究的：默认首页是「信息披露」，
+  // 所以落到这里就证明 redirect 真的起作用了（否则会落到信息披露）。
+  {
+    const f = loginFields()
+    setInput(f.account, 'admin')
+    setInput(f.password, 'admin')
+    f.submit.click()
+    await waitFor(() => h1Text() === '市场出清', 1200)
+    check(h1Text() === '市场出清', '登录后回到登录前想去的页（redirect 生效，不是落回默认首页）', h1Text())
+    const call = requests.filter((r) => r.url.includes('/api/auth/login')).pop()
+    check(JSON.stringify(call?.body) === JSON.stringify({ role: 'admin', password: 'admin' }), '登录请求体 = {role,password}', JSON.stringify(call?.body))
+    check(localStorage.getItem('ems:user:role') === 'admin', '会话角色写入 localStorage')
+    check(!!localStorage.getItem('ems:user:expireAt'), '会话过期时间写入 localStorage')
+    check(!!doc.querySelector('.appbar'), '登录后壳层回来了')
+  }
+}
 
 console.log('\n== 自动化联动页 ==')
 await clickTo('管理', '自动化联动')
@@ -1249,17 +1351,6 @@ for (const [from, to] of [['/programs', '手动控制'], ['/effect', '决策支�
     `${from} → ${to}`,
     doc.querySelector('.pagehead h1')?.textContent ?? '(空)',
   )
-}
-
-console.log('\n== 401 提示 ==')
-{
-  const orig = globalThis.fetch
-  globalThis.fetch = async () => new Response(JSON.stringify({ code: 401, message: '未登录或登录已过期' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
-  await clickTo('配置', '系统信息')
-  await waitFor(() => !!doc.querySelector('.auth-warn'), 800)
-  check(!!doc.querySelector('.auth-warn'), '接口 401 时给出会话提示')
-  check((doc.body.textContent ?? '').includes('AUTH_BYPASS_ROLE'), '提示里说清依赖哪个环境变量')
-  globalThis.fetch = orig
 }
 
 console.log('\n== 导航结构 ==')
@@ -1989,6 +2080,28 @@ await clickTo('管理', '手动控制')
   check(call?.body?.parameters?.every((p) => typeof p === 'number'), 'int 字段转成了数字')
 }
 
+
+console.log('\n== 会话失效（401 写在响应体里）==')
+// 后端用 WriteJson(DefaultHandlerResponse{Code:401})，HTTP 状态码可能仍是 200。
+// 只看 res.status 会漏掉这种 401，于是界面一直转圈而不去登录页 —— 这里就测这个变体。
+// 放在最后：一旦被踢到登录页，后面的页面断言就没法跑了。
+{
+  const orig = globalThis.fetch
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ code: 401, message: '未登录或登录已过期' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  // 用 pushState 直接跳，不走 clickTo：切 Tab 本身就会触发请求，
+  // 页面在侧栏渲染完之前就被踢到登录页，clickTo 会以为「侧栏里没有这一项」。
+  window.history.pushState({}, '', '/scene/clearing')
+  window.dispatchEvent(new window.Event('popstate'))
+  await waitFor(() => !!doc.querySelector('.login'), 1500)
+  check(!!doc.querySelector('.login'), 'HTTP 200 但响应体 code=401 时也要回登录页')
+  check((doc.body.textContent ?? '').includes('登录已过期'), '并说明是会话过期，而不是让人猜')
+  check(!localStorage.getItem('ems:user:token'), '会话失效时清掉本地令牌')
+  globalThis.fetch = orig
+}
 
 if (interopNoise.length) {
   console.log(`\n（忽略 ${interopNoise.length} 条 happy-dom 环境噪音：缺 canvas 与只认标准 Event）`)

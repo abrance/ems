@@ -22,6 +22,13 @@ export function buildRoutes(): RouteRecordRaw[] {
   const landingTarget = allPaths.has(landing) ? landing : DEFAULT_ROUTE
 
   return [
+    // 登录页不来自 nav：它不参与 Tab/侧栏结构，是壳层之外的独立页
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/pages/LoginView.vue'),
+      meta: { public: true, title: '登录' },
+    },
     { path: '/', redirect: landingTarget },
     // 旧前端用过的路径，留着防书签失效：
     //   /programs 旧 SPA 的「系统管理」页（overlay 的返回目标）

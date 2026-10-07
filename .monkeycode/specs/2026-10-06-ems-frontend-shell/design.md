@@ -1297,12 +1297,11 @@ Go 侧同步改动：
 就会读到空会话。紧跟 `<head>` 能保证顺序。
 
 **`authBypassScript` 必须保留。** 它往 localStorage 写 `ems:user:token` / `ems:user:role`，
-而新前端没有登录页 —— 这是当前**唯一**的会话来源，删掉它整个界面 401。
-后端 `MiddlewareAuth` 也是「临时放开」状态，靠 `AUTH_BYPASS_ROLE` 放行；该变量目前
-只在环境变量里设，`deploy/docker-compose` 没有设置（**部署时必须补上**）。
+与登录页写入的是**同一套键** —— 登录页实现后它不再承担「唯一会话来源」的职责，
+但仍是 `AUTH_BYPASS_ROLE` 打开时的配套（否则前端与后端对该变量的认知不一致）。
 
 前端配套：旧路径保留重定向（`/programs` → 管理·手动控制，`/effect` → 场景·决策支持），
-以及 401 时的显式提示条（说清依赖 `AUTH_BYPASS_ROLE`），避免「界面全空但不说为什么」。
+以及 401 时清会话并回登录页（会话过期给单独文案，不让人猜）。详见 §13.9。
 
 ### 13.4 要保留的后端接口（不动）
 
@@ -1315,6 +1314,30 @@ Go 侧同步改动：
 | `GET /api/forecast/price` | 电价预测，同一 TimesFM，序列源＝日报已确认日均成交价（§14.5） |
 
 新前端只换壳层与渲染，这四处接口原样调用；overlay 下线时同步删对应 JS/CSS 与注入代码。
+
+## 13.9 登录与会话（已实现）
+
+原先决定「本期不做登录页」，改用 `AUTH_BYPASS_ROLE` 绕过鉴权 —— 那只是把它推到以后，
+不是解决了它（且该变量一开，任何能访问服务的人都拿到同样权限）。登录页现已实现。
+
+**后端的账号模型要说清**：`POST /api/auth/login` 只有 `role` 和 `password` 两个字段 ——
+**没有「用户名」**。`admin` / `user` 两个角色本身就是账号，密码存在系统设置里
+（`admin_password` / `user_password`，bcrypt）。所以登录页的「账号」填的就是这两个词之一；
+前端在本地先校验，填别的直接给出提示，不打后端。
+
+| 项 | 值 |
+| --- | --- |
+| 登录接口 | `POST /api/auth/login` `{role, password}` → `{token, role, expireAt}` |
+| 退出接口 | `POST /api/auth/logout` |
+| 令牌 | GoFrame Session ID，前端以 `Authorization: Bearer <token>` 发送（同时带 Cookie） |
+| 会话存储 | `localStorage`：`ems:user:token` / `ems:user:role` / `ems:user:expireAt`（**与 `authBypassScript` 同一套键**，不另起一套） |
+| 初始密码 | 初次部署：admin = `admin`，user = `111111`（`s_db_basic` 常量默认值，init 时 bcrypt 入库） |
+| 已升级的库 | **保持原密码**，不会被重置（刻意如此：升级时重置密码比弱默认值更危险）。忘记密码时删掉 `setting` 表里 `admin_password` 行再重启，会按当前默认值重建 |
+| 路由守卫 | `router.beforeEach`：`meta.public` 之外一律要求有效会话，未登录跳 `/login?redirect=<原路径>`，登录后跳回去 |
+| 401 | 既看 HTTP 状态码，也看**响应体 `code`** —— 后端用 `WriteJson(DefaultHandlerResponse{Code:401})`，HTTP 状态可能仍是 200 |
+
+**默认密码是弱口令**，这是出厂默认值的固有代价：部署后第一件事就该改掉它，别把管理端放公网。
+`AUTH_BYPASS_ROLE` 保留为内网调试/演示的逃生门，不再承担「没有登录页」的职责。
 
 ## 14. 策略反演 / 长周期电价预测：数据源与建模
 

@@ -86,6 +86,7 @@ src/
 | 场景 · 长周期电价预测 | `GET /api/forecast/price`（`grain=day\|intraday`） |
 | 场景 · 预测复盘 | `GET /api/forecast/recorded`（留痕对账）`GET /api/forecast/backtest`（1A 回测）`GET /api/gd-metric/series`（96 点实际值） |
 | 场景 · 策略反演 | `GET /api/gd-metric/supply-curve`（统计反演：由负荷-出清价反推聚合报价曲线） |
+| 登录 / 退出 / 改密 | `POST /api/auth/login`（`{role, password}`，**没有用户名字段**）、`POST /api/auth/logout`、`POST /api/auth/change-password` |
 
 手动控制页的两条硬规则：
 
@@ -134,3 +135,17 @@ src/
 ```bash
 cd dist && zip -r ../../application/manifest/web.zip . -x '.*'
 ```
+
+## 登录
+
+后端登录接口只有 `role` + `password` —— `admin` / `user` 两个角色**本身就是账号**，
+密码存在系统设置里。登录页的「账号」填这两个词之一，填错的在本地就拦下来了。
+
+- 会话键：`ems:user:token` / `ems:user:role` / `ems:user:expireAt`（与后端
+  `authBypassScript` 同一套，不要另起一套）
+- 令牌以 `Authorization: Bearer <token>` 发送，同时带 Cookie
+- 初始密码：**初次部署** admin = `admin`、user = `111111`；
+  **已升级的库保持原密码**（刻意不重置）。忘了密码就删掉 `setting` 表里
+  `admin_password` 那一行再重启，会按当前默认值重建
+- 出厂默认密码是弱口令：部署后第一件事就是改掉它
+- `AUTH_BYPASS_ROLE` 是内网调试/演示用的逃生门，默认不要设
