@@ -47,9 +47,18 @@ const error = ref('')
 
 /** 柜子下面挂哪些子设备 */
 const members = computed(() => devices.value.filter((d) => d.pid && d.pid === selectedId.value))
+
+/**
+ * 卡片要展示的设备 = 柜子自己 + 它的子设备。
+ * 柜子自己必须算进去：很多现场就是一台顶层储能柜（下面没有 PCS/BMS），
+ * 只列子设备的话这页会空得让人以为没数据。
+ */
+const units = computed(() => (cabinet.value ? [cabinet.value, ...members.value] : members.value))
 const cabinet = computed(() => devices.value.find((d) => d.id === selectedId.value) ?? null)
 
 const CARD_ORDER: Array<[string, string]> = [
+  ['ess', '储能柜'],
+  ['sess', '储能柜'],
   ['pcs', 'PCS'],
   ['bms', 'BMS'],
   ['ammeter', '电表'],
@@ -72,7 +81,7 @@ function display(deviceId: string, key: string, raw: unknown) {
 
 const cards = computed<Card[]>(() => {
   const byType = new Map<string, DeviceDetailedInfo[]>()
-  for (const m of members.value) {
+  for (const m of units.value) {
     const t = m.deviceType || 'unknown'
     if (!byType.has(t)) byType.set(t, [])
     byType.get(t)!.push(m)
@@ -137,6 +146,10 @@ async function load() {
 
 /** 趋势挑三类关键量：功率（PCS）、SOC（BMS）、温度（BMS/液冷） */
 const TREND_KEYS: Record<string, string[]> = {
+  // ess/sess 必须在这里：常见的装法就是一台**顶层储能柜**（下面没有 PCS/BMS 子设备），
+  // 少了它这一页就一条曲线都画不出来（部署上那台 ESS Demo 正是这种）。
+  ess: ['power', 'soc', 'temperature'],
+  sess: ['power', 'soc', 'temperature'],
   pcs: ['power'],
   bms: ['soc', 'temperature', 'soh'],
   cl: ['temperature'],

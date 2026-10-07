@@ -161,6 +161,34 @@ npm run pack        # = vite build → 打包到 ../application/manifest/web.zip
 冒烟也不再检查 zip，而是检查**刚构建出来的 `dist`**：页面 chunk 数必须等于导航页数 + 非导航页数，
 少了就说明有页面没登记到 `pages/index.ts`。
 
+## 三层检查（各挡一类问题）
+
+```bash
+npm run typecheck      # vue-tsc
+npm run smoke          # 壳层冒烟：happy-dom 加载 dist，逐页点过 + 行为断言
+npm run browser-check   # 真浏览器：无头 Firefox 查「图画出来没有」
+npm run verify         # = 上面三个（+ build）；本地没 firefox 时 browser-check 自动跳过
+```
+
+**为什么需要 browser-check**（冒烟抓不到、真实发生过两次）：
+
+- 冒烟跑在 happy-dom 里，**没有 canvas** —— `echarts.init` 直接抛错，
+  「图画没画出来」这件事在冒烟里根本不存在。冒烟只能断言「数据到了容器上」，
+  而那恰恰是下面两个 bug 里都成立的部分：
+  1. 图表在数据到达前挂载，只画了首帧 → 数据到了也不重绘
+  2. 容器被换成新 DOM 节点（`PanelBox` 加载中不渲染 slot），ECharts 实例还挂在
+     脱离文档的旧节点上 → 容器空、整页没有 canvas、**且不报错**
+
+做法：把 `dist` 起成本地站点并注入 API 桩（桩形状照抄真实响应），用无头 Firefox
+通过 Marionette 协议加载页面，检查每个 `.chart` 是否真有 canvas 且尺寸不为 0。
+
+它抓到的两个真实问题（都是冒烟与人工都没发现的）：
+- **只注册了 `LineChart`**：scatter 没注册时不报「类型没注册」，而是抛
+  `can't access property "getProgressive", t is undefined` → 策略反演的观测散点图整张画不出来
+- **储能柜页的趋势点位表缺 `ess`/`sess`** → 顶层储能柜（没有 PCS/BMS 子设备）一条曲线都画不出来
+
+CI 里 `BROWSER_CHECK_REQUIRED=1`（不许跳过）；本地没有 firefox 时只打一行提示。
+
 ## 数据来源（都来自广东）
 
 侧栏 7 个模块名借用参考系统（山西）的信息架构，但**数据全部是广东的**：`gd_metric.csv`
