@@ -1,12 +1,18 @@
 import { onBeforeUnmount, onMounted, onUpdated, watch, type Ref, type WatchSource } from 'vue'
 import * as echarts from 'echarts/core'
-import { LineChart } from 'echarts/charts'
+import { BarChart, LineChart, ScatterChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsOption } from 'echarts'
 
-// 只注册用到的模块：ECharts 全量约 1MB，按需注册是唯一把体积压下来的办法
-echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+// 只注册用到的模块：ECharts 全量约 1MB，按需注册是唯一把体积压下来的办法。
+//
+// 但**页面上用到的类型一个都不能漏**：漏注册时不会提示「类型没注册」，
+// 而是抛一个看起来无关的错 —— 例如 scatter 没注册时报
+// `can't access property "getProgressive", t is undefined`，
+// 图直接画不出来，排查时完全看不出原因（真浏览器检查抓到的就是这个）。
+// 目前用到：line（多数页）、bar（预测复盘的离散度、策略反演的观测点数）、scatter（策略反演的观测散点）。
+echarts.use([LineChart, BarChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 /**
  * 把 ECharts 挂到一个 div 上：init / 跟随容器尺寸 / 卸载时 dispose。

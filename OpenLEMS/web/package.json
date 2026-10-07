@@ -11,9 +11,10 @@
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
-    "verify": "npm run typecheck && npm run build && npm run smoke",
+    "verify": "npm run typecheck && npm run build && npm run smoke && npm run browser-check",
     "preview": "vite preview",
-    "pack": "node scripts/pack.mjs"
+    "pack": "node scripts/pack.mjs",
+    "browser-check": "node scripts/browser-check.mjs"
   },
   "dependencies": {
     "@arco-design/web-vue": "^2.58.0",
