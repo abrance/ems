@@ -134,12 +134,25 @@ src/
 
 ## 与线上产物的关系
 
-线上是 `application/manifest/web.zip`（打进 Go 可执行文件，静态服务在根路径）。
-本仓库 `npm run build` 的 `dist/` 就是同构产物：
+**交付物仍是 `application/manifest/web.zip`** —— 它由 `//go:embed` 打进 Go 可执行文件，
+静态服务挂在根路径（`application/manifest/web_embed.go` + `internal/cmd/web.go`）。
+Go 侧没有「从目录服务静态文件」的路径，也没有别的入口。
+
+所以：**源码真源是 `src/`（Vue3 + Vite + TS），`web.zip` 是它的构建产物**，两者不冲突。
+早先那份预编译的 Vue+Arco 产物已经在「用新前端替换 web.zip」那次删掉了；
+现在 zip 里装的就是这份源码的构建结果。
+
+重新生成它（**改完前端必须跑，否则部署出去的是旧界面**）：
 
 ```bash
-cd dist && zip -r ../../application/manifest/web.zip . -x '.*'
+npm run pack        # = vite build → 打包到 ../application/manifest/web.zip → 写 .packed.json
 ```
+
+`.packed.json` 是给冒烟对账用的：页面 chunk 数必须等于真实导航页数 + 非导航页数（登录页 1 个），
+不一致就报「web.zip 是旧的」。
+
+> 部署镜像（`script/Dockerfile.dev`）**不复制 `web/`、也没有 node/npm 步骤**，
+> 也就是说镜像里的前端就是构建镜像那一刻仓库里的 `web.zip`。
 
 ## 登录
 
