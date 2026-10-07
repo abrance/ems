@@ -129,17 +129,3 @@ export function fetchPriceBacktest(
 ): Promise<PriceBacktest> {
   return api.get<PriceBacktest>('/api/forecast/backtest', params, signal)
 }
-
-/** 区间 96 点实际值（复盘的第二条腿） */
-export interface MetricSeriesPoint {
-  date: string
-  time: string
-  value: number
-}
-
-export function fetchMetricSeries(
-  params: { from: string; to: string; kind?: string },
-  signal?: AbortSignal,
-): Promise<{ kind: string; from: string; to: string; points: MetricSeriesPoint[]; days: string[] }> {
-  return api.get('/api/gd-metric/series', params, signal)
-}

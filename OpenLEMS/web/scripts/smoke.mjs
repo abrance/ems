@@ -502,6 +502,56 @@ const FAKE_SERIES = {
   ],
 }
 
+// ===== 策略反演的手算夹具 =====
+// 两个分箱的分位点故意**完全相同**：这样任意负荷上插值结果都一样，
+// 手算值不会被「插值到哪儿」这件事影响。
+// 分位点均匀铺开 0,100,…,1000 ⇒ 条件分布 = 均匀分布 U(0,1000)，于是：
+//   中标概率(x) = 1 − x/1000
+//   中标概率 80%/50%/20% 对应报价 200 / 500 / 800
+//   E[(p−500)·1{p≥500}] = ∫₅₀₀^1000 (p−500)/1000 dp = 125
+//   E[p | p≥500] = (125 + 500×0.5)/0.5 = 750
+const uniformQ = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+const FAKE_SUPPLY_BINS = [
+  { loadFrom: 500, loadTo: 1500, loadMid: 1000, count: 500, q: uniformQ },
+  { loadFrom: 1500, loadTo: 2500, loadMid: 2000, count: 500, q: uniformQ },
+]
+const FAKE_SUPPLY_CLEAN = {
+  market: 'ahead',
+  from: '2026-06-01',
+  to: '2026-08-31',
+  bins: 2,
+  quantiles: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
+  points: [
+    { load: 1000, price: 500 },
+    { load: 2000, price: 500 },
+  ],
+  sampled: false,
+  allBins: FAKE_SUPPLY_BINS,
+  steps: [
+    { loadFrom: 500, loadTo: 1500, price: 500, count: 500 },
+    { loadFrom: 1500, loadTo: 2500, price: 500, count: 500 },
+  ],
+  stats: {
+    pairs: 1000,
+    days: 30,
+    loadMin: 500,
+    loadMax: 2500,
+    priceMin: 0,
+    priceMax: 1000,
+    spearman: 1,
+    violations: 0,
+    maxPavaMove: 0,
+    latestLoad: 1500,
+  },
+}
+// 供给栈漂移：负荷越高价格越低 → 逆序 + 负相关，页面必须报出来
+const FAKE_SUPPLY_DRIFT = {
+  ...FAKE_SUPPLY_CLEAN,
+  market: 'real',
+  allBins: FAKE_SUPPLY_BINS.map((b) => ({ ...b, q: uniformQ.slice().reverse() })),
+  stats: { ...FAKE_SUPPLY_CLEAN.stats, spearman: -0.2, violations: 7, maxPavaMove: 150 },
+}
+
 const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -601,6 +651,9 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/forecast/recorded')) return json(FAKE_RECORDED)
   if (u.includes('/api/forecast/backtest')) return json(FAKE_BACKTEST_RESULT)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
+  if (u.includes('/api/gd-metric/supply-curve')) {
+    return json(u.includes('market=real') ? FAKE_SUPPLY_DRIFT : FAKE_SUPPLY_CLEAN)
+  }
   if (u.includes('/api/forecast/load')) return json({ forecast: FAKE_LOAD })
   if (u.includes('/api/forecast/price')) return json({ forecast: FAKE_PRICE })
   if (u.includes('/api/spot-report/trend')) {
@@ -1339,6 +1392,64 @@ await clickTo('场景', '预测复盘')
   // 口径说明必须在页面上，公式不藏在代码里
   check(bodyHas('Spearman'), '口径说明写明用 Spearman')
   check(bodyHas('当日出清均价'), '口径说明写明分母')
+}
+
+console.log('\n== 策略反演页 ==')
+await clickTo('场景', '策略反演')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('统计反演'))
+  check(bodyHas('估计值') && bodyHas('不是任何一台机组的真实报价'), '明示是统计反演、不是机组真实报价')
+
+  await waitFor(() => bodyHas('观测点数') || bodyHas('1000 个观测点'))
+  check(bodyHas('1000 个观测点 · 30 天'), '概览显示观测点数与覆盖天数')
+  check(bodyHas('1.000'), '负荷-价格秩相关原样显示')
+
+  // 当前负荷默认取 latestLoad=1500；两箱分位相同 ⇒ 插值结果就是 uniformQ
+  //   500 MW 处中位价 = 500；负荷历史分位 = 500/1000 = 50%
+  await waitFor(() => bodyHas('当前负荷历史分位'))
+  check(bodyHas('50.0%'), '当前负荷历史分位 = 50%（500+500 观测点中前一半在下方）', bodyHas('50.0%'))
+  check(bodyHas('500.0'), '当前负荷处的中位价 = 500.0 元/MWh')
+
+  // 未填边际成本时必须提示「最优点会落在最低报价」
+  check(bodyHas('未填边际成本') && bodyHas('最优点会落在最低报价'), '未填成本时给出退化提示')
+
+  // 填成本 500 ⇒ 最优报价 = 500（成本下方报都是同样的 125，取扫描下界）、期望收益 = 125
+  const costInput = [...doc.querySelectorAll('.toolbar input[type=number]')].pop()
+  costInput.value = '500'
+  costInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await tick()
+  check(!bodyHas('未填边际成本'), '填了成本后退化提示消失')
+  await waitFor(() => bodyHas('最优报价'))
+  check(bodyHas('125.0'), '期望收益代理 = 125.0 元/MWh（∫₅₀₀¹⁰⁰⁰(p−500)/1000 dp）')
+
+  // 策略族：目标中标概率 80/50/20% → 报价 200/500/800
+  //   中标时均价 = E[p|p≥bid]；期望收益 = E[(p−500)·1{p≥bid}]（成本 500）
+  //   稳健的口径 125 最高，与上面 KPI 的「最优报价 500」自洽 —— 两处用同一套公式
+  const table = [...doc.querySelectorAll('.table')].pop()
+  const cells = [...table.querySelectorAll('div')].map((d) => d.textContent.replace(/\s+/g, '').trim())
+  const rowOf = (label) => {
+    const i = cells.indexOf(label)
+    return cells.slice(i, i + 6)
+  }
+  check(JSON.stringify(rowOf('激进')) === JSON.stringify(['激进', '80%', '200.0', '80.0%', '600.0', '80.0']),
+    '激进策略：80% 中标率 → 报价 200', JSON.stringify(rowOf('激进')))
+  check(JSON.stringify(rowOf('稳健')) === JSON.stringify(['稳健', '50%', '500.0', '50.0%', '750.0', '125.0']),
+    '稳健策略：50% 中标率 → 报价 500，中标时均价 750', JSON.stringify(rowOf('稳健')))
+  check(JSON.stringify(rowOf('保守')) === JSON.stringify(['保守', '20%', '800.0', '20.0%', '900.0', '80.0']),
+    '保守策略：20% 中标率 → 报价 800', JSON.stringify(rowOf('保守')))
+
+  // 局限必须写在页面上，不假装有能力
+  check(bodyHas('净负荷') && bodyHas('没有网络与阻塞') && bodyHas('没有机组成本'), '局限与缺口清单常驻')
+
+  // 切实时：供给栈漂移（逆序 7、ρ=-0.2）→ 页面要报警，而不是继续装作曲线可用
+  const mkt = doc.querySelector('.toolbar select')
+  mkt.value = 'real'
+  mkt.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => requests.some((r) => r.url.includes('supply-curve') && r.url.includes('market=real')))
+  check(requests.some((r) => r.url.includes('market=real')), '切市场带上 market=real')
+  await waitFor(() => bodyHas('曲线可信度低'))
+  check(bodyHas('7 处逆序'), '逆序数报给用户，并说明原因（供给栈漂移）')
 }
 
 console.log('\n== 长周期电价预测页 ==')

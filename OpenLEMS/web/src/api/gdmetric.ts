@@ -57,3 +57,93 @@ export function fetchGdMetric(params: {
     params.signal,
   )
 }
+
+/** 区间 96 点序列（复盘的第二条腿：实际值） */
+export interface MetricSeriesPoint {
+  date: string
+  time: string
+  value: number
+}
+
+export interface MetricSeries {
+  kind: string
+  from: string
+  to: string
+  points: MetricSeriesPoint[]
+  /** 区间内实际有数据的日期（升序），供前端灰显无数据日期 */
+  days: string[]
+}
+
+export function fetchMetricSeries(
+  params: { from: string; to: string; kind?: string },
+  signal?: AbortSignal,
+): Promise<MetricSeries> {
+  return api.get<MetricSeries>('/api/gd-metric/series', params, signal)
+}
+
+/** 反演：一个观测点（系统负荷 + 该时刻出清价） */
+export interface SupplyPair {
+  load: number
+  price: number
+}
+
+/** 反演：一个负荷分箱上的价格分位分布 */
+export interface SupplyBin {
+  loadFrom: number
+  loadTo: number
+  loadMid: number
+  count: number
+  /** 价格分位；下标 i 对应概率 i/(len-1)。默认 11 个（0,0.1,…,1） */
+  q: number[]
+}
+
+/** 反演报价曲线的报一段（对应参考界面的「报价段一…十」） */
+export interface SupplyStep {
+  loadFrom: number
+  loadTo: number
+  price: number
+  count: number
+}
+
+export interface SupplyStats {
+  pairs: number
+  days: number
+  loadMin: number
+  loadMax: number
+  priceMin: number
+  priceMax: number
+  /** 负荷与价格的秩相关；越接近 1 说明价格越由负荷单调决定 */
+  spearman: number
+  /** P50 曲线的逆序数：>0 说明供给栈在区间内整体漂移过，曲线只能当参考 */
+  violations: number
+  /** 单调化对报价段价格的最大改动 元/MWh */
+  maxPavaMove: number
+  latestLoad: number
+}
+
+/**
+ * 反演出的市场聚合报价（供给）曲线。
+ *
+ * 原理：负荷基本刚需，出清价是需求与供给栈的交点，所以每个 (负荷, 出清价)
+ * 观测点本身就是供给曲线上的一个点。按负荷分箱取价格分位即得。
+ */
+export interface SupplyCurve {
+  market: string
+  from: string
+  to: string
+  bins: number
+  quantiles: number[]
+  /** 观测散点（超过上限按等距抽样） */
+  points: SupplyPair[]
+  sampled: boolean
+  allBins: SupplyBin[]
+  steps: SupplyStep[]
+  stats: SupplyStats
+}
+
+export function fetchSupplyCurve(
+  params: { from: string; to: string; market?: string; bins?: number; steps?: number },
+  signal?: AbortSignal,
+): Promise<SupplyCurve> {
+  return api.get<SupplyCurve>('/api/gd-metric/supply-curve', params, signal)
+}
