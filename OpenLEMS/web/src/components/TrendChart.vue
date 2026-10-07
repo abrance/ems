@@ -80,7 +80,7 @@ useECharts(el, (): EChartsOption => {
       data: buckets.value.map((b) => s.byBucket.get(b)?.avg ?? null),
     })),
   }
-})
+}, [() => props.points])
 </script>
 
 <template>

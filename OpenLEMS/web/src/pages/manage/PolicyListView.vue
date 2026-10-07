@@ -329,7 +329,7 @@ useECharts(previewEl, (): EChartsOption => {
       },
     ],
   }
-})
+}, [() => form.points])
 
 onMounted(load)
 </script>

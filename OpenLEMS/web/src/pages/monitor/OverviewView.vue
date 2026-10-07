@@ -85,11 +85,15 @@ const NODES: { key: string; label: string; types: string[] }[] = [
   { key: 'load', label: '负载', types: ['load'] },
 ]
 
-const POWER_RE = /power|功率/
+// 点位键随驱动而异（ess_demo 是小写 power，某些驱动是 Power），所以匹配大小写不敏感；
+// 再优先取**精确的** power/setPower 之外的那个 —— 否则可能选中 MaxChargePower 这类量。
+const POWER_RE = /power|功率/i
 
 function powerOf(id: string): { key: string; value: number; unit: string } | null {
   const values = telemetry.value[id]?.telemetryValues ?? {}
-  const entry = Object.entries(values).find(([k, v]) => POWER_RE.test(k) && typeof v === 'number')
+  const numeric = Object.entries(values).filter(([, v]) => typeof v === 'number')
+  const exact = numeric.find(([k]) => k.toLowerCase() === 'power' || k === '功率')
+  const entry = exact ?? numeric.find(([k]) => POWER_RE.test(k))
   if (!entry) return null
   return { key: entry[0], value: Number(entry[1]), unit: 'kW' }
 }

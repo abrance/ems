@@ -856,11 +856,54 @@ globalThis.fetch = async (url, init) => {
             dayAhead: { avg: 380, max: 760, min: 60, last: 380, count: 96, unit: '元/MWh' },
             realtime: { avg: 365, max: 780, min: 40, last: 365, count: 96, unit: '元/MWh' },
           },
-        days: [],
-        curve: { date: '2026-09-21', load: [], dayAhead: [], realtime: [] },
+        // days 与 curve 都要给**非空**数据：之前这里是空数组，
+        // 于是「图表真的画出了数据」这件事从来没被验证过 —— 信息披露页两个图
+        // 因为没传 deps 只画了首帧空数据，冒烟照样全绿。
+        days: [
+          { date: '2026-09-20', load: { avg: 2950, max: 3400, min: 2100, last: 2950, count: 96, unit: 'MW' }, dayAhead: { avg: 370, max: 750, min: 50, last: 370, count: 96, unit: '元/MWh' }, realtime: { avg: 355, max: 770, min: 30, last: 355, count: 96, unit: '元/MWh' } },
+          { date: '2026-09-21', load: { avg: 3000, max: 3460, min: 2200, last: 3000, count: 96, unit: 'MW' }, dayAhead: { avg: 380, max: 760, min: 60, last: 380, count: 96, unit: '元/MWh' }, realtime: { avg: 365, max: 780, min: 40, last: 365, count: 96, unit: '元/MWh' } },
+        ],
+        curve: {
+          date: '2026-09-21',
+          load: [
+            { time: '00:15', value: 2600 },
+            { time: '00:30', value: 2650 },
+            { time: '00:45', value: 2700 },
+          ],
+          dayAhead: [
+            { time: '00:15', value: 320 },
+            { time: '00:30', value: 335 },
+            { time: '00:45', value: 350 },
+          ],
+          realtime: [
+            { time: '00:15', value: 310 },
+            { time: '00:30', value: 328 },
+            { time: '00:45', value: 344 },
+          ],
+        },
       }
     : {}
   return json(body)
+}
+
+/**
+ * 断言本页所有图表都拿到了数据。
+ *
+ * 为什么需要：图形是 canvas，DOM 里看不出画没画 —— 曾经信息披露页因为图表在
+ * 数据到达之前挂载、只画了首帧，接口有数据、KPI 有数、图全白，而冒烟照样全绿。
+ * `data-chart-points` 是 useECharts 每次重绘时写在容器上的数据点数，用它来断言。
+ */
+async function assertChartsHaveData(label, expect = null) {
+  // 每次都在等待里**重新查询**：图是数据到了才渲染出来的，
+  // 提前抓一个数组等于等一个永远为空的快照。
+  const read = () => [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
+  await waitFor(() => {
+    const pts = read()
+    return pts.length > 0 && pts.every((n) => n > 0)
+  }, 2000)
+  const points = read()
+  if (expect !== null) check(points.length === expect, `${label}：图表 ${expect} 个（实际 ${points.length}）`)
+  check(points.length > 0 && points.every((n) => n > 0), `${label}：每个图都画到了数据点`, JSON.stringify(points))
 }
 
 function json(data, status = 200, envelope = {}) {
@@ -902,6 +945,48 @@ const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
+console.log('\n== 场景 · 信息披露（图表确实画出了数据）==')
+await clickTo('场景', '信息披露')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('负荷与电价曲线'))
+
+  // KPI 是模板绑定，之前「图空白」时它们照样有值 —— 所以不能只断言 KPI
+  check(bodyHas('3000.0'), 'KPI 显示接口返回的负荷均值')
+  check(bodyHas('380.0'), 'KPI 显示日前均价')
+
+  // 关键：图表容器上记录着「本次画了多少个数据点」。
+  // 图形是 canvas，DOM 里看不出画没画；这个属性让「接口有数据但图空白」可断言。
+  const charts = [...doc.querySelectorAll('.chart')]
+  check(charts.length === 2, `页面有两个图（曲线 + 趋势），实际 ${charts.length}`)
+  await waitFor(() => charts.every((c) => Number(c.dataset.chartPoints ?? 0) > 0), 1500)
+  const points = charts.map((c) => Number(c.dataset.chartPoints ?? 0))
+  check(
+    points.every((n) => n > 0),
+    '两个图都画到了数据点（不是首帧空数据）',
+    `data-chart-points = ${JSON.stringify(points)}`,
+  )
+  // 曲线图三条序列 × 各 3 个点 = 9；趋势图 2 条 × 2 天 = 4
+  check(points[0] === 9, '曲线图的点数 = 3 条序列 × 3 个点', String(points[0]))
+  check(points[1] === 4, '趋势图的点数 = 2 条序列 × 2 天', String(points[1]))
+
+  // 换运行日要重新取数：日期在页头（PageHeader），绑定的是全局 runDate，
+  // 页面 watch 它 → 重新拉数据。
+  const before = requests.filter((r) => r.url.includes('/api/gd-metric')).length
+  const dateInput = doc.querySelector('input[type=date]')
+  check(!!dateInput, '页头有运行日选择')
+  dateInput.value = '2026-09-20'
+  dateInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/gd-metric')).length > before, 1500)
+  check(requests.filter((r) => r.url.includes('/api/gd-metric')).length > before, '换运行日会重新取数')
+  await waitFor(() => !!requests.filter((r) => r.url.includes('/api/gd-metric')).pop()?.url.includes('date=2026-09-20'), 1200)
+  check(
+    requests.filter((r) => r.url.includes('/api/gd-metric')).pop()?.url.includes('date=2026-09-20') === true,
+    '请求带上了新的运行日',
+    requests.filter((r) => r.url.includes('/api/gd-metric')).pop()?.url,
+  )
+}
+
 console.log('\n== 运行监控 · 能源总览 ==')
 await clickTo('运行监控', '能源总览')
 {
@@ -909,6 +994,7 @@ await clickTo('运行监控', '能源总览')
   await waitFor(() => bodyHas('面板'))
   check(bodyHas('能源拓扑') && bodyHas('实时状态'), '默认勾选的面板已渲染')
   check(bodyHas('需量节省') && bodyHas('负荷预测'), '未勾选的面板出现在清单里')
+  await assertChartsHaveData('能源总览')
   check(!bodyHas('峰谷套利'), '未勾选的面板不渲染内容（省掉请求）')
 
   // 拓扑四个节点都在；储能节点的功率来自设备遥测
@@ -965,6 +1051,7 @@ await clickTo('运行监控', '储能柜')
   check(bodyHas('控制动作在'), '说明控制动作不在这里做（不在同页留第二个控制入口）')
   check(bodyHas('去手动控制'), '给出跳到手动控制的入口')
   check(bodyHas('关键量趋势') && bodyHas('柜内告警'), '趋势与告警面板都在')
+  await assertChartsHaveData('储能柜')
 }
 
 console.log('\n== 运行监控 · 告警中心 ==')

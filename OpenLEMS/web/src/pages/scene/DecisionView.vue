@@ -153,7 +153,7 @@ useECharts(loadEl, (): EChartsOption => {
       { name: '点预测', type: 'line', smooth: true, showSymbol: false, lineStyle: { type: 'dashed' }, itemStyle: { color: CHART_COLORS.brand }, data: [...pad, ...(f?.forecastPoint ?? [])] },
     ],
   }
-})
+}, [load])
 
 /* ---------- 电价预测：日均 + 分位 ---------- */
 const priceEl = ref<HTMLElement>()
@@ -182,7 +182,7 @@ useECharts(priceEl, (): EChartsOption => {
       { name: '预测中位', type: 'line', showSymbol: true, lineStyle: { type: 'dashed' }, itemStyle: { color: CHART_COLORS.brand }, data: [...fcPadHead, ...(f?.forecast ?? []).map((p) => p.point)] },
     ],
   }
-})
+}, [price])
 
 onMounted(() => {
   applyPreset()
