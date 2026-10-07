@@ -1366,6 +1366,72 @@ for (const [from, to] of [['/programs', '手动控制'], ['/effect', '决策支�
   )
 }
 
+console.log('\n== 报表导出页 ==')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+
+  // CSV 转义直接测函数：经由 DOM 间接断言看不出引号/换行是怎么处理的。
+  // 这一层错了 Excel 不会报错，只会安静地给一张错位的表。
+  const { buildCsv, csvField } = await vite.ssrLoadModule(resolve(root, 'src/utils/csv.ts'))
+  const quoted = (v) => `"${v}"`
+  check(csvField('plain') === 'plain', '普通字段不加引号')
+  check(csvField(1) === '1' && csvField(null) === '' && csvField(undefined) === '', '数字/空值处理')
+  check(csvField('a,b') === quoted('a,b'), '含逗号 → 加引号', csvField('a,b'))
+  check(csvField('say "hi"') === quoted('say ""hi""'), '引号翻倍', csvField('say "hi"'))
+  check(csvField('l1\nl2') === quoted('l1\nl2'), '含换行 → 加引号')
+  check(csvField(' pad ') === quoted(' pad '), '前后空格也加引号（否则会被下游 trim 掉）')
+  // 逐行写清楚：含换行的字段也要加引号，末行不带尾随 CRLF
+  const table = buildCsv(['a', 'b'], [['x,y', 'q"q'], ['l\nm', '']])
+  const wantTable = ['a,b', '"x,y","q""q"', '"l\nm",'].join('\r\n')
+  check(table === wantTable, '整表：CRLF 行尾 + 转义', JSON.stringify(table))
+  check(buildCsv(['a', 'b'], []) === 'a,b', '无数据时只有表头')
+  // Excel 打开 UTF-8 CSV 没有 BOM 就是中文乱码，这条不能丢
+  const { CSV_BOM } = await vite.ssrLoadModule(resolve(root, 'src/utils/csv.ts'))
+  check(CSV_BOM === '\ufeff', '下载内容带 UTF-8 BOM（Excel 不乱码）', JSON.stringify(CSV_BOM))
+
+  await clickTo('管理', '报表导出')
+  await waitFor(() => bodyHas('数据集'))
+  const dsEls = [...doc.querySelectorAll('.ds')]
+  check(dsEls.length === 7, `数据集 7 个（实际 ${dsEls.length}）`, dsEls.map((e) => e.querySelector('strong')?.textContent).join('/'))
+  check(bodyHas('电网日指标') && bodyHas('效果评估·实测汇总') && bodyHas('策略反演·反演报价段'), '数据集覆盖电网指标/效果/反演')
+  check(bodyHas('报表模板与生成任务') && bodyHas('没有任务、没有历史文件'), '写清与设计稿的差距（无模板/任务/历史文件）')
+  check(bodyHas('受浏览器内存限制'), '写清前端生成的代价（区间上限）')
+
+  // 默认数据集就是电网日指标，直接生成预览
+  const genBtn = [...doc.querySelectorAll('.toolbar button')].find((b) => b.textContent.includes('生成预览'))
+  genBtn.click()
+  await waitFor(() => !!doc.querySelector('.table tbody tr'), 1200)
+  const rows = [...doc.querySelectorAll('.table tbody tr')]
+  check(rows.length === 2, `预览 2 行（实际 ${rows.length}）`)
+  const firstRow = [...rows[0].querySelectorAll('td')].map((td) => td.textContent.trim()).join('|')
+  check(firstRow === '2026-09-20|00:00|日前出清价 元/MWh|100', '第一行内容按列定义', firstRow)
+  check(bodyHas('2 行 × 4 列'), '显示行数 × 列数')
+  const pre = doc.querySelector('.raw pre')?.textContent ?? ''
+  check(pre.includes('日期,时刻,类别,数值'), 'CSV 原文预览含表头', pre.split('\n')[0])
+  check(pre.includes('2026-09-20,00:00,日前出清价 元/MWh,100'), 'CSV 原文预览含数据行')
+  check(bodyHas('.csv'), '显示下载文件名')
+
+  // 区间超上限 → 拦下且不发请求（后端 MaxSeriesDays=400 会直接 400，先在本地说清）
+  const seriesBefore = requests.filter((r) => r.url.includes('/api/gd-metric/series')).length
+  const dates = [...doc.querySelectorAll('.toolbar input[type=date]')]
+  dates[0].value = '2020-01-01'
+  dates[0].dispatchEvent(new window.Event('input', { bubbles: true }))
+  genBtn.click()
+  await waitFor(() => bodyHas('超过上限 400 天'), 800)
+  check(bodyHas('超过上限 400 天'), '区间超上限时给出明确原因')
+  check(
+    requests.filter((r) => r.url.includes('/api/gd-metric/series')).length === seriesBefore,
+    '超上限时根本不发请求',
+  )
+
+  // 切数据集：参数与预览都要重置
+  const effect = dsEls.find((e) => (e.querySelector('strong')?.textContent ?? '').includes('实测汇总'))
+  effect.click()
+  await tick()
+  check(!doc.querySelector('.table tbody tr'), '切数据集后清掉旧预览')
+  check(bodyHas('效果评估·实测汇总') && bodyHas('/api/effect/summary'), '面板脚注跟着切到新数据集的来源接口')
+}
+
 console.log('\n== 用户与权限页 ==')
 await clickTo('管理', '用户与权限')
 {
@@ -1558,6 +1624,9 @@ await clickTo('场景', '预测复盘')
   await waitFor(() => requests.some((r) => r.url.includes('/api/gd-metric/series')))
   const seriesCall = requests.filter((r) => r.url.includes('/api/gd-metric/series')).pop()
   check(seriesCall.url.includes('kind=dayAhead'), '实际值按市场选 kind', seriesCall.url)
+  // 等**文本**而不是等请求：sourceNote 是在那次请求 resolve 之后才赋值的，
+  // 只等「请求已发出」会在状态更新前就断言（之前通过属于运气好）。
+  await waitFor(() => bodyHas('留痕：'), 800)
   check(bodyHas('留痕：'), '留痕模式显式声明「当时发出的预测」')
 
   // 逐点离散度切标幺/数值

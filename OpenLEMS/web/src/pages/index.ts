@@ -24,6 +24,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   automation: () => import('./manage/AutomationView.vue'),
   audit: () => import('./manage/AuditView.vue'),
   users: () => import('./manage/UsersView.vue'),
+  exports: () => import('./manage/ExportsView.vue'),
   price: () => import('./manage/PriceView.vue'),
   collect: () => import('./manage/CollectView.vue'),
   ess: () => import('./config/EssParamsView.vue'),
