@@ -52,6 +52,10 @@ func InitSystem(ctx context.Context, parser *gcmd.Parser) error {
 		return err
 	}
 
+	// 应用全局日志级别（在数据库之后：级别存在设置里）。
+	// 配置里的 logger.level 只是初值，运行期以设置里的为准。
+	applog.ApplyGlobalLogLevel(ctx, g.Log())
+
 	// 初始化存储管理器
 	storageManager := s_storage.NewStorageManagerWithConfig(ctx, &c_base.SStorageConfig{
 		Enable: true,

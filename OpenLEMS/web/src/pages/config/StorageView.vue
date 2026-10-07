@@ -12,7 +12,10 @@ import { fetchStorageStats, humanBytes, updateRetention, type StorageStats } fro
  *   2. 保留策略（/system/storage-time）—— 后端把它挂在 system 下，
  *      所以不再单开「数据保留」页，避免同一功能两个入口。
  *
- * 生效语义：保留天数改动由存储服务在下次清理时采纳；这里只提交，不假装立刻删数据。
+ * ⚠️ 生效语义（现状，不是设计意图）：这三个保留天数**目前没有生效**。
+ *   后端把它们写进设置，但**没有任何代码读它们**；存储层打开时也没配保留
+ *   （`promtsdb.Open(path, nil, nil, nil)`，注释写着「由调用方做外部清理」—— 而没人做）。
+ *   也就是说页面能改、接口会成功、数据都不会被删。加清理任务之前不要把这里当已实现。
  */
 const stats = ref<StorageStats | null>(null)
 const loading = ref(false)
@@ -119,8 +122,12 @@ onMounted(load)
       title="保留策略"
       :span="12"
       :loading="loading"
-      foot="生效语义：下次清理任务生效（不是立刻删数据）"
+      foot="⚠️ 当前不生效：设置会被保存，但后端没有任何代码读它们去清理数据（见文件头说明）"
     >
+      <p class="not-effective">
+        这三个值会保存到系统设置，但<strong>后端目前不读它们</strong>：存储层打开时没有配置保留策略，
+        也没有清理任务。所以改这里不会删除任何数据 —— 先别把它当已实现的能力。
+      </p>
       <div class="fields">
         <label>设备数据保留（天）<input v-model.number="form.device" type="number" min="1" /></label>
         <label>系统数据保留（天）<input v-model.number="form.system" type="number" min="1" /></label>
@@ -179,6 +186,16 @@ onMounted(load)
   cursor: pointer;
 }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4); }
+.not-effective {
+  margin: 0 0 var(--s3);
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--r-sm);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-size: var(--fs-12);
+  line-height: 1.8;
+}
 .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }
 .fields label { display: flex; flex-direction: column; gap: var(--s2); font-size: var(--fs-12); color: var(--text-3); }
 .fields input {
