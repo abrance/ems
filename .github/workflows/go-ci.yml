@@ -36,6 +36,19 @@ jobs:
         working-directory: OpenLEMS/@cpp/hexlib
         run: make build
 
+      # //go:embed web.zip 要求编译时该文件存在，而 zip 已不再入库（构建镜像时才生成）。
+      # 所以这里必须先构建前端，否则 go vet/test/build 直接编译不过。
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: OpenLEMS/web/package.json
+          cache: npm
+          cache-dependency-path: OpenLEMS/web/package-lock.json
+
+      - name: Build frontend (产出 application/manifest/web.zip)
+        working-directory: OpenLEMS/web
+        run: npm ci && npm run pack
+
       - name: Download dependencies
         run: go mod download
 

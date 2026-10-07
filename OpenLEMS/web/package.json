@@ -1,15 +1,19 @@
 {
   "name": "lems-web",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
     "verify": "npm run typecheck && npm run build && npm run smoke",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pack": "node scripts/pack.mjs"
   },
   "dependencies": {
     "@arco-design/web-vue": "^2.58.0",

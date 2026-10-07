@@ -132,14 +132,34 @@ src/
 
 默认首页 = `NAV[0].pages[0]`，现在是「运行监控 · 能源总览」（可在「配置 · 界面与语言」里改）。
 
-## 与线上产物的关系
+## 与线上产物的关系（构建流程）
 
-线上是 `application/manifest/web.zip`（打进 Go 可执行文件，静态服务在根路径）。
-本仓库 `npm run build` 的 `dist/` 就是同构产物：
+前端**源码**是 `src/`（Vue3 + Vite + TS）。交付走的是 `application/manifest/web.zip` ——
+Go 用 `//go:embed` 把它编进可执行文件，静态服务挂在根路径
+（`application/manifest/web_embed.go` + `internal/cmd/web.go`；Go 侧没有「从目录服务静态文件」的路径）。
 
 ```bash
-cd dist && zip -r ../../application/manifest/web.zip . -x '.*'
+npm run pack        # = vite build → 打包到 ../application/manifest/web.zip
+# 也可以指定输出：npm run pack -- --out /out/web.zip（Dockerfile 就是这么用的）
 ```
+
+**zip 不再入库**（见 `.gitignore`）。它由构建流程就地生成：
+
+- **构建镜像**（`script/Dockerfile.dev`）：先跑一个 `node:22-alpine` 阶段 `npm ci && npm run pack`，
+  再由 Go 阶段消费它 → 镜像里的前端**永远**是本次源码构建出来的
+- **Go CI**：`go vet/test/build` 之前也会先构建前端 —— 因为 `//go:embed`
+  **要求编译时 `web.zip` 存在**，缺了直接编译不过：
+
+  ```
+  manifest/web_embed.go:12:12: pattern web.zip: no matching files found
+  ```
+
+所以本地改完后端要编译时，先跑一次 `npm run pack`（或者干脆 `npm run verify`，它顺带检查构建产物完整性）。
+
+这么改的原因：产物提交进仓库时，**「改了源码忘了打包」= 部署旧界面**，
+而且 CI 全绿、只有用户看得见 —— 最难查的一类问题。现在产物只由构建产生，这个类别从根上没有了。
+冒烟也不再检查 zip，而是检查**刚构建出来的 `dist`**：页面 chunk 数必须等于导航页数 + 非导航页数，
+少了就说明有页面没登记到 `pages/index.ts`。
 
 ## 登录
 

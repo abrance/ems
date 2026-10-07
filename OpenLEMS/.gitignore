@@ -53,3 +53,6 @@ build/
 
 @cpp/build
 /application/manifest/web/
+
+# 前端构建产物：由 npm run pack 生成（镜像构建时也会生成），不再入库
+application/manifest/web.zip
