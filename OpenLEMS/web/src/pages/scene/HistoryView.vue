@@ -3,7 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import PanelBox from '@/components/PanelBox.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import TrendChart from '@/components/TrendChart.vue'
-import { DATASET_LABELS, fetchTrend, type SpotTrend, type SpotTrendPoint } from '@/api/spotreport'
+import { DATASET_LABELS, fetchTrend, listReports, type SpotTrend, type SpotTrendPoint } from '@/api/spotreport'
+import { anchorEndDate } from '@/utils/latestRange'
 
 /**
  * 场景 · 历史信息 —— overlay 趋势卡（spot-overlay.js）能力的迁入点。
@@ -49,8 +50,12 @@ function fmt(d: Date): string {
   return loc.toISOString().slice(0, 10)
 }
 
+/** 最新日报日（现货指标的日期）；拿不到就用今天 */
+const latestReportDate = ref<string | null>(null)
+
 function applyPreset() {
-  const today = new Date()
+  // 与预测复盘同理：日报数据可能滞后，默认区间落到「最新日报日」才不会一开就是空的
+  const today = anchorEndDate(latestReportDate.value)
   if (range.preset === 'week') {
     // ISO 周：周一 → 今天，与后端「按周」分桶口径一致，不会错位
     const dow = (today.getDay() + 6) % 7
@@ -155,9 +160,17 @@ function onPreset(p: 'week' | 'month' | 'custom') {
   if (p !== 'custom') void load()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 先问一次最新日报日，再定默认区间：日报常滞后，今天往前一周可能整段是空的
+  try {
+    const reports = await listReports()
+    const dates = reports.map((r) => String(r.date ?? '').slice(0, 10)).filter(Boolean).sort()
+    latestReportDate.value = dates.length ? dates[dates.length - 1] : null
+  } catch {
+    latestReportDate.value = null
+  }
   applyPreset()
-  void load()
+  await load()
 })
 </script>
 

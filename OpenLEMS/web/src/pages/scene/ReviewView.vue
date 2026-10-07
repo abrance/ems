@@ -9,7 +9,7 @@ import {
   type BacktestPoint,
   type RecordedForecastPoint,
 } from '@/api/forecast'
-import { fetchMetricSeries } from '@/api/gdmetric'
+import { fetchGdMetric, fetchMetricSeries } from '@/api/gdmetric'
 import { fetchCurrentPrice } from '@/api/price'
 import {
   buildSegmentLookup,
@@ -21,6 +21,7 @@ import {
   type Segment,
   type SegmentRange,
 } from '@/metrics/forecast'
+import { anchorEndDate, rangeEndingAt } from '@/utils/latestRange'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
 /**
@@ -58,16 +59,17 @@ const recordedMeta = ref<{ generatedDates: string[] } | null>(null)
 const lookup = ref<(m: number) => Segment | null>(() => null)
 const segmentConfigured = ref(false)
 
-function fmt(d: Date): string {
-  const loc = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-  return loc.toISOString().slice(0, 10)
-}
+/** 数据最新日（gd_metric 的 latestDate）；拿不到就用今天 */
+const latestDataDate = ref<string | null>(null)
 
 function applyPreset() {
-  const end = new Date()
+  // 右端锚到「数据最新日」而不是今天：数据常滞后一个多月，
+  // 今天往前 7 天的区间会整段落在数据之外 → 回测直接报「没有完整 96 点数据」
+  const end = anchorEndDate(latestDataDate.value)
   const days = PRESETS.find((p) => p.v === preset.value)?.days ?? 6
-  from.value = fmt(new Date(end.getTime() - days * 86400_000))
-  to.value = fmt(end)
+  const r = rangeEndingAt(end, days)
+  from.value = r.from
+  to.value = r.to
 }
 
 async function loadSegments() {
@@ -264,6 +266,12 @@ useECharts(
 )
 
 onMounted(async () => {
+  // 先问一次数据最新到哪天，再定默认区间（拿不到就按今天，不影响可用性）
+  try {
+    latestDataDate.value = (await fetchGdMetric({})).latestDate ?? null
+  } catch {
+    latestDataDate.value = null
+  }
   applyPreset()
   await loadSegments()
   await load()

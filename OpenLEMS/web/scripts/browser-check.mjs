@@ -141,17 +141,18 @@ const FIXTURES = {
     forecastQuantiles: { '0.5': curve96('load').map((p) => p.value) },
     timeMs: 900,
   },
+  // 刻意只给一台**顶层储能柜（没有子设备）**：这是现场常见装法，也正是曾经漏掉的那种 ——
+  // 储能柜页的趋势循环当时只遍历子设备，于是顶层柜子一条曲线都画不出来，
+  // 页面还把「没遍历到」说成「没有开启存储的数值点位」。夹具给一台带子设备的柜子会把这个问题掩盖掉。
   '/api/device/detailed-list': {
     total: 2,
     devices: [
-      { id: 'dev_site', pid: '0', name: '储能柜示范站', deviceType: 'sess', enabled: true, driver: 'ess_demo_v1.0.0', protocolId: 'p1', params: {}, storageEnable: true, storageIntervalSec: 60, sort: 0, isVirtualDevice: false },
-      { id: 'dev_ess_1', pid: 'dev_site', name: '储能柜 1', deviceType: 'ess', enabled: true, driver: 'ess_demo_v1.0.0', protocolId: 'p1', params: {}, storageEnable: true, storageIntervalSec: 60, sort: 1, isVirtualDevice: false },
-      { id: 'dev_pcs_1', pid: 'dev_ess_1', name: 'PCS 1', deviceType: 'pcs', enabled: true, driver: 'pcs_demo', protocolId: 'p1', params: {}, storageEnable: true, storageIntervalSec: 60, sort: 2, isVirtualDevice: false },
+      { id: 'dev_ess_1', pid: '0', name: '储能柜 1', deviceType: 'ess', enabled: true, driver: 'ess_demo_v1.0.0', protocolId: 'p1', params: {}, storageEnable: true, storageIntervalSec: 60, sort: 0, isVirtualDevice: false },
+      { id: 'dev_pcs_9', pid: 'dev_other', name: 'PCS 9', deviceType: 'pcs', enabled: true, driver: 'pcs_demo', protocolId: 'p1', params: {}, storageEnable: true, storageIntervalSec: 60, sort: 1, isVirtualDevice: false },
     ],
   },
   '/api/device/telemetry': {
     telemetry: {
-      dev_site: { lastUpdateTime: '2026-08-31T10:00:00+08:00', telemetryValues: { SOC: 62, Power: -40, Status: 4 } },
       dev_ess_1: { lastUpdateTime: '2026-08-31T10:00:00+08:00', telemetryValues: { SOC: 62, Power: -40, Status: 4, Temperature: 28.4 } },
       dev_pcs_1: { lastUpdateTime: '2026-08-31T10:00:00+08:00', telemetryValues: { Power: -40, Efficiency: 97.2 } },
     },

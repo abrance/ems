@@ -945,6 +945,22 @@ const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
+console.log('\n== 默认区间的锚点（数据滞后时不能落在空区间）==')
+{
+  // 部署上数据只到 08-31 而今天是 10-07：「今天往前 7 天」整段落在数据之外，
+  // 预测复盘因此报「没有完整 96 点数据」。锚点必须收到数据最新日。
+  const { anchorEndDate, isoDate, rangeEndingAt } = await vite.ssrLoadModule(resolve(root, 'src/utils/latestRange.ts'))
+  const today = new Date('2026-10-07T15:00:00')
+  check(isoDate(anchorEndDate('2026-08-31', today)) === '2026-08-31', '数据滞后一个多月 → 锚到数据最新日', isoDate(anchorEndDate('2026-08-31', today)))
+  check(isoDate(anchorEndDate('2026-10-06', today)) === '2026-10-06', '数据滞后一天 → 锚到数据最新日')
+  check(isoDate(anchorEndDate('2026-10-07', today)) === '2026-10-07', '数据就是今天 → 用今天')
+  check(isoDate(anchorEndDate('2026-10-20', today)) === '2026-10-07', '数据比今天新（不该发生）→ 用今天')
+  check(isoDate(anchorEndDate('', today)) === '2026-10-07' && isoDate(anchorEndDate(null, today)) === '2026-10-07', '拿不到最新日 → 用今天')
+  check(isoDate(anchorEndDate('not-a-date', today)) === '2026-10-07', '格式不对 → 用今天')
+  const r = rangeEndingAt(new Date('2026-08-31T00:00:00'), 6)
+  check(r.from === '2026-08-25' && r.to === '2026-08-31', '区间右端随锚点回到数据内', JSON.stringify(r))
+}
+
 console.log('\n== 场景 · 信息披露（图表确实画出了数据）==')
 await clickTo('场景', '信息披露')
 {
