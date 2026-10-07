@@ -4,12 +4,12 @@ import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import {
-  fetchMetricSeries,
   fetchPriceBacktest,
   fetchRecordedForecast,
   type BacktestPoint,
   type RecordedForecastPoint,
 } from '@/api/forecast'
+import { fetchMetricSeries } from '@/api/gdmetric'
 import { fetchCurrentPrice } from '@/api/price'
 import {
   buildSegmentLookup,

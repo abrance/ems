@@ -33,6 +33,7 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		// 现货日报 / 电网日指标
 		"GET /api/gd-metric",
 		"GET /api/gd-metric/series",
+		"GET /api/gd-metric/supply-curve",
 		"GET /api/spot-report",
 		"GET /api/spot-report/data",
 		"GET /api/spot-report/trend",
