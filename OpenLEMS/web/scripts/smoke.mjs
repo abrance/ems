@@ -577,10 +577,46 @@ const RETENTION_AFTER = {
 }
 
 // 保留策略：清理前（本次启动后还没跑过）与清理后两种状态
+// 告警夹具：三个级别各一条，忽略规则一条 —— 用来验级别标签/忽略与恢复/清除按钮
+const FAKE_CURRENT_ALARMS = [
+  {
+    sourceDeviceId: 'bms_1', sourceDeviceName: '派能BMS', deviceId: 'ess_1', deviceName: '储能柜 1',
+    point: 'temperature', pointName: '电池温度', level: 'Error', detail: '单体温度 55.2°C 超过上限 50°C',
+    createdAt: '2026-10-08 02:10:00',
+  },
+  {
+    sourceDeviceId: 'pcs_1', sourceDeviceName: 'PCS 1', deviceId: 'pcs_1', deviceName: 'PCS 1',
+    point: 'power', pointName: '功率', level: 'Alarm', detail: '功率超过额定 110%',
+    createdAt: '2026-10-08 01:40:00',
+  },
+  {
+    sourceDeviceId: 'ammeter_1', sourceDeviceName: '关口电表', deviceId: 'ammeter_1', deviceName: '关口电表',
+    point: 'voltage', pointName: 'A相电压', level: 'Warn', detail: 'A相电压 210V 低于下限 220V',
+    createdAt: '2026-10-07 23:05:00',
+  },
+]
+const FAKE_HISTORY_ALARMS = [
+  {
+    id: 1, deviceId: 'ess_1', deviceName: '储能柜 1', sourceDeviceId: 'bms_1', sourceDeviceName: '派能BMS',
+    point: 'temperature', pointName: '电池温度', level: 'Alarm', detail: '温度 48°C 超过上限',
+    triggerAt: '2026-10-07 18:00:00', clearAt: '2026-10-07 18:30:00',
+  },
+]
+const FAKE_IGNORE_ALARMS = [
+  {
+    id: 7, deviceId: 'pcs_1', deviceName: 'PCS 1', sourceDeviceId: 'pcs_1', sourceDeviceName: 'PCS 1',
+    point: 'power', pointName: '功率', createdAt: '2026-10-07 20:00:00',
+  },
+]
+
 const requests = []
 let cleaned = false
 globalThis.fetch = async (url, init) => {
-  requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
+  requests.push({
+    url: String(url),
+    method: init?.method ?? 'GET',
+    body: init?.body ? JSON.parse(String(init.body)) : undefined,
+  })
   const u = String(url)
   if (u.includes('/api/setting/detail')) {
     const b = init?.body ? JSON.parse(String(init.body)) : {}
@@ -610,6 +646,18 @@ globalThis.fetch = async (url, init) => {
       ],
     })
   }
+  if (u.includes('/api/alarm/current')) {
+    return json({ total: FAKE_CURRENT_ALARMS.length, ignoreTotal: 1, historyTotal: 9, items: FAKE_CURRENT_ALARMS })
+  }
+  if (u.includes('/api/alarm/history')) {
+    if (init?.method === 'POST') return json({})
+    return json({ total: FAKE_HISTORY_ALARMS.length, items: FAKE_HISTORY_ALARMS })
+  }
+  if (u.includes('/api/alarm/ignore')) {
+    if (init?.method === 'POST' || init?.method === 'DELETE') return json({})
+    return json({ total: FAKE_IGNORE_ALARMS.length, items: FAKE_IGNORE_ALARMS })
+  }
+  if (u.includes('/api/alarm/clear')) return json({})
   if (u.includes('/api/auth/login')) {
     const b = init?.body ? JSON.parse(String(init.body)) : {}
     if (b.password !== 'admin') {
@@ -643,8 +691,23 @@ globalThis.fetch = async (url, init) => {
     return json({ services: dev === 'dido_1' ? FAKE_SERVICES_DIDO : FAKE_SERVICES })
   }
   if (u.includes('/api/device/telemetry')) {
+    // 遥测要覆盖 **detailed-list 里真实存在的设备**（site_1/pcs_1/meter_1），
+    // 否则页面会出现「设备列表里有、遥测里没有」的空壳 —— 这正是之前 ess_1 那种
+    // 自相矛盾的夹具。ess_1 保留：name-list 夹具里有它，手动控制页要用。
     return json({
       telemetry: {
+        site_1: {
+          lastUpdateTime: '2026-10-08T10:12:00+08:00',
+          telemetryValues: { SOC: 80, Power: -5, Status: 4, Temperature: 28.5 },
+        },
+        pcs_1: {
+          lastUpdateTime: '2026-10-08T10:12:00+08:00',
+          telemetryValues: { Power: 5.2, Efficiency: 97.1, Status: 4 },
+        },
+        meter_1: {
+          lastUpdateTime: '2026-10-08T10:12:00+08:00',
+          telemetryValues: { VoltageA: 231.4, VoltageB: 230.8, VoltageC: 232.1, Power: 12.3, PowerFactor: 0.98 },
+        },
         ess_1: {
           lastUpdateTime: '2026-10-06T18:58:00+08:00',
           telemetryValues: { SOC: 80, Power: 5, SOH: 98, MaxChargePower: 50, MaxDischargePower: 50 },
@@ -839,6 +902,102 @@ const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
+console.log('\n== 运行监控 · 能源总览 ==')
+await clickTo('运行监控', '能源总览')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('面板'))
+  check(bodyHas('能源拓扑') && bodyHas('实时状态'), '默认勾选的面板已渲染')
+  check(bodyHas('需量节省') && bodyHas('负荷预测'), '未勾选的面板出现在清单里')
+  check(!bodyHas('峰谷套利'), '未勾选的面板不渲染内容（省掉请求）')
+
+  // 拓扑四个节点都在；储能节点的功率来自设备遥测
+  const nodeLabels = [...doc.querySelectorAll('.node-label')].map((e) => e.textContent.trim())
+  check(JSON.stringify(nodeLabels) === JSON.stringify(['电网关口', '光伏', '储能', '负载']), '拓扑四节点', JSON.stringify(nodeLabels))
+  check(bodyHas('储能柜 1'), '节点下列出具体设备名')
+  check(bodyHas('净功率'), '给出净功率并写明口径')
+
+  // 勾上「需量节省」→ 立刻取数并渲染
+  const quick = [...doc.querySelectorAll('.quick-item')].find((e) => e.textContent.includes('需量节省'))
+  const box = quick.querySelector('input[type=checkbox]')
+  box.checked = true
+  box.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => bodyHas('峰谷套利'), 1200)
+  check(bodyHas('峰谷套利') && bodyHas('合计节省'), '勾选后取数并渲染该面板')
+  check(localStorage.getItem('lems:monitor:panels')?.includes('saving'), '勾选状态存本地')
+
+  // 告警摘要按级别排序：故障在前
+  const firstAlarmLevel = doc.querySelector('.table .status-tag')?.textContent?.trim()
+  check(firstAlarmLevel === '故障', '告警摘要按级别排序（故障在最前）', String(firstAlarmLevel))
+}
+
+console.log('\n== 运行监控 · 实时数据 ==')
+await clickTo('运行监控', '实时数据')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('实时值'))
+  check(bodyHas('储能柜') && bodyHas('正常'), '设备列表按类型分组并标状态')
+  check(bodyHas('配置设备请去'), '写明与管理·设备管理的分工（这里只读）')
+  check(bodyHas('最近更新'), '显示数据更新时间')
+
+  // 点位定义里没有的点位照样显示，并标「未定义」
+  await waitFor(() => bodyHas('SOC'))
+  check(bodyHas('未定义'), '点位定义缺失时标出「未定义」，而不是藏起来')
+  check(bodyHas('可画趋势'), '数值点位才可画趋势，并显示数量')
+
+  // 趋势：请求带了设备与点位
+  await waitFor(() => requests.some((r) => r.url.includes('/api/device/history')), 1200)
+  const h = requests.filter((r) => r.url.includes('/api/device/history')).pop()
+  check(
+    typeof h?.body?.deviceId === 'string' && Array.isArray(h?.body?.telemetryKeys) && h.body.telemetryKeys.length > 0,
+    '趋势请求带设备与点位',
+    JSON.stringify(h?.body),
+  )
+}
+
+console.log('\n== 运行监控 · 储能柜 ==')
+await clickTo('运行监控', '储能柜')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('柜内设备'))
+  // 柜子 = 设备类型 ess/sess；夹具里的柜子是 site_1「储能柜示范站」
+  check(bodyHas('储能柜示范站'), '柜子列表（来自设备类型 ess/sess）')
+  check(bodyHas('控制动作在'), '说明控制动作不在这里做（不在同页留第二个控制入口）')
+  check(bodyHas('去手动控制'), '给出跳到手动控制的入口')
+  check(bodyHas('关键量趋势') && bodyHas('柜内告警'), '趋势与告警面板都在')
+}
+
+console.log('\n== 运行监控 · 告警中心 ==')
+await clickTo('运行监控', '告警中心')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('当前告警'))
+  check(bodyHas('故障') && bodyHas('告警') && bodyHas('警告'), '三个级别都能显示')
+  check(bodyHas('电池温度 55.2') || bodyHas('55.2'), '显示告警详情')
+  check(bodyHas('忽略'), '当前告警带忽略操作')
+
+  // 切到历史
+  const historyTab = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '历史告警')
+  historyTab.click()
+  await waitFor(() => bodyHas('触发'))
+  check(bodyHas('未恢复') || bodyHas('2026-10-07 18:30:00'), '历史告警显示触发与清除时间')
+
+  // 切到忽略规则并恢复一条
+  const ignoreTab = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '忽略规则')
+  ignoreTab.click()
+  await waitFor(() => bodyHas('恢复告警'))
+  check(bodyHas('忽略规则'), '忽略规则列表')
+  const restore = [...doc.querySelectorAll('.link')].find((b) => b.textContent.includes('恢复告警'))
+  restore.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/alarm/ignore') && r.init?.method === 'DELETE' || r.method === 'DELETE'), 1200)
+  check(requests.some((r) => (r.method ?? '') === 'DELETE' && r.url.includes('/api/alarm/ignore')), '恢复告警发的是 DELETE')
+  await waitFor(() => bodyHas('已恢复'), 1200)
+  check(bodyHas('已恢复'), '恢复后给出提示')
+
+  // 口径说明必须写清「忽略 ≠ 清除」
+  check(bodyHas('忽略 ≠ 清除') || bodyHas('忽略是一条'), '写明忽略与清除的区别')
+}
+
 console.log('\n== 登录与退出 ==')
 {
   const loginForm = () => doc.querySelector('.login')
@@ -906,8 +1065,8 @@ console.log('\n== 登录与退出 ==')
   }
 
   // 正确账密 → 回到登录前想去的那一页，而不是被扔回首页。
-  // 用「市场出清」当目标是有讲究的：默认首页是「信息披露」，
-  // 所以落到这里就证明 redirect 真的起作用了（否则会落到信息披露）。
+  // 用「市场出清」当目标是有讲究的：默认首页是 NAV[0].pages[0]（现在是「能源总览」），
+  // 所以落到这里就证明 redirect 真的起作用了（否则会落到能源总览）。
   {
     const f = loginFields()
     setInput(f.account, 'admin')
@@ -1652,10 +1811,17 @@ console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
 // 当前 27 = 29 - 「数据保留」- 「时间与时区」
 //   两者都是「后端接口挂在别的功能下」：保留→存储管理，时间→系统操作，不留两个入口
-const EXPECTED_PAGES = 27
+const EXPECTED_PAGES = 31
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
-check(tabEls.length === 3, `Tab 数量 = ${tabEls.length}（期望 3）`, tabEls.map((e) => e.textContent.trim()).join('/'))
-check(NAV[0].pages.length === 7, `场景页 7 个（实际 ${NAV[0].pages.length}）`)
+check(tabEls.length === 4, `Tab 数量 = ${tabEls.length}（期望 4）`, tabEls.map((e) => e.textContent.trim()).join('/'))
+check(
+  tabEls.map((e) => e.textContent.trim()).join('/') === '运行监控/场景/管理/配置',
+  'Tab 顺序：运行监控插在场景之前（设计稿 §9）',
+  tabEls.map((e) => e.textContent.trim()).join('/'),
+)
+// 按 key 找而不是按序号：Tab 顺序变过一次（加了运行监控），序号断言会跟着一起错
+const sceneTab = NAV.find((t) => t.key === 'scene')
+check(sceneTab?.pages.length === 7, `场景页 7 个（实际 ${sceneTab?.pages.length}）`)
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
 check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${totalPages}）`)
 
