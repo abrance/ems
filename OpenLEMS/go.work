@@ -22,8 +22,6 @@ use (
 	./plugins/plug_protocols/p_canbus
 	./plugins/plug_protocols/p_gpiod
 	./plugins/plug_protocols/p_modbus
-
-	./plugins/plug_storages/p_storage
 	./plugins/plug_storages/p_tsdb
 
 	./services/s_automation
@@ -39,6 +37,5 @@ use (
 	./services/s_storage
 
 	./tools/t_network_manager
-	./tools/t_time_task
 	./tools/t_window_counter
 )
