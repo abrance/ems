@@ -135,6 +135,33 @@ export function rebootExecute(): Promise<void> {
 
 /* ---------- 展示工具 ---------- */
 
+/** 数据保留策略状态（后端按 device/system/log 三条设置清理历史数据） */
+export interface RetentionStatus {
+  deviceRetentionDays: number
+  systemRetentionDays: number
+  logRetentionDays: number
+  /** 自动清理间隔（小时） */
+  intervalHours: number
+  /** 上次清理时间（本地时间；空 = 本次启动后还没跑过） */
+  lastRunAt: string
+  lastRunTimeMs: number
+  lastLogRowsDeleted: number
+  lastDeviceBefore: string
+  lastSystemBefore: string
+  lastLogBefore: string
+  /** 上次清理的错误（空 = 成功） */
+  lastError: string
+}
+
+export function fetchRetention(signal?: AbortSignal): Promise<RetentionStatus> {
+  return api.get<{ status: RetentionStatus }>('/api/system/retention', undefined, signal).then((r) => r.status)
+}
+
+/** 立即执行一次清理（管理员）——不用等定时任务 */
+export function cleanRetentionNow(): Promise<RetentionStatus> {
+  return api.post<{ status: RetentionStatus }>('/api/system/retention/clean', {}).then((r) => r.status)
+}
+
 export function humanBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

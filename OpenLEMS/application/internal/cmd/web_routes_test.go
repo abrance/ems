@@ -82,6 +82,8 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		"POST /api/automation/{id}/toggle",
 		"GET /api/system/summary",
 		"GET /api/system/credentials",
+		"GET /api/system/retention",
+		"POST /api/system/retention/clean",
 		"GET /api/system/storage/stats",
 		"POST /api/system/reboot/apply",
 		"POST /api/setting/update",

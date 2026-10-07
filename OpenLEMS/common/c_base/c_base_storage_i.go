@@ -51,6 +51,10 @@ type IStorage interface {
 	// ClearDeviceHistoryAll 清除指定设备的所有历史数据
 	ClearDeviceHistoryAll(deviceId string) error
 
+	// DeleteBefore 删除 before 之前的历史数据，按存储类型筛选（数据保留策略用）。
+	// 注意：系统类里的**电价数据不会被删** —— 长周期预测/复盘/反演依赖它，见 tsdb_retention_f.go。
+	DeleteBefore(before time.Time, types ...StorageType) error
+
 	// Close 关闭数据库
 	Close()
 }

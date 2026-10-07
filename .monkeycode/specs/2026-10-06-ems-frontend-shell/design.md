@@ -1425,9 +1425,39 @@ DEBUG 打开了怎么还是没有」）：
 做不到「只关某个协议的 DEBUG」。模块与设置定义的对应关系写在
 `s_db_basic.LogLevelSettings`（顺序即界面顺序），加模块只改这一处。
 
-**没有做的事**：日志保留天数 `LogRetentionDays` 目前**不生效** —— 后端写设置但没有任何代码读它；
-存储层的 `promtsdb.Open(path, nil, nil, nil)` 也没有保留配置（注释写着「由调用方做外部清理」，
-而没人做）。所以「存储管理」里那三个保留天数目前都不会删数据，界面上已如实标注。
+**数据保留已实现**（见 §11.10）：三个保留天数原先只写不读、`promtsdb.Open(path, nil, nil, nil)`
+也没配保留，界面上改了不会删任何数据。现在有定时清理 + 手动触发，界面上能看到上次清理结果。
+
+### 11.10 数据保留（已实现）
+
+**原先的问题**：`DeviceRetentionDays` / `SystemRetentionDays` / `LogRetentionDays` 三个设置
+**只写不读** —— 界面能改、接口成功，但没有任何代码清理；存储层
+`promtsdb.Open(path, nil, nil, nil)` 也没配保留（注释写着「由调用方做外部清理」，而没人做）。
+长期运行的设备会就这么把磁盘填满。存量数据后来补了两件事：
+
+| 数据 | 清理方式 | 由哪条设置管 |
+| --- | --- | --- |
+| 设备遥测（`type=device`） | TSDB `Delete(0, 截止)` + `CleanTombstones()` | `DeviceRetentionDays` |
+| 协议指标（`type=protocol`） | 同上 | 一并归 `DeviceRetentionDays`（协议数据属设备侧） |
+| 系统指标（`type=system`，**不含电价**） | 同上 | `SystemRetentionDays` |
+| 业务日志（`log` 表） | SQL `DELETE WHERE created_at < ?` | `LogRetentionDays` |
+
+**为什么系统类要排除 `id=price`**：电价是市场数据，却是用 `buildSystemLabels("price", ...)`
+存在 `type=system` 下的。按系统保留天数一起删，会毁掉长周期电价预测、预测复盘、策略反演
+依赖的历史价格（它们要好几年的价）。清理系统类时显式加 `id != price` 匹配器，
+并在 TSDB 测试里断言「设备老数据没了、电价一条没少」。
+
+**`CleanTombstones()` 不能省**：只打 tombstone 不释放磁盘，重写数据块才真正回收空间 ——
+而这个功能的目的正是别把磁盘填满。
+
+**节奏**：默认每 24 小时一次，服务启动 5 分钟后首跑；界面上可以「立即清理」，
+并显示上次清理的时间、删除行数、各自的截止时间与错误（保留策略最怕「设了但没人跑」，
+所以要能看见它跑过）。
+
+**失败回退**：保留天数读出空/0/负数/带单位时回退到设置定义里的默认值，**而不是不清理** ——
+读不到就永远不清理，比用一个保守默认值清理更糟。
+
+**接口**：`GET /api/system/retention`（状态）、`POST /api/system/retention/clean`（立即清理，admin）。
 
 ## 14. 策略反演 / 长周期电价预测：数据源与建模
 

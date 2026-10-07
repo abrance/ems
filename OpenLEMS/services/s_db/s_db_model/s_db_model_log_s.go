@@ -151,6 +151,24 @@ func (l *SLogModel) DeleteByFilters(ctx context.Context, filters map[string]inte
 	return int(affectedRows), nil
 }
 
+// DeleteBefore 删除 before 之前写入的日志，返回删除行数。
+//
+// 与 DeleteByFilters 的日期过滤保持同一种比较方式：created_at 在库里是
+// **字符串**（SQLite 的 CURRENT_TIMESTAMP，UTC），所以按字符串比较，格式必须一致。
+// 这里用 UTC 生成截止时间，与库里写入的时区对齐 —— 用本地时间会比库里晚 8 小时，
+// 结果是多留 8 小时的日志（不致命，但没必要）。
+func (l *SLogModel) DeleteBefore(ctx context.Context, before time.Time) (int, error) {
+	const layout = "2006-01-02 15:04:05"
+	result, err := g.Model(TableLog).Ctx(ctx).
+		Where(FieldCreatedAt+" < ?", before.UTC().Format(layout)).
+		Delete()
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
 // GetAll 获取所有日志记录
 func (l *SLogModel) GetAll(ctx context.Context) ([]*SLogModel, error) {
 	var records []*SLogModel
