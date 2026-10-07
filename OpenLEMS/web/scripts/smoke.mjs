@@ -556,6 +556,34 @@ const requests = []
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
   const u = String(url)
+  if (u.includes('/api/setting/detail')) {
+    const b = init?.body ? JSON.parse(String(init.body)) : {}
+    // 与后端一致：/setting/detail 返回全字段（含 isPublic/remark），供调用方合并后再更新
+    return json({
+      id: b.id,
+      value: b.id === 'LogLevelProtocol' ? 'DEBUG' : b.id === 'LogLevelGlobal' ? 'ALL' : 'DEBUG',
+      isPublic: true,
+      enabled: true,
+      remark: b.id === 'LogLevelProtocol' ? 'protocol 业务日志级别' : '设置',
+      sort: 0,
+      group: 'system',
+    })
+  }
+  if (u.includes('/api/setting/update')) return json({})
+  if (u.includes('/api/setting')) {
+    return json({
+      settings: [
+        { id: 'LogLevelGlobal', value: 'ALL', groupName: '系统', remark: '全局日志级别' },
+        { id: 'LogLevelEms', value: 'DEBUG', groupName: '系统', remark: 'ems 业务日志级别' },
+        { id: 'LogLevelDevice', value: 'DEBUG', groupName: '系统', remark: 'device 业务日志级别' },
+        { id: 'LogLevelProtocol', value: 'DEBUG', groupName: '系统', remark: 'protocol 业务日志级别' },
+        { id: 'LogLevelPolicy', value: 'DEBUG', groupName: '系统', remark: 'policy 业务日志级别' },
+        { id: 'LogLevelAutomation', value: 'DEBUG', groupName: '系统', remark: 'automation 业务日志级别' },
+        { id: 'LogLevelRemote', value: 'DEBUG', groupName: '系统', remark: 'remote 业务日志级别' },
+        { id: 'SystemEnableDebugLog', value: 'false', groupName: '系统', remark: '启用系统调试日志' },
+      ],
+    })
+  }
   if (u.includes('/api/auth/login')) {
     const b = init?.body ? JSON.parse(String(init.body)) : {}
     if (b.password !== 'admin') {
@@ -1504,6 +1532,63 @@ await clickTo('管理', '用户与权限')
   check(bodyHas('session_admin_timeout'), '写明会话时长设置不生效（且因此没做控件）')
   check(!bodyHas('保存会话时长'), '没有给不生效的设置做假控件')
   check(bodyHas('没有失败次数限制'), '写明登录没有频率限制 / 锁定')
+}
+
+console.log('\n== 日志级别页 ==')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await clickTo('配置', '日志级别')
+  await waitFor(() => bodyHas('全局日志级别'))
+  check(bodyHas('管系统日志') && bodyHas('管业务日志'), '把两套级别的界线写在标题里')
+  check(bodyHas('立即生效'), '写明改完立即生效')
+
+  // 模块矩阵：6 个模块，说明与后端 LogLevelSettings 对应
+  const rowTitles = [...doc.querySelectorAll('.table .strong')].map((d) => d.textContent.trim())
+  check(
+    JSON.stringify(rowTitles) === JSON.stringify(['ems', 'device', 'protocol', 'policy', 'automation', 'remote']),
+    '模块矩阵 6 行且顺序固定',
+    JSON.stringify(rowTitles),
+  )
+
+  // 改一个模块级别：请求必须带上原 isPublic/remark —— /setting/update 是全量覆盖，
+  // 少传 isPublic 会把设置置成非公开，页面下次就读不到它了
+  const sel = [...doc.querySelectorAll('.table .ctrl select')][2] // protocol
+  sel.value = 'INFO'
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => requests.some((r) => r.url.includes('/api/setting/update')), 800)
+  const call = requests.filter((r) => r.url.includes('/api/setting/update')).pop()
+  check(call?.body?.id === 'LogLevelProtocol' && call?.body?.value === 'INFO', '改了 protocol 的级别', JSON.stringify(call?.body))
+  check(call?.body?.isPublic === true, '更新时保留 isPublic（全量覆盖接口的坑）', JSON.stringify(call?.body))
+  check(call?.body?.group === 'system' && call?.body?.remark === 'protocol 业务日志级别', '保留 group 与 remark')
+  check(bodyHas('已保存') && bodyHas('立即生效'), '保存后给出即时生效的提示')
+
+  // 调试开关：勾上 → 写 true
+  const dbg = doc.querySelector('.switch input[type=checkbox]')
+  check(!!dbg, '有调试日志开关')
+  dbg.checked = true
+  dbg.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => {
+    const c = requests.filter((r) => r.url.includes('/api/setting/update')).pop()
+    return c?.body?.id === 'SystemEnableDebugLog' && c?.body?.value === 'true'
+  }, 800)
+  const dbgCall = requests.filter((r) => r.url.includes('/api/setting/update')).pop()
+  check(dbgCall?.body?.value === 'true', '开关写入 true', JSON.stringify(dbgCall?.body))
+
+  // 限制清单：必须写出「三个条件」「保留天数没生效」这类实话
+  check(bodyHas('两个条件') || bodyHas('都要满足'), '写明级别与调试开关是两个条件')
+  check(bodyHas('逐设备的'), '写明设备侧还有第三道条件')
+  check(bodyHas('没有任何代码读它'), '写明日志保留天数没有生效')
+
+  // 普通用户会话：只读（写设置需要 admin，否则每个控件都会吃 403）
+  check(!bodyHas('本页**只读**') && !bodyHas('本页只读'), '管理员会话下不显示只读提示')
+  localStorage.setItem('ems:user:role', 'user')
+  await clickTo('场景', '信息披露') // 先离开这一页，避免组件缓存
+  await clickTo('配置', '日志级别')
+  await waitFor(() => bodyHas('只读'), 1200)
+  check(bodyHas('只读'), '普通用户会话下给出只读提示')
+  const lockedSel = doc.querySelector('.table .ctrl select')
+  check(lockedSel?.disabled === true, '普通用户会话下控件禁用（而不是点了才 403）')
+  localStorage.setItem('ems:user:role', 'admin')
 }
 
 console.log('\n== 导航结构 ==')

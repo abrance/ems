@@ -105,7 +105,14 @@ export const NAV: NavTab[] = [
       { key: 'operations', title: '系统操作', path: '/config/operations', status: 'ready', perm: 'config:operation' },
       { key: 'credentials', title: '采集与凭据', path: '/config/credentials', status: 'ready', perm: 'config:credential' },
       { key: 'ui', title: '界面与语言', path: '/config/ui', status: 'ready', perm: 'config:ui' },
-      { key: 'logging', title: '日志级别', path: '/config/logging', status: 'todo', perm: 'config:log', panels: ['各模块日志级别'] },
+      {
+        key: 'logging',
+        title: '日志级别',
+        path: '/config/logging',
+        status: 'ready',
+        perm: 'config:log',
+        note: '两套级别分开：全局（系统日志，写文件）+ 按模块（业务日志，入库）。改完立即生效',
+      },
     ],
   },
 ]

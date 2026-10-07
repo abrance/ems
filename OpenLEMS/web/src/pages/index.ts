@@ -33,6 +33,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   operations: () => import('./config/OperationsView.vue'),
   credentials: () => import('./config/CredentialsView.vue'),
   ui: () => import('./config/UiView.vue'),
+  logging: () => import('./config/LoggingView.vue'),
 }
 
 export { PlaceholderView }

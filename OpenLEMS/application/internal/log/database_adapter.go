@@ -88,6 +88,16 @@ func (d *DbLoggerAdapter) saveToDb(ctx context.Context, level c_enum.ELogLevel, 
 
 	logType, deviceId := d.getLogInfo(ctx)
 
+	// 先过模块级别这道闸：低于该模块配置级别的日志，既不入库也不输出到 biz 控制台/文件。
+	// 这里读设置走的是设置服务的缓存，而写设置会清缓存，所以改了**立即生效**、无需重启。
+	if def := s_db_basic.LogLevelSettingFor(logType); def != nil {
+		if v := s_db.GetSettingService().GetSettingValueBySystemSettingDefine(ctx, def); v != nil {
+			if !levelAllowed(*v, level) {
+				return
+			}
+		}
+	}
+
 	// 检查是否为 EMS 系统的 DEBUG 级别日志，如果是则需要检查系统调试日志开关
 	if level == c_enum.Debug && logType == c_enum.ELogTypeEms {
 		// 获取系统调试日志开关设置

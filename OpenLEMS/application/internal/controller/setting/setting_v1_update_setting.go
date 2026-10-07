@@ -12,11 +12,13 @@ import (
 	"time"
 
 	v1 "application/api/setting/v1"
+	applog "application/internal/log"
 
 	"common/c_log"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/shockerli/cvt"
 )
@@ -112,6 +114,14 @@ func (c *ControllerV1) UpdateSetting(ctx context.Context, req *v1.UpdateSettingR
 
 // triggerReloadIfNeeded 根据设置ID触发相应的重载操作
 func (c *ControllerV1) triggerReloadIfNeeded(ctx context.Context, settingId string) error {
+	// 全局日志级别：立即改 GoFrame logger 的级别，不用重启。
+	// （各业务模块的级别不用在这里处理 —— 业务日志每次写入都去读设置，
+	//   而写设置会清设置缓存，所以本来就是立即生效的。）
+	if settingId == s_db_basic.SystemSettingLogLevelGlobal.Id {
+		applog.ApplyGlobalLogLevel(ctx, g.Log())
+		return nil
+	}
+
 	// 检查是否为Modbus配置
 	if settingId == s_db_basic.SystemSettingModbusConfig.Id {
 		c_log.Info(ctx, "检测到Modbus配置更新，开始重新加载Modbus服务")
