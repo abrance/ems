@@ -206,22 +206,13 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 	s.BindHandler("GET:/assets/*", func(r *ghttp.Request) {
 		fileServer.ServeHTTP(r.Response.Writer, r.Request)
 	})
-	s.BindHandler("GET:/images/*", func(r *ghttp.Request) {
-		fileServer.ServeHTTP(r.Response.Writer, r.Request)
-	})
 	s.BindHandler("GET:/favicon.ico", func(r *ghttp.Request) {
 		fileServer.ServeHTTP(r.Response.Writer, r.Request)
 	})
-	s.BindHandler("GET:/config/*", func(r *ghttp.Request) {
-		fileServer.ServeHTTP(r.Response.Writer, r.Request)
-	})
-	s.BindHandler("GET:/libs/*", func(r *ghttp.Request) {
-		// Frontend requests /libs/dashboard/*, while web.zip stores files under dashboard/.
-		http.StripPrefix("/libs", fileServer).ServeHTTP(r.Response.Writer, r.Request)
-	})
-	s.BindHandler("GET:/dashboard/*", func(r *ghttp.Request) {
-		fileServer.ServeHTTP(r.Response.Writer, r.Request)
-	})
+	// 这里曾经还绑了 /images/*、/config/*、/libs/*、/dashboard/* —— 那是**旧前端**的静态目录
+	// （Arco 那套产物用它们放配置与图标），新前端的产物只有 assets/ 与 index.html。
+	// 留着不只是死代码：新前端的「配置」Tab 就用 /config/* 路由，
+	// 撞上这个静态绑定后整片 7 个配置页全都 404（线上实测），而且请求根本不会落到 SPA 回退上。
 	// 根路径：直接输出 index.html
 	s.BindHandler("GET:/", func(r *ghttp.Request) {
 		writeIndexHTML(r, indexHTML)
@@ -239,14 +230,11 @@ func setupStaticFiles(s *ghttp.Server, ctx context.Context) {
 			r.Response.WriteStatus(http.StatusNotFound)
 			return
 		}
-		// 跳过静态资源路由 - 这些应该由具体的静态资源处理器处理
+		// 跳过静态资源路由 - 这些应该由具体的静态资源处理器处理。
+		// 只留真正还有人提供的：assets/ 是新前端的产物目录，favicon.ico 走上面的绑定，
+		// /overlay/* 是已下线的旧悬浮层（保留 404 是为了让旧书签拿到 404，
+		// 而不是被 SPA 回退吞掉、返回一份 index.html）。
 		if strings.HasPrefix(r.URL.Path, "/assets/") ||
-			strings.HasPrefix(r.URL.Path, "/images/") ||
-			strings.HasPrefix(r.URL.Path, "/config/") ||
-			strings.HasPrefix(r.URL.Path, "/demo/") ||
-			strings.HasPrefix(r.URL.Path, "/libs/") ||
-			// 悬浮层已下线：/overlay/* 保留在跳过列表里，是为了让旧书签拿到 404
-			// 而不是被 SPA 回退吞掉、返回一份 index.html
 			strings.HasPrefix(r.URL.Path, "/overlay/") ||
 			r.URL.Path == "/favicon.ico" {
 			r.Response.WriteStatus(http.StatusNotFound)
