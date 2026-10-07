@@ -116,7 +116,7 @@ const FIXTURES = {
   '/api/forecast/backtest': {
     market: 'ahead', grain: 'intraday', unit: '元/兆瓦时', model: 'timesfm-3.0',
     from: '2026-08-24', to: '2026-08-31', sampleDays: 3,
-    targetDates: ['2026-08-31'], skipped: [], timeMs: 1200,
+    targetDates: ['2026-08-31'], skipped: null, timeMs: 1200,
     points: Array.from({ length: 96 }, (_, i) => ({
       targetTime: `2026-08-31 ${String(Math.floor((i * 15) / 60)).padStart(2, '0')}:${String((i * 15) % 60).padStart(2, '0')}`,
       predicted: 300 + ((i * 7) % 150), actual: 310 + ((i * 11) % 140), q10: 260, q50: 300, q90: 420,
@@ -131,15 +131,19 @@ const FIXTURES = {
       model: 'timesfm-3.0', unit: '元/兆瓦时', source: 'gd_metric.csv',
     })),
   },
+  // 注意外壳：真实响应是 { forecast: {...} }（api/forecast.ts 会拆包），
+  // 桩少一层外壳 → 页面读出 undefined.timeMs → 组件 setup 抛异常、整页空白。
   '/api/forecast/load': {
-    deviceId: 'dev_ess_1', model: 'timesfm-3.0', stepMinutes: 15,
+    forecast: {
+      deviceId: 'dev_ess_1', model: 'timesfm-3.0', stepMinutes: 15,
     lookbackPoints: 96, inputTruncated: false,
     historyTimes: curve96('load').map((_, i) => 1756000000000 + i * 900000),
     historyValues: curve96('load').map((p) => p.value),
     forecastTimes: curve96('load').map((_, i) => 1757000000000 + i * 900000),
     forecastPoint: curve96('load').map((p) => p.value * 1.02),
-    forecastQuantiles: { '0.5': curve96('load').map((p) => p.value) },
-    timeMs: 900,
+      forecastQuantiles: { '0.5': curve96('load').map((p) => p.value) },
+      timeMs: 900,
+    },
   },
   // 刻意只给一台**顶层储能柜（没有子设备）**：这是现场常见装法，也正是曾经漏掉的那种 ——
   // 储能柜页的趋势循环当时只遍历子设备，于是顶层柜子一条曲线都画不出来，
@@ -201,6 +205,24 @@ function pointDefinitions(deviceId) {
  * ------------------------------------------------------------------ */
 
 const STUB_SCRIPT = `<script>
+// 在最前面装错误钩子：组件 setup 抛异常时页面会**整片空白且不报错**（预测复盘线上就是这样），
+// 只有把错误抓下来，失败原因才是可读的。
+window.__errors = [];
+window.addEventListener('error', function (e) {
+  window.__errors.push('onerror: ' + ((e.error && e.error.message) || e.message));
+});
+window.addEventListener('unhandledrejection', function (e) {
+  window.__errors.push('reject: ' + ((e.reason && e.reason.message) || String(e.reason)));
+});
+(function () {
+  var orig = console.error.bind(console);
+  console.error = function () {
+    var args = Array.prototype.slice.call(arguments);
+    var err = args.find(function (x) { return x instanceof Error; });
+    if (err) window.__errors.push('console: ' + err.message);
+    orig.apply(null, args);
+  };
+})();
 localStorage.setItem('ems:user:token','browser-check');
 localStorage.setItem('ems:user:role','admin');
 const __FIXTURES__ = ${JSON.stringify(FIXTURES)};
@@ -367,14 +389,31 @@ async function main() {
       await m.call('WebDriver:Navigate', { url: base + '/' })
       await new Promise((r) => setTimeout(r, 300))
       await m.call('WebDriver:Navigate', { url: base + page.path })
-      await new Promise((r) => setTimeout(r, 2500))
+
+      // 轮询等图出现，不用固定 sleep：有的页面要等接口回来才渲染（固定 2.5s 会偶发 0 图，
+      // 那是检查自己不稳，不是页面有问题）。最多等 8 秒。
+      const deadline = Date.now() + 8000
+      for (;;) {
+        const n = await m.call('WebDriver:ExecuteScript', {
+          script: "return document.querySelectorAll('.chart').length;",
+          args: [],
+        })
+        const count = typeof n === 'number' ? n : Number(n?.value ?? 0)
+        if (count >= page.min || Date.now() > deadline) break
+        await new Promise((r) => setTimeout(r, 300))
+      }
 
       const raw = await m.call('WebDriver:ExecuteScript', {
         script: `return JSON.stringify((() => {
           const charts = [...document.querySelectorAll('.chart')];
+          const txt = (sel) => [...document.querySelectorAll(sel)].map(e => e.textContent.replace(/\s+/g,' ').trim()).filter(Boolean);
           return {
             h1: document.querySelector('.pagehead h1')?.textContent ?? null,
             totalCanvas: document.querySelectorAll('canvas').length,
+            empty: txt('.empty').slice(0, 2),
+            errors: txt('.alert.error, .notice.error').slice(0, 2),
+            loading: txt('.panel-state').slice(0, 2),
+            jsErrors: (window.__errors || []).slice(0, 3),
             charts: charts.map((c) => ({
               points: Number(c.dataset.chartPoints ?? 0),
               error: c.dataset.chartError ?? null,
@@ -395,7 +434,11 @@ async function main() {
       }
       if (problems.length) {
         failed++
-        console.error(`  FAIL ${page.name} — ${problems.join('；')}`)
+        const why = [...info.jsErrors, ...info.errors, ...info.empty, ...info.loading].slice(0, 3)
+        console.error(
+          `  FAIL ${page.name} — ${problems.join('；')}  [h1=${info.h1} canvas=${info.totalCanvas}]` +
+            (why.length ? `\n         ← ${why.join('\n         ← ')}` : '  （页面没有任何空态/错误文字，也没有 JS 异常）'),
+        )
       } else {
         console.log(`  ok   ${page.name}（${info.charts.length} 个图，canvas 共 ${info.totalCanvas}）`)
       }

@@ -51,11 +51,13 @@ export function fetchGdMetric(params: {
   date?: string
   signal?: AbortSignal
 }): Promise<GdMetricSnapshot> {
-  return api.get<GdMetricSnapshot>(
-    '/api/gd-metric',
-    { from: params.from, to: params.to, date: params.date },
-    params.signal,
-  )
+  return api
+    .get<GdMetricSnapshot>(
+      '/api/gd-metric',
+      { from: params.from, to: params.to, date: params.date },
+      params.signal,
+    )
+    .then((r) => ({ ...r, days: r.days ?? [], availableDays: r.availableDays ?? [] }))
 }
 
 /** 区间 96 点序列（复盘的第二条腿：实际值） */
@@ -78,7 +80,11 @@ export function fetchMetricSeries(
   params: { from: string; to: string; kind?: string },
   signal?: AbortSignal,
 ): Promise<MetricSeries> {
-  return api.get<MetricSeries>('/api/gd-metric/series', params, signal)
+  return api.get<MetricSeries>('/api/gd-metric/series', params, signal).then((r) => ({
+    ...r,
+    points: r.points ?? [],
+    days: r.days ?? [],
+  }))
 }
 
 /** 反演：一个观测点（系统负荷 + 该时刻出清价） */
@@ -145,5 +151,12 @@ export function fetchSupplyCurve(
   params: { from: string; to: string; market?: string; bins?: number; steps?: number },
   signal?: AbortSignal,
 ): Promise<SupplyCurve> {
-  return api.get<SupplyCurve>('/api/gd-metric/supply-curve', params, signal)
+  // 归一化：nil 切片 → []（Go 的 nil 切片是 null，页面读 .length 会崩）
+  return api.get<SupplyCurve>('/api/gd-metric/supply-curve', params, signal).then((r) => ({
+    ...r,
+    quantiles: r.quantiles ?? [],
+    points: r.points ?? [],
+    allBins: r.allBins ?? [],
+    steps: r.steps ?? [],
+  }))
 }

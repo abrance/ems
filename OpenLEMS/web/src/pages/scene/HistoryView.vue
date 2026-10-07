@@ -134,13 +134,17 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    // **一律显式传区间**：后端的缺省是「本月 1 日 ~ 今天」，
+    // 而日报数据常常滞后（部署上最新到 09-25，而当天是 10-07）→ 缺省区间整段是空的，
+    // 页面就显示「当前区间没有已确认的现货指标」。
+    // 区间由 applyPreset 算好（右端锚到最新日报日），这里只管传。
     trend.value = await fetchTrend({
-      from: range.preset === 'custom' ? range.from : undefined,
-      to: range.preset === 'custom' ? range.to : undefined,
+      from: range.from || undefined,
+      to: range.to || undefined,
       grain: grain.value || undefined,
     })
-    // 自定义区间用前端显式传值；预设由后端按今天回落到本月 1 日，这里同步显示回来
-    if (range.preset !== 'custom' && trend.value) {
+    // 后端可能对区间做收口（如不足一天补整），回填是为了让界面显示与实际查询一致
+    if (trend.value && range.preset !== 'custom') {
       range.from = trend.value.from
       range.to = trend.value.to
     }

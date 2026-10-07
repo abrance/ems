@@ -77,5 +77,9 @@ export function fetchBacktest(
       { start: params.start, end: params.end },
       signal,
     )
-    .then((r) => r.backtest)
+    .then((r) => ({
+      ...r.backtest,
+      results: r.backtest?.results ?? [],
+      essDeviceIds: r.backtest?.essDeviceIds ?? [],
+    }))
 }
