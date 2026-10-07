@@ -552,7 +552,33 @@ const FAKE_SUPPLY_DRIFT = {
   stats: { ...FAKE_SUPPLY_CLEAN.stats, spearman: -0.2, violations: 7, maxPavaMove: 150 },
 }
 
+// 保留策略：清理前（本次启动后还没跑过）与清理后两种状态
+const RETENTION_BEFORE = {
+  deviceRetentionDays: 30,
+  systemRetentionDays: 30,
+  logRetentionDays: 90,
+  intervalHours: 24,
+  lastRunAt: '',
+  lastRunTimeMs: 0,
+  lastLogRowsDeleted: 0,
+  lastDeviceBefore: '',
+  lastSystemBefore: '',
+  lastLogBefore: '',
+  lastError: '',
+}
+const RETENTION_AFTER = {
+  ...RETENTION_BEFORE,
+  lastRunAt: '2026-10-08 03:15:00',
+  lastRunTimeMs: 812,
+  lastLogRowsDeleted: 12,
+  lastDeviceBefore: '2026-09-08 03:15:00',
+  lastSystemBefore: '2026-09-08 03:15:00',
+  lastLogBefore: '2026-07-10 03:15:00',
+}
+
+// 保留策略：清理前（本次启动后还没跑过）与清理后两种状态
 const requests = []
+let cleaned = false
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
   const u = String(url)
@@ -698,6 +724,13 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/system/time/update')) return json({})
   if (u.includes('/api/system/reboot/apply')) return json({})
   if (u.includes('/api/system/reboot/execute')) return json({})
+  if (u.includes('/api/system/retention/clean')) {
+    cleaned = true
+    return json({ status: RETENTION_AFTER })
+  }
+  if (u.includes('/api/system/retention')) {
+    return json({ status: cleaned ? RETENTION_AFTER : RETENTION_BEFORE })
+  }
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
   if (u.includes('/api/forecast/recorded')) return json(FAKE_RECORDED)
@@ -1534,6 +1567,30 @@ await clickTo('管理', '用户与权限')
   check(bodyHas('没有失败次数限制'), '写明登录没有频率限制 / 锁定')
 }
 
+console.log('\n== 存储管理·保留策略（已生效）==')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await clickTo('配置', '存储管理')
+  await waitFor(() => bodyHas('保留策略'))
+  // 首访：本次启动后还没跑过 → 页面要说清「还没有执行过」以及间隔，而不是装作有结果
+  check(bodyHas('还没有执行过清理'), '本次启动未清理时如实说明')
+  check(bodyHas('每 24 小时一次'), '写明自动清理间隔')
+  check(bodyHas('电价历史不会被删'), '写明电价历史不会被清理（长周期预测依赖它）')
+  check(bodyHas('协议指标算设备侧数据'), '写明协议指标归设备保留')
+  check(!bodyHas('当前不生效') && !bodyHas('后端目前不读它们'), '不再有「不生效」的旧说法')
+
+  const cleanBtn = [...doc.querySelectorAll('button')].find((b) => b.textContent.includes('立即清理'))
+  check(!!cleanBtn, '有「立即清理」按钮')
+  cleanBtn.click()
+  await waitFor(() => requests.some((r) => r.url.includes('/api/system/retention/clean')), 1500)
+  check(requests.some((r) => r.url.includes('/api/system/retention/clean')), '点击后调用清理接口')
+  await waitFor(() => bodyHas('已清理'), 1500)
+  check(bodyHas('已清理'), '清理完成给出结果提示')
+  // 清理后状态区要换成真实结果（时间/删除行数/各自截止时间）
+  await waitFor(() => bodyHas('上次清理'), 1500)
+  check(bodyHas('删除日志 12 行'), '显示上次删了多少行')
+  check(bodyHas('2026-09-08 03:15:00') && bodyHas('2026-07-10 03:15:00'), '分别显示设备/系统/日志的截止时间')
+}
 console.log('\n== 日志级别页 ==')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)

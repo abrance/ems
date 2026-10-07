@@ -3,6 +3,7 @@ package cmd
 import (
 	applog "application/internal/log"
 	"application/internal/logic"
+	retentionlogic "application/internal/logic/retention"
 	"application/internal/service"
 	"application/internal/utils"
 	_ "application/manifest"
@@ -64,6 +65,10 @@ func InitSystem(ctx context.Context, parser *gcmd.Parser) error {
 		Params: map[string]string{},
 	})
 	common.RegisterStorageInstance(storageManager.GetStorageInstance())
+
+	// 数据保留：按 device/system/log 三条设置定期清理历史数据。
+	// 放在存储注册之后 —— 没有存储实例时它只会跳过并在结果里写明原因。
+	retentionlogic.Start(ctx, retentionlogic.DefaultInterval)
 
 	// 注册设备管理器
 	common.RegisterDeviceManager(s_driver.NewDriverManagerImpl(ctx))

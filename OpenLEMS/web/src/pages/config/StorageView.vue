@@ -2,7 +2,15 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import PanelBox from '@/components/PanelBox.vue'
 import KpiCard from '@/components/KpiCard.vue'
-import { fetchStorageStats, humanBytes, updateRetention, type StorageStats } from '@/api/system'
+import {
+  cleanRetentionNow,
+  fetchRetention,
+  fetchStorageStats,
+  humanBytes,
+  updateRetention,
+  type RetentionStatus,
+  type StorageStats,
+} from '@/api/system'
 
 /**
  * 配置 · 存储管理。
@@ -12,10 +20,14 @@ import { fetchStorageStats, humanBytes, updateRetention, type StorageStats } fro
  *   2. 保留策略（/system/storage-time）—— 后端把它挂在 system 下，
  *      所以不再单开「数据保留」页，避免同一功能两个入口。
  *
- * ⚠️ 生效语义（现状，不是设计意图）：这三个保留天数**目前没有生效**。
- *   后端把它们写进设置，但**没有任何代码读它们**；存储层打开时也没配保留
- *   （`promtsdb.Open(path, nil, nil, nil)`，注释写着「由调用方做外部清理」—— 而没人做）。
- *   也就是说页面能改、接口会成功、数据都不会被删。加清理任务之前不要把这里当已实现。
+ * 生效语义（已实现）：后端有定时清理任务（默认每 24 小时一次，启动后 5 分钟首跑），
+ *   按三条设置删除历史数据；也可以在这里点「立即清理」。上次清理的时间/结果都显示出来 ——
+ *   保留策略最怕的是「设了但没人跑」，所以必须能看见它跑过。
+ *
+ *   两条要知道的边界：
+ *   1. **电价历史不会被删**。电价存在系统类里（id=price），清理系统类时显式排除它 ——
+ *      长周期电价预测 / 预测复盘 / 策略反演依赖好几年的历史价格。
+ *   2. 协议指标算设备侧数据，跟「设备数据保留」走。
  */
 const stats = ref<StorageStats | null>(null)
 const loading = ref(false)
@@ -25,6 +37,33 @@ const toast = ref<{ tone: 'green' | 'red'; text: string } | null>(null)
 let toastTimer: number | undefined
 
 const form = reactive({ device: 30, system: 30, log: 90 })
+const retention = ref<RetentionStatus | null>(null)
+const cleaning = ref(false)
+
+async function loadRetention() {
+  try {
+    retention.value = await fetchRetention()
+    // 设置值以保留策略接口为准（存储统计里的 retention_hours 是存储层自己的统一值）
+    form.device = retention.value.deviceRetentionDays || form.device
+    form.system = retention.value.systemRetentionDays || form.system
+    form.log = retention.value.logRetentionDays || form.log
+  } catch {
+    retention.value = null
+  }
+}
+
+async function cleanNow() {
+  cleaning.value = true
+  try {
+    retention.value = await cleanRetentionNow()
+    showToast('green', `已清理：日志删除 ${retention.value.lastLogRowsDeleted} 行，耗时 ${retention.value.lastRunTimeMs}ms`)
+    await load()
+  } catch (err) {
+    showToast('red', `清理失败：${err instanceof Error ? err.message : '未知错误'}`)
+  } finally {
+    cleaning.value = false
+  }
+}
 const pendingConfirm = ref(false)
 
 function showToast(tone: 'green' | 'red', text: string) {
@@ -38,11 +77,7 @@ async function load() {
   error.value = ''
   try {
     stats.value = await fetchStorageStats()
-    if (stats.value?.retention_hours) {
-      // 存储层只回一个统一保留时长，按天展示；三类各自的设置以表单为准
-      const days = Math.max(1, Math.round(stats.value.retention_hours / 24))
-      form.device = form.system = form.log = days
-    }
+    await loadRetention()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
     stats.value = null
@@ -80,7 +115,7 @@ async function confirmSave() {
       systemRetentionDays: Number(form.system),
       logRetentionDays: Number(form.log),
     })
-    showToast('green', '已保存；保留策略在存储服务下次清理时生效')
+    showToast('green', '已保存；立即清理或等定时任务（间隔见下方）即可生效')
     await load()
   } catch (err) {
     showToast('red', `保存失败：${err instanceof Error ? err.message : '未知错误'}`)
@@ -122,11 +157,25 @@ onMounted(load)
       title="保留策略"
       :span="12"
       :loading="loading"
-      foot="⚠️ 当前不生效：设置会被保存，但后端没有任何代码读它们去清理数据（见文件头说明）"
+      foot="定时清理 + 手动清理都会真正删数据；上次清理结果见上方状态"
     >
-      <p class="not-effective">
-        这三个值会保存到系统设置，但<strong>后端目前不读它们</strong>：存储层打开时没有配置保留策略，
-        也没有清理任务。所以改这里不会删除任何数据 —— 先别把它当已实现的能力。
+      <div class="retention-state" :class="{ bad: !!retention?.lastError }">
+        <template v-if="retention?.lastRunAt">
+          <strong>上次清理 {{ retention.lastRunAt }}</strong>
+          <span>
+            　删除日志 {{ retention.lastLogRowsDeleted }} 行 · 耗时 {{ retention.lastRunTimeMs }}ms ·
+            截止：设备 {{ retention.lastDeviceBefore }} / 系统 {{ retention.lastSystemBefore }} / 日志 {{ retention.lastLogBefore }}
+          </span>
+          <span v-if="retention.lastError" class="err">　⚠️ {{ retention.lastError }}</span>
+        </template>
+        <template v-else>
+          <strong>还没有执行过清理</strong>
+          <span>　自动清理每 {{ retention?.intervalHours ?? 24 }} 小时一次（服务启动 5 分钟后首跑），也可以现在手动跑一次。</span>
+        </template>
+      </div>
+      <p class="note-line">
+        清理按上面的天数删除历史数据。<strong>电价历史不会被删</strong> —— 它存在系统类里但被显式排除，
+        长周期电价预测 / 预测复盘 / 策略反演依赖它。协议指标算设备侧数据，跟「设备数据保留」走。
       </p>
       <div class="fields">
         <label>设备数据保留（天）<input v-model.number="form.device" type="number" min="1" /></label>
@@ -136,6 +185,9 @@ onMounted(load)
       <div class="actions">
         <span v-if="retentionIssue" class="err">{{ retentionIssue }}</span>
         <span class="spacer" />
+        <button class="btn" type="button" :disabled="cleaning" @click="cleanNow">
+          {{ cleaning ? '清理中…' : '立即清理' }}
+        </button>
         <button class="btn primary" type="button" :disabled="saving" @click="askSave">
           {{ saving ? '保存中…' : '保存' }}
         </button>
@@ -186,14 +238,25 @@ onMounted(load)
   cursor: pointer;
 }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4); }
-.not-effective {
-  margin: 0 0 var(--s3);
+.retention-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s1);
+  margin-bottom: var(--s2);
   padding: var(--s2) var(--s3);
-  border-left: 3px solid var(--brand);
+  border-left: 3px solid var(--green);
   border-radius: var(--r-sm);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  background: var(--green-soft);
+  color: var(--green-ink);
   font-size: var(--fs-12);
+}
+.retention-state.bad { border-left-color: var(--red); background: var(--red-soft); color: var(--red-ink); }
+.retention-state .err { color: var(--red-ink); }
+.note-line {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-12);
+  color: var(--text-3);
   line-height: 1.8;
 }
 .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }

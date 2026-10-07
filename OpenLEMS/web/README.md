@@ -88,6 +88,7 @@ src/
 | 场景 · 策略反演 | `GET /api/gd-metric/supply-curve`（统计反演：由负荷-出清价反推聚合报价曲线） |
 | 管理 · 报表导出 | 不新增接口：复用上面这些接口在前端拼 CSV（见 `src/exports/datasets.ts`） |
 | 配置 · 日志级别 | `GET /api/setting`（公开设置）、`POST /api/setting/detail`、`POST /api/setting/update`（**全量覆盖**，改值前先读详情再合并） |
+| 配置 · 存储管理 | `GET /api/system/retention`（保留策略状态）、`POST /api/system/retention/clean`（立即清理） |
 | 登录 / 退出 / 改密 | `POST /api/auth/login`（`{role, password}`，**没有用户名字段**）、`POST /api/auth/logout`、`POST /api/auth/change-password`（带 `oldPassword` 校验）、`GET /api/auth/current` |
 
 手动控制页的两条硬规则：

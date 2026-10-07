@@ -130,6 +130,17 @@ func (s *sLogServiceImpl) DeleteLogByFilters(ctx context.Context, filters map[st
 	return deletedCount, nil
 }
 
+// DeleteLogBefore 删除 before 之前写入的日志（日志保留策略用）
+func (s *sLogServiceImpl) DeleteLogBefore(ctx context.Context, before time.Time) (int, error) {
+	log := &s_db_model.SLogModel{}
+	deleted, err := log.DeleteBefore(ctx, before)
+	if err != nil {
+		c_log.Errorf(ctx, "按时间清理日志失败 - 截止时间: %s, 错误: %+v", before.Format(time.RFC3339), err)
+		return 0, err
+	}
+	return deleted, nil
+}
+
 // GetAllLog 获取所有日志记录
 func (s *sLogServiceImpl) GetAllLog(ctx context.Context) ([]*s_db_model.SLogModel, error) {
 	log := &s_db_model.SLogModel{}

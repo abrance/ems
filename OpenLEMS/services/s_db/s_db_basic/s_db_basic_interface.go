@@ -77,6 +77,8 @@ type ILogService interface {
 	GetAllLog(ctx context.Context) ([]*s_db_model.SLogModel, error)
 	GetLogPage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SLogModel, int, error)
 	ClearAllLog(ctx context.Context) error
+	// DeleteLogBefore 删除 before 之前写入的日志（日志保留策略用），返回删除行数
+	DeleteLogBefore(ctx context.Context, before time.Time) (int, error)
 	GetLogCount(ctx context.Context) (int, error)
 }
 
