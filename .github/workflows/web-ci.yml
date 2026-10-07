@@ -39,3 +39,33 @@ jobs:
 
       - name: Shell smoke
         run: npm run smoke
+
+  # 前端产物最终是打进 Docker 镜像的（Go //go:embed），而镜像只在打 tag 时才构建 ——
+  # 也就是「Dockerfile 坏了要等发布才知道」。这里只构建 **web 阶段**（几十秒），
+  # 覆盖新加的 node 阶段与 alpine/musl 上的 npm ci；整镜像要编 cgo，不适合每次 PR 都跑。
+  docker-web-stage:
+    name: Docker web 阶段可构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build web stage
+        run: |
+          docker build \
+            --target web \
+            -f OpenLEMS/script/Dockerfile.dev \
+            -t lems-web-stage:pr \
+            OpenLEMS
+
+      - name: 校验包内容（页面 chunk 数 vs 导航页数）
+        run: |
+          docker run --rm --entrypoint sh lems-web-stage:pr -c 'ls -la /out && python3 -c "
+          import zipfile
+          z = zipfile.ZipFile(\"/out/web.zip\")
+          names = z.namelist()
+          chunks = [n for n in names if n.endswith(\".js\") and \"View-\" in n]
+          print(\"文件\", len(names), \"页面 chunk\", len(chunks))
+          assert \"index.html\" in names, \"zip 里没有 index.html\"
+          assert len(chunks) >= 31, \"页面 chunk 太少，可能少打了页面\"
+          "'

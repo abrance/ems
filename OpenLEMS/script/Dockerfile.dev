@@ -112,10 +112,11 @@ RUN mkdir -p /app/application/lib
 RUN cp /app/@cpp/hexlib/build/libhexlib.a /app/application/lib/
 
 # 第五步：编译 EMS 程序（此时依赖已下载，不用再下载）
-# 前端产物放到 //go:embed 期望的位置（application/manifest/web.zip）
-COPY --from=web /out/web.zip ./application/manifest/web.zip
-
 WORKDIR /app/application
+# 前端产物放到 //go:embed 期望的位置。
+# **用绝对路径**：相对目标会跟着当前 WORKDIR 走（上一步把 WORKDIR 设成了 /app/@cpp/hexlib），
+# 放错地方就是编译期 `pattern web.zip: no matching files found`。
+COPY --from=web /out/web.zip /app/application/manifest/web.zip
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     echo "Starting Go build..." && \
