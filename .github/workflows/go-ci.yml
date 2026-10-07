@@ -96,13 +96,10 @@ jobs:
               continue
             fi
 
-            # 仅有 go.mod、没有源码的模块（p_storage、t_time_task）：
-            # `go vet ./...` 会以 "matched no packages" 退 1，不是错误，直接跳过
-            if [ -z "$(cd "$m" && go list ./... 2>/dev/null)" ]; then
-              echo "::notice::$m 没有 Go 包，跳过"
-              continue
-            fi
-
+            # 这里**故意不为「只有 go.mod 的空壳模块」留后路**：
+            # 那种模块本来就不该挂在 go.work 里（此前 p_storage、t_time_task 就是），
+            # 真出现了就让 `go vet ./...` 以 "matched no packages" 把它顶红，
+            # 让「go.work 里每个模块都有 Go 包」成为一条被守着的不变量。
             echo "::group::$m"
             ( cd "$m" && go vet ./... && go test ./... )
             echo "::endgroup::"
