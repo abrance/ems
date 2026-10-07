@@ -77,7 +77,14 @@ export const NAV: NavTab[] = [
       { key: 'collect', title: '采集管理', path: '/manage/collect', status: 'ready', perm: 'manage:collect' },
       { key: 'statistics', title: '统计分析', path: '/manage/statistics', status: 'ready', perm: 'manage:statistics' },
       { key: 'audit', title: '审计', path: '/manage/audit', status: 'ready', perm: 'manage:audit' },
-      { key: 'exports', title: '报表导出', path: '/manage/exports', status: 'todo', perm: 'manage:export', panels: ['报表模板', '生成任务'] },
+      {
+        key: 'exports',
+        title: '报表导出',
+        path: '/manage/exports',
+        status: 'ready',
+        perm: 'manage:export',
+        note: '基础版：7 个数据集前端拼 CSV 直接下载。没有模板 / 异步任务 / 历史文件（那需要后端任务队列）',
+      },
       {
         key: 'users',
         title: '用户与权限',
