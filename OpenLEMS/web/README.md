@@ -170,6 +170,9 @@ npm run browser-check   # 真浏览器：无头 Firefox 查「图画出来没有
 npm run verify         # = 上面三个（+ build）；本地没 firefox 时 browser-check 自动跳过
 ```
 
+> 更完整的工程经验（含排查手册、契约坑、操作纪律）见
+> [`../docs/lessons-learned.md`](../docs/lessons-learned.md)。
+
 **为什么需要 browser-check**（冒烟抓不到、真实发生过两次）：
 
 - 冒烟跑在 happy-dom 里，**没有 canvas** —— `echarts.init` 直接抛错，
