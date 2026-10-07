@@ -951,6 +951,17 @@ await clickTo('场景', '信息披露')
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('负荷与电价曲线'))
 
+  // 数据场景：只有一支，所以是标签不是下拉；且必须说清另外两支没有数据源
+  const sceneChip = doc.querySelector('[data-scene]')
+  check(!!sceneChip && sceneChip.textContent.includes('广东现货日报'), '页头显示当前数据场景')
+  check(
+    !doc.querySelector('.pagehead select, .scene-switch select') &&
+      !sceneChip?.tagName.match(/SELECT|INPUT/i),
+    '「场景」不是可切换控件（切换本来不改变任何数据）',
+  )
+  const hint = sceneChip?.getAttribute('title') ?? ''
+  check(hint.includes('山西现货交易') && hint.includes('需要'), '悬停说明列出规划中的场景及各自缺的数据源', hint.split('\n')[1] ?? '')
+
   // KPI 是模板绑定，之前「图空白」时它们照样有值 —— 所以不能只断言 KPI
   check(bodyHas('3000.0'), 'KPI 显示接口返回的负荷均值')
   check(bodyHas('380.0'), 'KPI 显示日前均价')
