@@ -108,10 +108,13 @@ func jitter(rng *rand.Rand, amplitude float64) float64 {
 	return (rng.Float64()*2 - 1) * amplitude
 }
 
-// jitterExtra random-walks the configured non-ESS points inside their range.
+// jitterExtra re-rolls the configured non-ESS points around their configured
+// value each tick. It deliberately does not accumulate: an unanchored random
+// walk drifts away from the base and ends up pinned to min/max after a few
+// hours (observed: irradiance 450 -> 32, grid power 25 -> 44 in 20 minutes).
 func jitterExtra(h *slave.Handler, s Settings, rng *rand.Rand) {
 	for _, p := range s.Jitter {
-		value := p.Decode(h.Get(p.Addr)) + jitter(rng, p.Jitter)
+		value := p.Value + jitter(rng, p.Jitter)
 		if p.HasRange {
 			if value < p.Min {
 				value = p.Min
