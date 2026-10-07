@@ -1,10 +1,12 @@
 package mock
 
 import (
+	"math"
 	"math/rand/v2"
 	"testing"
 	"time"
 
+	"github.com/abrance/ems/emsdevice/internal/devicetable"
 	"github.com/abrance/ems/emsdevice/internal/essdemo"
 	"github.com/abrance/ems/emsdevice/pkg/modbus/slave"
 )
@@ -34,5 +36,32 @@ func TestTickFollowsTargetPower(t *testing.T) {
 	soc := essdemo.Decode01(h.Get(essdemo.AddrSOC))
 	if soc <= 80 {
 		t.Fatalf("soc should rise while charging, got %v", soc)
+	}
+}
+
+// TestJitterExtraStaysAroundBase pins the fix for the unanchored random walk:
+// every tick must stay within jitter of the configured value, and the value
+// must actually move.
+func TestJitterExtraStaysAroundBase(t *testing.T) {
+	base := devicetable.Point{
+		Addr: 0x65, Key: "Power", Signed: true, Scale: 0.1,
+		Value: 60, Jitter: 3, HasRange: true, Min: 0, Max: 120,
+	}
+	h := slave.NewHandler(1, map[uint16]uint16{base.Addr: base.Encode(base.Value)})
+	s := Settings{Jitter: []devicetable.Point{base}}
+	rng := rand.New(rand.NewPCG(7, 8))
+
+	minSeen, maxSeen := math.Inf(1), math.Inf(-1)
+	for i := 0; i < 5000; i++ {
+		Tick(h, s, rng, time.Second)
+		v := base.Decode(h.Get(base.Addr))
+		if math.Abs(v-base.Value) > base.Jitter+1e-9 {
+			t.Fatalf("tick %d: %v drifted away from base %v (jitter %v)", i, v, base.Value, base.Jitter)
+		}
+		minSeen = math.Min(minSeen, v)
+		maxSeen = math.Max(maxSeen, v)
+	}
+	if minSeen >= base.Value || maxSeen <= base.Value {
+		t.Fatalf("jitter never moved: min=%v max=%v", minSeen, maxSeen)
 	}
 }

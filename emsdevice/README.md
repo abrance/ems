@@ -39,8 +39,8 @@ go build -o emsdevice ./cmd/emsdevice
 | `scale` | 工程量 = 原码 × scale，默认 1 |
 | `value` | 上电初值（工程量） |
 | `writable` | 允许 FC06/FC16 写入；**不写就是只读** |
-| `jitter` | live 模式下每 tick 的随机游走幅度（工程量），0/缺省 = 不动 |
-| `min` / `max` | 随机游走的钳位范围（可选，各出现一个即生效） |
+| `jitter` | live 模式下每 tick 围绕初值抖动的幅度（工程量），0/缺省 = 不动 |
+| `min` / `max` | 抖动后的钳位范围（可选，各出现一个即生效） |
 
 内置的四张表与 OpenLEMS 的 demo 驱动一一对应（地址不重叠，可挂在同一
 `unitId` 上）：
@@ -67,7 +67,9 @@ go build -o emsdevice ./cmd/emsdevice
 
 1. 储能柜按 SOC/功率模型运行：绕 `targetPower` 抖动、受 `deviceControl` 控制、
    按 `minSoc`/`maxSoc` 钳位，并把充放电量累计进 `generatedEnergy`/`consumedEnergy`。
-2. 点表里带 `jitter` 的点（光伏/负载/关口）按范围随机游走。
+2. 点表里带 `jitter` 的点（光伏/负载/关口）每 tick 围绕初值抖动并钳到
+   `min`/`max`。刻意不做累积式随机游走 —— 那样会一路漂走，几小时后贴死在
+   边界上（实测 20 分钟里辐照度 450→32、关口功率 25→44）。
 
 储能柜的初值仍由 `mock` 段与 `EMSDEVICE_MOCK_*` 环境变量决定（后者优先），
 点表里的 `value` 只是同一份默认值的文档副本。
