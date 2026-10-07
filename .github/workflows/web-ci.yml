@@ -58,14 +58,22 @@ jobs:
             -t lems-web-stage:pr \
             OpenLEMS
 
-      - name: 校验包内容（页面 chunk 数 vs 导航页数）
+      # 校验放在**宿主**上做：alpine 里既没有 python3 也没有 unzip，
+      # 而宿主（ubuntu runner）有 python3 —— 顺带用另一个独立实现再验一遍我们的 zip 写入
+      # （打包脚本是手写的 zip 结构，值得让 python 的 zipfile 也读一遍）。
+      - name: 取出产物并校验（在宿主上用 python）
         run: |
-          docker run --rm --entrypoint sh lems-web-stage:pr -c 'ls -la /out && python3 -c "
+          cid=$(docker create lems-web-stage:pr)
+          docker cp "$cid:/out/web.zip" /tmp/web.zip
+          docker rm "$cid" >/dev/null
+          python3 - <<'EOF'
           import zipfile
-          z = zipfile.ZipFile(\"/out/web.zip\")
+
+          z = zipfile.ZipFile('/tmp/web.zip')
+          assert z.testzip() is None, 'CRC 校验失败：zip 结构坏了'
           names = z.namelist()
-          chunks = [n for n in names if n.endswith(\".js\") and \"View-\" in n]
-          print(\"文件\", len(names), \"页面 chunk\", len(chunks))
-          assert \"index.html\" in names, \"zip 里没有 index.html\"
-          assert len(chunks) >= 31, \"页面 chunk 太少，可能少打了页面\"
-          "'
+          chunks = [n for n in names if n.endswith('.js') and 'View-' in n]
+          print(f'文件 {len(names)} 个，页面 chunk {len(chunks)} 个')
+          assert 'index.html' in names, 'zip 里没有 index.html（界面打不开）'
+          assert len(chunks) >= 31, f'页面 chunk 只有 {len(chunks)} 个，可能少打了页面'
+          EOF
