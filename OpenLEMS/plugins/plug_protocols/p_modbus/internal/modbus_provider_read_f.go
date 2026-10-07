@@ -204,7 +204,8 @@ func (p *ModbusProtocolProvider) analysisModbus(groupName string, addr, quantity
 
 		if er != nil {
 			message := fmt.Sprintf("[%s-%s] %v;", groupName, point.Name, er.Error())
-			c_log.Errorf(p.ctx, message)
+			// message 是拼出来的，含 % 时会被当格式动词吃掉，所以显式用 %s
+			c_log.Errorf(p.ctx, "%s", message)
 			errMessage += message
 			continue
 		}
@@ -213,7 +214,8 @@ func (p *ModbusProtocolProvider) analysisModbus(groupName string, addr, quantity
 		results[i] = value.GetValue()
 	}
 	if errMessage != "" {
-		err = errors.Errorf(errMessage)
+		// 同上：错误文本里可能有 %（点名、寄存器名），不能再当格式串用
+		err = errors.New(errMessage)
 	}
 
 	return results, err

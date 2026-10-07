@@ -20,13 +20,13 @@ func NewCanbusConnect(ctx context.Context, protocolConfig *c_base.SProtocolConfi
 	// 启动接口
 	canInterface, err := candevice.New(protocolConfig.GetAddress())
 	if err != nil {
-		return nil, nil, gerror.Wrapf(err, "canbus初始化失败！%s")
+		return nil, nil, gerror.Wrap(err, "canbus初始化失败！")
 	}
 	isUp, _ := canInterface.IsUp()
 	if !isUp {
 		err = canInterface.SetBitrate(canbusConfig.BaudRate)
 		if err != nil {
-			return nil, nil, gerror.Wrapf(err, "canbus[%v] 设置波特率为 %v 失败！%s", protocolConfig.GetAddress(), canbusConfig.BaudRate)
+			return nil, nil, gerror.Wrapf(err, "canbus[%v] 设置波特率为 %v 失败！", protocolConfig.GetAddress(), canbusConfig.BaudRate)
 		}
 		err = canInterface.SetUp()
 		if err != nil {
@@ -55,7 +55,7 @@ func NewCanbusConnect(ctx context.Context, protocolConfig *c_base.SProtocolConfi
 		return nil, nil, gerror.Newf("错误的参数传递！%s 进入了canbus协议连接初始化！", protocolConfig.GetProtocol())
 	}
 	if err != nil {
-		return nil, nil, gerror.Wrapf(err, "canbus协议连接[%s]初始化失败！%s", protocolConfig.GetAddress())
+		return nil, nil, gerror.Wrapf(err, "canbus协议连接[%s]初始化失败！", protocolConfig.GetAddress())
 	}
 
 	// 初始化 can 接收器

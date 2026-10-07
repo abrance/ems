@@ -13,6 +13,11 @@ import (
 // 若哪天反演结果偏离这个形状（比如不再单调），大概率是配对或分箱出了问题。
 func TestSupplyCurveRealData(t *testing.T) {
 	ctx := context.Background()
+	initGlobal(ctx)
+	// 同上：没有本地缓存就直接跳过，不要在 CI 里拉 37MB
+	if !global.localCSVReady() {
+		t.Skip("本地没有 gd_metric.csv 缓存，跳过")
+	}
 	cases := []struct {
 		name       string
 		from, to   string
