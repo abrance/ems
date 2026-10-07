@@ -148,7 +148,11 @@ async function loadTrend() {
   const collected: { name: string; unit: string; data: number[] }[] = []
   let axis: string[] = []
   for (const d of members.value) {
-    const keys = (TREND_KEYS[d.deviceType] ?? []).filter((k) => fieldInfo(d.id, k))
+    // 点位键大小写随驱动而异，按定义里的实际 key 做不敏感匹配
+    const want = TREND_KEYS[d.deviceType] ?? []
+    const keys = (defsByDevice.value[d.id]?.fields ?? [])
+      .map((f) => f.key)
+      .filter((k) => want.includes(k.toLowerCase()) && fieldInfo(d.id, k))
     if (!keys.length) continue
     try {
       const c = await fetchHistory({ deviceId: d.id, telemetryKeys: keys, startTime: start, endTime: end })

@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, watch, type Ref, type WatchSource } from 'vue'
+import { onBeforeUnmount, onMounted, onUpdated, watch, type Ref, type WatchSource } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -11,8 +11,13 @@ echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, Canvas
 /**
  * 把 ECharts 挂到一个 div 上：init / 跟随容器尺寸 / 卸载时 dispose。
  *
- * `deps` 是数据依赖：图表在数据到达之前就挂载时，必须传进去，否则首帧画的是空数据、
- * 之后不会自己重绘。图表挂在 `v-if` 里（数据到了才创建）的场景可以不传。
+ * `deps` 是数据依赖（推荐传，省掉无谓重绘）。**不传也不会画空**：
+ * 没给 deps 时退化成「组件每次更新就重绘」，因为图表容器常常在数据到达之前就挂载了
+ * （面板一直渲染，只是里面还没数）。这个兜底是补一个真实事故：信息披露页两个图都没传 deps，
+ * 于是只画了首帧的空数据 —— 接口有数据、KPI 有数，只有图是白的，页面上没有任何提示。
+ *
+ * 每次重绘会在容器上写 `data-chart-points`＝本次画了多少个数据点。
+ * 图形是 canvas，画没画出来在 DOM 上看不见；这个属性让「图空白」变成可断言、可排查的信号。
  */
 export function useECharts(
   el: Ref<HTMLElement | undefined>,
@@ -22,10 +27,34 @@ export function useECharts(
   let chart: echarts.ECharts | null = null
   let observer: ResizeObserver | null = null
 
+  /** 数一数这次画了多少个数据点（各 series 的 data 长度之和） */
+  function countPoints(option: EChartsOption): number {
+    const raw = (option as { series?: unknown }).series
+    const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+    let n = 0
+    for (const s of list) {
+      const data = (s as { data?: unknown })?.data
+      if (Array.isArray(data)) n += data.length
+    }
+    return n
+  }
+
   function render() {
     if (!el.value) return
-    if (!chart) chart = echarts.init(el.value)
-    chart.setOption(build(), true)
+    const option = build()
+    // **先记点数再碰 ECharts**：这个属性描述的是「页面把多少数据交给了图」，
+    // 与渲染器是否可用无关。冒烟的 happy-dom 没有 canvas，init 会直接失败 ——
+    // 若把记录放在后面，属性永远不会被写上，也就无从区分「没数据」和「画不出来」。
+    el.value.dataset.chartPoints = String(countPoints(option))
+    try {
+      if (!chart) chart = echarts.init(el.value)
+      chart.setOption(option, true)
+      delete el.value.dataset.chartError
+    } catch (err) {
+      // 渲染器起不来时不要把整个页面带崩：记在容器上并说清原因，页面其余部分照常可用
+      el.value.dataset.chartError = err instanceof Error ? err.message : String(err)
+      console.error('[useECharts] 图表渲染失败', err)
+    }
   }
 
   function resize() {
@@ -49,7 +78,17 @@ export function useECharts(
     chart = null
   })
 
-  if (deps.length) watch(deps, render, { deep: true })
+  // 容器本身可能是**后出现的**：图挂在 PanelBox 的 slot 里，加载中时那一块不渲染，
+  // 数据到了才创建出来。而 Vue 的 watch 默认在 DOM 更新**之前**跑 —— 于是首帧扑空
+  // （el 还是 undefined，render 直接 return），此后没人再叫它，图永远空白。
+  // 两个补救：post（DOM 更新后再跑）＋单独盯住元素本身（容器出现时补画一次）。
+  if (deps.length) {
+    watch(deps, render, { deep: true, flush: 'post' })
+  } else {
+    // 没给 deps：兜底成「组件更新就重绘」，宁可多画一次，也不要留一张永远空白的图
+    onUpdated(render)
+  }
+  watch(el, render, { flush: 'post' })
 
   return { render, resize }
 }

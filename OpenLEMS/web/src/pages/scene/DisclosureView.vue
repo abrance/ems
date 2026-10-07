@@ -73,7 +73,7 @@ useECharts(curveEl, (): EChartsOption => {
       { name: '实时电价 (元/MWh)', type: 'line', smooth: true, showSymbol: false, yAxisIndex: 1, lineStyle: { type: 'dashed' }, itemStyle: { color: CHART_COLORS.dark }, data: curve?.realtime.map((s) => s.value) ?? [] },
     ],
   }
-})
+}, [snapshot])
 
 /* ---------- 图 2：日指标趋势 ---------- */
 const trendEl = ref<HTMLElement>()
@@ -90,7 +90,7 @@ useECharts(trendEl, (): EChartsOption => {
       { name: '实时均价 (元/MWh)', type: 'line', smooth: true, showSymbol: false, itemStyle: { color: CHART_COLORS.cyan }, data: days.map((d) => d.realtime.avg) },
     ],
   } as EChartsOption
-})
+}, [snapshot])
 </script>
 
 <template>

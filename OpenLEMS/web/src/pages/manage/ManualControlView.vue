@@ -311,7 +311,7 @@ useECharts(chartEl, (): EChartsOption => {
       }
     }),
   }
-})
+}, [history])
 
 onMounted(async () => {
   await loadDevices()
