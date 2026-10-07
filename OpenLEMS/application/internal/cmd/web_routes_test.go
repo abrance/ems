@@ -30,6 +30,11 @@ func TestAPIRoutesRegistered(t *testing.T) {
 
 	// 前端用到的接口（按模块分组，方便以后加一条就补一条）
 	want := []string{
+		// 认证（登录页与「用户与权限」依赖；改密码接口带 oldPassword 校验，见 controller/auth）
+		"POST /api/auth/login",
+		"POST /api/auth/logout",
+		"POST /api/auth/change-password",
+		"GET /api/auth/current",
 		// 现货日报 / 电网日指标
 		"GET /api/gd-metric",
 		"GET /api/gd-metric/series",

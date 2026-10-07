@@ -86,7 +86,7 @@ src/
 | 场景 · 长周期电价预测 | `GET /api/forecast/price`（`grain=day\|intraday`） |
 | 场景 · 预测复盘 | `GET /api/forecast/recorded`（留痕对账）`GET /api/forecast/backtest`（1A 回测）`GET /api/gd-metric/series`（96 点实际值） |
 | 场景 · 策略反演 | `GET /api/gd-metric/supply-curve`（统计反演：由负荷-出清价反推聚合报价曲线） |
-| 登录 / 退出 / 改密 | `POST /api/auth/login`（`{role, password}`，**没有用户名字段**）、`POST /api/auth/logout`、`POST /api/auth/change-password` |
+| 登录 / 退出 / 改密 | `POST /api/auth/login`（`{role, password}`，**没有用户名字段**）、`POST /api/auth/logout`、`POST /api/auth/change-password`（带 `oldPassword` 校验）、`GET /api/auth/current` |
 
 手动控制页的两条硬规则：
 
@@ -124,7 +124,7 @@ src/
 「数据保留」不单开页：后端接口挂在 `/system/storage-time`，已并入「存储管理」，
 避免同一功能两个入口（导航因此从 29 项变 28 项，冒烟里有显式常量盯着）。
 
-其它 5 页是占位页：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
+其它 2 页是占位页（报表导出、日志级别）：按 `nav` 里声明的面板列出结构 + 标「本期做」/「本期不做」，
 不画假图、不编假数字。
 
 ## 与线上产物的关系
