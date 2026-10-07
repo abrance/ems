@@ -10,10 +10,35 @@ import (
 	"syscall"
 
 	"github.com/abrance/ems/emsdevice/internal/config"
+	"github.com/abrance/ems/emsdevice/internal/devicetable"
 	"github.com/abrance/ems/emsdevice/internal/essdemo"
 	"github.com/abrance/ems/emsdevice/internal/mock"
 	"github.com/abrance/ems/emsdevice/pkg/modbus/slave"
 )
+
+// initialRegisters seeds the served map. With declared point tables every
+// address comes from the config; without them the built-in ess_demo map is
+// used. The mock block always overlays the ESS cabinet (its SOC/power model
+// reads and writes those addresses), and EMSDEVICE_MOCK_* env vars win last.
+func initialRegisters(cfg config.Config) map[uint16]uint16 {
+	regs := essdemo.DefaultRegisters()
+	if len(cfg.Devices) > 0 {
+		regs = devicetable.Registers(cfg.Devices)
+	}
+	for addr, value := range cfg.Mock.Values.Registers() {
+		regs[addr] = value
+	}
+	return regs
+}
+
+// writableRegisters returns nil in legacy mode (every address writable) and a
+// whitelist when the config declares point tables.
+func writableRegisters(cfg config.Config) map[uint16]bool {
+	if len(cfg.Devices) == 0 {
+		return nil
+	}
+	return devicetable.Writable(cfg.Devices)
+}
 
 func main() {
 	configPath := flag.String("config", os.Getenv("EMSDEVICE_CONFIG"), "JSON config path")
@@ -46,7 +71,7 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	handler := slave.NewHandler(uint8(cfg.UnitID), cfg.Mock.Values.Registers())
+	handler := slave.NewHandlerWithAccess(uint8(cfg.UnitID), initialRegisters(cfg), writableRegisters(cfg))
 	server, err := slave.NewServer(cfg.Listen, handler)
 	if err != nil {
 		log.Fatalf("create server: %v", err)
@@ -62,9 +87,10 @@ func main() {
 			Interval:    cfg.Mock.Interval,
 			SOCJitter:   cfg.Mock.SOCJitter,
 			PowerJitter: cfg.Mock.PowerJitter,
+			Jitter:      devicetable.JitterPoints(cfg.Devices),
 		})
 	}
-	log.Printf("emsdevice listening %s unitId=%d mock=%s map=0x%X-0x%X", cfg.Listen, cfg.UnitID, cfg.Mock.Mode, essdemo.BaseAddr, essdemo.BaseAddr+essdemo.Count-1)
+	log.Printf("emsdevice listening %s unitId=%d mock=%s points=%d devices=%d", cfg.Listen, cfg.UnitID, cfg.Mock.Mode, len(handler.Snapshot()), len(cfg.Devices))
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

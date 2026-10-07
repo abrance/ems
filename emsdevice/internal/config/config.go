@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/abrance/ems/emsdevice/internal/devicetable"
 	"github.com/abrance/ems/emsdevice/internal/essdemo"
 )
 
@@ -20,6 +21,10 @@ type Config struct {
 	Listen string
 	UnitID uint
 	Mock   Mock
+	// Devices are the simulated point tables declared in the config file.
+	// Empty means "legacy": the built-in ess_demo map is served and any
+	// in-range register is writable.
+	Devices []devicetable.Device
 }
 
 type Mock struct {
@@ -31,10 +36,91 @@ type Mock struct {
 }
 
 type fileConfig struct {
-	Listen *string   `json:"listen"`
-	UnitID *uint     `json:"unitId"`
-	Mock   *fileMock `json:"mock"`
+	Listen  *string      `json:"listen"`
+	UnitID  *uint        `json:"unitId"`
+	Mock    *fileMock    `json:"mock"`
+	Devices []fileDevice `json:"devices"`
 }
+
+type fileDevice struct {
+	Key    string      `json:"key"`
+	Name   string      `json:"name"`
+	Points []filePoint `json:"points"`
+}
+
+type filePoint struct {
+	Addr     addrJSON `json:"addr"`
+	Key      string   `json:"key"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Scale    *float64 `json:"scale"`
+	Value    *float64 `json:"value"`
+	Writable *bool    `json:"writable"`
+	Jitter   *float64 `json:"jitter"`
+	Min      *float64 `json:"min"`
+	Max      *float64 `json:"max"`
+}
+
+// addrJSON accepts either a number (200) or a hex string ("0xC8").
+type addrJSON uint16
+
+func (a *addrJSON) UnmarshalJSON(raw []byte) error {
+	s := strings.Trim(string(raw), `"`)
+	base := 10
+	if strings.HasPrefix(strings.ToLower(s), "0x") {
+		s, base = s[2:], 16
+	}
+	n, err := strconv.ParseUint(s, base, 16)
+	if err != nil {
+		return fmt.Errorf("addr %q: %w", string(raw), err)
+	}
+	*a = addrJSON(n)
+	return nil
+}
+
+func (d fileDevice) toDevice() (devicetable.Device, error) {
+	out := devicetable.Device{Key: d.Key, Name: d.Name}
+	for _, p := range d.Points {
+		pt := devicetable.Point{
+			Addr: p.Addr.uint16(),
+			Key:  p.Key,
+			Name: p.Name,
+			// ess_demo/pv_demo/load_demo all use int16 by default; only the
+			// energy/temperature-style points declare uint16 explicitly.
+			Signed: p.Type != "uint16" && p.Type != "u16",
+			Scale:  1,
+		}
+		switch p.Type {
+		case "", "int16", "i16", "uint16", "u16":
+		default:
+			return devicetable.Device{}, fmt.Errorf("%s.%s: unknown type %q", d.Key, p.Key, p.Type)
+		}
+		if p.Scale != nil {
+			pt.Scale = *p.Scale
+		}
+		if p.Value != nil {
+			pt.Value = *p.Value
+		}
+		if p.Writable != nil {
+			pt.Writable = *p.Writable
+		}
+		if p.Jitter != nil {
+			pt.Jitter = *p.Jitter
+		}
+		if p.Min != nil {
+			pt.Min = *p.Min
+			pt.HasRange = true
+		}
+		if p.Max != nil {
+			pt.Max = *p.Max
+			pt.HasRange = true
+		}
+		out.Points = append(out.Points, pt)
+	}
+	return out, nil
+}
+
+func (a addrJSON) uint16() uint16 { return uint16(a) }
 
 type fileMock struct {
 	Mode              *string  `json:"mode"`
@@ -136,7 +222,14 @@ func applyFile(cfg *Config, path string) error {
 			return err
 		}
 	}
-	return nil
+	for _, d := range file.Devices {
+		dev, err := d.toDevice()
+		if err != nil {
+			return err
+		}
+		cfg.Devices = append(cfg.Devices, dev)
+	}
+	return devicetable.Validate(cfg.Devices)
 }
 
 func applyFileMock(dst *Mock, src *fileMock) error {

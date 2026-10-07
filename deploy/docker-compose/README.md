@@ -27,9 +27,17 @@ docker compose up -d
 
 ## emsdevice
 
-同 compose 会启动 `ess_demo` Modbus 从站，监听 `1502`，并挂载 `emsdevice.json` 作为 mock 配置。
+同 compose 会启动模拟 Modbus 从站（监听 `1502`），挂载 `emsdevice.json`。
+OpenLEMS 协议地址填 `emsdevice`，端口 `1502`，`params.unitId=1`，按寄存器地址挂四类设备：
 
-OpenLEMS 协议地址填 `emsdevice`，端口 `1502`，设备驱动 `ess_demo_v1.0.0`，`params.unitId=1`。
+| 设备驱动 | holding |
+| --- | --- |
+| `ess_demo_v1.0.0` 储能柜 | `0xC8-0xD5` |
+| `pv_demo_v1.0.0` 光伏 | `0x64-0x6C` |
+| `load_demo_v1.0.0` 负载 | `0x12C-0x131` |
+| `ammeter_demo_v1.0.0` 关口电表 | `0x190-0x1A8` |
 
-改点表或抖动幅度：编辑 `emsdevice.json` 后 `docker compose up -d emsdevice`。
-`.env` 里的 `EMSDEVICE_MOCK*` 会覆盖 JSON 中的同名项。`EMSDEVICE_MOCK=static` 关闭实时抖动。
+`emsdevice.json` 的 `devices` 段就是点表（地址 / 类型 / 缩放 / 初值 / 是否可写 /
+live 抖动）。改完 `docker compose up -d emsdevice` 生效；`.env` 里的
+`EMSDEVICE_MOCK*` 覆盖储能柜的同名初值，`EMSDEVICE_MOCK=static` 关闭实时抖动。
+四类设备共用一个从站，不再需要额外的端口。
