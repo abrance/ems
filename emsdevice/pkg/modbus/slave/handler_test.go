@@ -7,6 +7,36 @@ import (
 	"github.com/simonvetter/modbus"
 )
 
+func TestHandleHoldingRegistersWritableWhitelist(t *testing.T) {
+	regs := map[uint16]uint16{essdemo.AddrStatus: 2, essdemo.AddrTargetPower: 50}
+	writable := map[uint16]bool{essdemo.AddrTargetPower: true}
+	h := NewHandlerWithAccess(1, regs, writable)
+
+	if _, err := h.HandleHoldingRegisters(&modbus.HoldingRegistersRequest{
+		UnitId: 1, Addr: essdemo.AddrTargetPower, Quantity: 1, IsWrite: true, Args: []uint16{120},
+	}); err != nil {
+		t.Fatalf("write target power: %v", err)
+	}
+	if h.Snapshot()[essdemo.AddrTargetPower] != 120 {
+		t.Fatal("target power not updated")
+	}
+
+	if _, err := h.HandleHoldingRegisters(&modbus.HoldingRegistersRequest{
+		UnitId: 1, Addr: essdemo.AddrStatus, Quantity: 1, IsWrite: true, Args: []uint16{9},
+	}); err != modbus.ErrIllegalDataAddress {
+		t.Fatalf("want illegal address for read-only point, got %v", err)
+	}
+	if h.Snapshot()[essdemo.AddrStatus] != 2 {
+		t.Fatal("read-only register must not change")
+	}
+
+	if _, err := h.HandleHoldingRegisters(&modbus.HoldingRegistersRequest{
+		UnitId: 1, Addr: 0x1A0, Quantity: 1,
+	}); err != modbus.ErrIllegalDataAddress {
+		t.Fatalf("want illegal address for undeclared point, got %v", err)
+	}
+}
+
 func TestHandleHoldingRegistersReadBlock(t *testing.T) {
 	h := NewHandler(1, essdemo.DefaultRegisters())
 	got, err := h.HandleHoldingRegisters(&modbus.HoldingRegistersRequest{

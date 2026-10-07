@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/abrance/ems/emsdevice/internal/devicetable"
 	"github.com/abrance/ems/emsdevice/internal/essdemo"
 	"github.com/abrance/ems/emsdevice/pkg/modbus/slave"
 )
@@ -14,6 +15,10 @@ type Settings struct {
 	Interval    time.Duration
 	SOCJitter   float64
 	PowerJitter float64
+	// Jitter lists extra points (pv / load / ammeter) that random-walk in
+	// live mode. The ESS cabinet is driven by the SOC/power model below, so
+	// its points must not appear here.
+	Jitter []devicetable.Point
 }
 
 func Run(ctx context.Context, h *slave.Handler, s Settings) {
@@ -34,6 +39,8 @@ func Run(ctx context.Context, h *slave.Handler, s Settings) {
 }
 
 func Tick(h *slave.Handler, s Settings, rng *rand.Rand, dt time.Duration) {
+	jitterExtra(h, s, rng)
+
 	if h.Get(essdemo.AddrDeviceControl) == 0 {
 		h.Set(essdemo.AddrStatus, 0)
 		h.Set(essdemo.AddrPower, essdemo.Encode01(0))
@@ -99,4 +106,20 @@ func jitter(rng *rand.Rand, amplitude float64) float64 {
 		return 0
 	}
 	return (rng.Float64()*2 - 1) * amplitude
+}
+
+// jitterExtra random-walks the configured non-ESS points inside their range.
+func jitterExtra(h *slave.Handler, s Settings, rng *rand.Rand) {
+	for _, p := range s.Jitter {
+		value := p.Decode(h.Get(p.Addr)) + jitter(rng, p.Jitter)
+		if p.HasRange {
+			if value < p.Min {
+				value = p.Min
+			}
+			if value > p.Max {
+				value = p.Max
+			}
+		}
+		h.Set(p.Addr, p.Encode(value))
+	}
 }

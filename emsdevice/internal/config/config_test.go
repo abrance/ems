@@ -45,6 +45,68 @@ func TestLoadJSONAndFlags(t *testing.T) {
 	}
 }
 
+func TestLoadDevicesPointTable(t *testing.T) {
+	clearMockEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "emsdevice.json")
+	raw := []byte(`{
+	  "devices": [
+	    {
+	      "key": "pv",
+	      "name": "光伏",
+	      "points": [
+	        { "addr": "0x65", "key": "Power", "type": "int16", "scale": 0.1, "value": 60, "jitter": 3, "min": 0, "max": 120 },
+	        { "addr": "0x66", "key": "GeneratedEnergy", "type": "uint16", "scale": 0.1, "value": 1200 },
+	        { "addr": 104, "key": "PowerLimit", "value": 100, "writable": true }
+	      ]
+	    }
+	  ]
+	}`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path, Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Devices) != 1 || cfg.Devices[0].Key != "pv" || len(cfg.Devices[0].Points) != 3 {
+		t.Fatalf("devices %+v", cfg.Devices)
+	}
+	power := cfg.Devices[0].Points[0]
+	if power.Addr != 0x65 || power.Scale != 0.1 || power.Writable {
+		t.Fatalf("power %+v", power)
+	}
+	if !power.Signed || !power.HasRange || power.Min != 0 || power.Max != 120 {
+		t.Fatalf("power range %+v", power)
+	}
+	energy := cfg.Devices[0].Points[1]
+	if energy.Signed {
+		t.Fatalf("uint16 must decode as unsigned: %+v", energy)
+	}
+	decimal := cfg.Devices[0].Points[2]
+	if decimal.Addr != 104 || !decimal.Writable || decimal.Scale != 1 {
+		t.Fatalf("decimal addr %+v", decimal)
+	}
+}
+
+func TestLoadDevicesRejectsDuplicateAddress(t *testing.T) {
+	clearMockEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "emsdevice.json")
+	raw := []byte(`{
+	  "devices": [
+	    { "key": "a", "points": [ { "addr": "0xC8", "key": "X" } ] },
+	    { "key": "b", "points": [ { "addr": 200, "key": "Y" } ] }
+	  ]
+	}`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, Overrides{}); err == nil {
+		t.Fatal("duplicate address must fail")
+	}
+}
+
 func TestLoadEnv(t *testing.T) {
 	clearMockEnv(t)
 	t.Setenv("EMSDEVICE_MOCK", "true")

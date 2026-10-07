@@ -3,23 +3,31 @@ package slave
 import (
 	"sync"
 
-	"github.com/abrance/ems/emsdevice/internal/essdemo"
 	"github.com/simonvetter/modbus"
 )
 
-// Handler serves ess_demo holding registers over Modbus TCP.
+// Handler serves a simulated holding-register map over Modbus TCP. Reads and
+// writes are limited to the declared addresses; writes are additionally
+// limited to the writable whitelist when one is configured.
 type Handler struct {
 	mu     sync.RWMutex
 	unitID uint8
 	regs   map[uint16]uint16
+	// writable nil means "legacy": every declared address accepts writes.
+	// Non-nil (possibly empty) restricts FC06/FC16 to the listed addresses.
+	writable map[uint16]bool
 }
 
 func NewHandler(unitID uint8, initial map[uint16]uint16) *Handler {
+	return NewHandlerWithAccess(unitID, initial, nil)
+}
+
+func NewHandlerWithAccess(unitID uint8, initial map[uint16]uint16, writable map[uint16]bool) *Handler {
 	regs := make(map[uint16]uint16, len(initial))
 	for addr, value := range initial {
 		regs[addr] = value
 	}
-	return &Handler{unitID: unitID, regs: regs}
+	return &Handler{unitID: unitID, regs: regs, writable: writable}
 }
 
 func (h *Handler) acceptUnit(unitID uint8) bool {
@@ -43,10 +51,13 @@ func (h *Handler) HandleHoldingRegisters(req *modbus.HoldingRegistersRequest) ([
 	out := make([]uint16, req.Quantity)
 	for i := uint16(0); i < req.Quantity; i++ {
 		addr := req.Addr + i
-		if !essdemo.InRange(addr) {
+		if _, known := h.regs[addr]; !known {
 			return nil, modbus.ErrIllegalDataAddress
 		}
 		if req.IsWrite {
+			if h.writable != nil && !h.writable[addr] {
+				return nil, modbus.ErrIllegalDataAddress
+			}
 			if i >= uint16(len(req.Args)) {
 				return nil, modbus.ErrIllegalDataValue
 			}

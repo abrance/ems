@@ -311,4 +311,4 @@ Go CI 的 `defaults.run.working-directory` 是 `application`，
 | 长周期投资评估（年 / 15 年） | 属另一条产品线 |
 | 会话时长设置 | 读取方式有 bug（`g.Cfg().MustGet(ctx, "int:"+值)` 是无效配置键），
 且服务端会话上限是全局的 `SetSessionMaxAge` → per-role 做不到 |
-| `emsdevice` 模拟点表 | 现场只有一台顶层储能柜，运行监控内容寡淡；加点表就能有光伏/负载/关口电表 |
+| ~~`emsdevice` 模拟点表~~ | 已补（2026-10-08）：`emsdevice.json` 的 `devices` 段成为点表，加了光伏 / 负载 / 关口电表三张表，并给储能柜补齐可写点位；四类设备共用一个从站（地址不重叠），运行监控不再只有一台柜子 |
