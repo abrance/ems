@@ -48,14 +48,24 @@ jobs:
       - name: Build
         run: go build ./...
 
-  emsdevice-ci:
-    name: emsdevice CI
+  # 工作区里除 application 以外的模块（services / plugins / common / tools）。
+  #
+  # 为什么单开一个 job：`defaults.run.working-directory` 是 application，
+  # 上面那套 vet/test 只覆盖到它一个模块。其余约 25 个模块因此从来没被 vet 或测试过 ——
+  # 一个「电价类型落库恒为平电」的错就那样在 services/s_price 里藏了很久，
+  # 而 vet 本来就能直接报出来（string(枚举)）。
+  #
+  # 这里的模块清单不手写，直接读 go.work：手写一份迟早会和 go.work 不一致，
+  # 而不一致的表现是「新模块静默不受保护」——正是这个 job 要防的事。
+  workspace-ci:
+    name: Workspace CI（其它模块）
     runs-on: ubuntu-latest
     env:
-      CGO_ENABLED: "0"
+      CGO_ENABLED: "1"
+      CGO_LDFLAGS: "-lm"
     defaults:
       run:
-        working-directory: emsdevice
+        working-directory: OpenLEMS
 
     steps:
       - name: Checkout repository
@@ -64,18 +74,36 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: emsdevice/go.mod
+          go-version-file: OpenLEMS/go.work
           cache: true
-          cache-dependency-path: emsdevice/go.sum
+          cache-dependency-path: |
+            OpenLEMS/go.work.sum
+            OpenLEMS/**/go.sum
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Build hexlib
+        working-directory: OpenLEMS/@cpp/hexlib
+        run: make build
 
-      - name: Run go vet
-        run: go vet ./...
+      - name: Vet & test every workspace module
+        run: |
+          set -euo pipefail
+          # 只列不跑的模块要写在这里，并写清理由（否则它就是下一个「静默不受保护」的模块）
+          skip_re='^\./application$'   # 上面 go-ci 已经完整跑过
 
-      - name: Run tests
-        run: go test ./...
+          go work edit -json | jq -r '.Use[].DiskPath' | while read -r m; do
+            if [[ "$m" =~ $skip_re ]]; then
+              echo "::notice::$m 由 go-ci 覆盖，此处跳过"
+              continue
+            fi
 
-      - name: Build
-        run: go build -o emsdevice ./cmd/emsdevice
+            # 仅有 go.mod、没有源码的模块（p_storage、t_time_task）：
+            # `go vet ./...` 会以 "matched no packages" 退 1，不是错误，直接跳过
+            if [ -z "$(cd "$m" && go list ./... 2>/dev/null)" ]; then
+              echo "::notice::$m 没有 Go 包，跳过"
+              continue
+            fi
+
+            echo "::group::$m"
+            ( cd "$m" && go vet ./... && go test ./... )
+            echo "::endgroup::"
+          done

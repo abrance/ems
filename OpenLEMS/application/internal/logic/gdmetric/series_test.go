@@ -46,9 +46,17 @@ func TestGetSeriesRejectsBadRange(t *testing.T) {
 	}
 }
 
-// 与 CSV 里的真实覆盖对齐：这条用例只在数据就绪时跑，数据没拉到就跳过。
+// 与 CSV 里的真实覆盖对齐：这条用例只在本地已有缓存时跑。
+//
+// 先查缓存再取数：GetSeries 会把「缓存缺失」当成「该刷新了」去拉 37MB 的
+// gd_metric.csv。CI 上没有这个文件，跑一次就是一次跨网下载（还可能因为
+// 拉到的文件随上游变化而让断言时好时坏）。测试不该有这种依赖。
 func TestGetSeriesRealData(t *testing.T) {
 	ctx := context.Background()
+	initGlobal(ctx)
+	if !global.localCSVReady() {
+		t.Skip("本地没有 gd_metric.csv 缓存，跳过（不要为跑用例去下载 37MB）")
+	}
 	series, err := GetSeries(ctx, "2026-08-01", "2026-08-03", KindDayAhead)
 	if err != nil {
 		t.Skipf("电网日指标数据不可用，跳过: %v", err)
