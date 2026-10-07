@@ -47,6 +47,15 @@ export function useECharts(
     // 若把记录放在后面，属性永远不会被写上，也就无从区分「没数据」和「画不出来」。
     el.value.dataset.chartPoints = String(countPoints(option))
     try {
+      // 容器可能被**换成另一个 DOM 节点**：面板在 loading 时销毁 slot 内容、加载完再新建一个 div。
+      // 这时实例还挂在那个已脱离文档的旧节点上，继续 setOption 只会往看不见的 canvas 上画 ——
+      // 现象是「容器空、整页一个 canvas 都没有」，而且**一点报错都没有**。
+      // （只有真浏览器能发现：冒烟用的 happy-dom 里 init 本来就失败。
+      //   部署上信息披露页的曲线图就是这么空的：数据点写到容器上了，画却画在别处。）
+      if (chart && chart.getDom() !== el.value) {
+        chart.dispose()
+        chart = null
+      }
       if (!chart) chart = echarts.init(el.value)
       chart.setOption(option, true)
       delete el.value.dataset.chartError
