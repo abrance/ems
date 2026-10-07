@@ -32,6 +32,23 @@ export interface NavTab {
 
 export const NAV: NavTab[] = [
   {
+    key: 'monitor',
+    title: '运行监控',
+    pages: [
+      {
+        key: 'overview',
+        title: '能源总览',
+        path: '/monitor/overview',
+        status: 'ready',
+        perm: 'monitor:overview',
+        note: '看板面板可勾选显隐，配置存本地',
+      },
+      { key: 'realtime', title: '实时数据', path: '/monitor/realtime', status: 'ready', perm: 'monitor:realtime' },
+      { key: 'cabinet', title: '储能柜', path: '/monitor/cabinet', status: 'ready', perm: 'monitor:cabinet' },
+      { key: 'alarms', title: '告警中心', path: '/monitor/alarms', status: 'ready', perm: 'monitor:alarm' },
+    ],
+  },
+  {
     key: 'scene',
     title: '场景',
     scene: true,

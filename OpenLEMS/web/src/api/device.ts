@@ -82,6 +82,12 @@ export interface PointField {
   max?: number
   default?: string
   description?: string
+  /**
+   * 枚举点位（如运行状态）的取值说明：文案 + 颜色，由后端点位定义给出。
+   * **不要在页面上再写一份映射表** —— 设备型号不同，状态码的含义就不同，
+   * 硬编码的表迟早会和实际设备对不上。
+   */
+  valueExplain?: { key: string; value: string; color: string; fromParam: boolean }[]
 }
 
 export interface PointDefinitions {

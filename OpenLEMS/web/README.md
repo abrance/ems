@@ -1,6 +1,6 @@
 # LEMS Web
 
-EMS 前端源码。企业后台布局：顶部 Tab（场景 / 管理 / 配置）+ 左侧栏 + 主界面。
+EMS 前端源码。企业后台布局：顶部 Tab（运行监控 / 场景 / 管理 / 配置）+ 左侧栏 + 主界面。
 
 对应设计稿：[`.monkeycode/specs/2026-10-06-ems-frontend-shell/design.md`](../../.monkeycode/specs/2026-10-06-ems-frontend-shell/design.md)
 
@@ -89,6 +89,7 @@ src/
 | 管理 · 报表导出 | 不新增接口：复用上面这些接口在前端拼 CSV（见 `src/exports/datasets.ts`） |
 | 配置 · 日志级别 | `GET /api/setting`（公开设置）、`POST /api/setting/detail`、`POST /api/setting/update`（**全量覆盖**，改值前先读详情再合并） |
 | 配置 · 存储管理 | `GET /api/system/retention`（保留策略状态）、`POST /api/system/retention/clean`（立即清理） |
+| 运行监控 · 四页 | 复用既有接口：`/device/{detailed-list,telemetry,history,*\/points/definitions}`、`/alarm/{current,history,ignore}`、`/effect/summary`、`/forecast/load`（**零后端改动**） |
 | 登录 / 退出 / 改密 | `POST /api/auth/login`（`{role, password}`，**没有用户名字段**）、`POST /api/auth/logout`、`POST /api/auth/change-password`（带 `oldPassword` 校验）、`GET /api/auth/current` |
 
 手动控制页的两条硬规则：
@@ -127,7 +128,9 @@ src/
 「数据保留」不单开页：后端接口挂在 `/system/storage-time`，已并入「存储管理」，
 避免同一功能两个入口（导航因此从 29 项变 28 项，冒烟里有显式常量盯着）。
 
-27 页全部 ready，没有占位页了（占位兜底组件 `PlaceholderView` 保留，用于将来新加的页）。
+31 页全部 ready，没有占位页了（占位兜底组件 `PlaceholderView` 保留，用于将来新加的页）。
+
+默认首页 = `NAV[0].pages[0]`，现在是「运行监控 · 能源总览」（可在「配置 · 界面与语言」里改）。
 
 ## 与线上产物的关系
 

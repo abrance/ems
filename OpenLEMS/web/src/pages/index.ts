@@ -7,6 +7,11 @@ import PlaceholderView from '@/components/PlaceholderView.vue'
  * 做完一个页面 = 这里加一行 + 把 nav 里该页 status 改成 'ready'。
  */
 export const PAGE_LOADERS: Record<string, RouteComponent> = {
+  // 运行监控（设计稿 §9 的暂缓区，现补齐）
+  overview: () => import('./monitor/OverviewView.vue'),
+  realtime: () => import('./monitor/RealtimeView.vue'),
+  cabinet: () => import('./monitor/CabinetView.vue'),
+  alarms: () => import('./monitor/AlarmsView.vue'),
   disclosure: () => import('./scene/DisclosureView.vue'),
   history: () => import('./scene/HistoryView.vue'),
   decision: () => import('./scene/DecisionView.vue'),
