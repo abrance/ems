@@ -14,7 +14,7 @@
  * 已知不覆盖：信息披露页的 ECharts 绘制（happy-dom 无 canvas，只验证挂载不抛错）
  */
 import { Window } from 'happy-dom'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createServer } from 'vite'
@@ -1825,30 +1825,29 @@ check(sceneTab?.pages.length === 7, `场景页 7 个（实际 ${sceneTab?.pages.
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
 check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${totalPages}）`)
 
-// 部署产物是否跟得上源码。
-// web.zip 是**真正部署出去的东西**（dist/ 被 gitignore），所以「改源码忘了打包」
-// 会静默地把旧界面发出去 —— 这个仓库就出现过一次：源码 31 页、zip 里只有 16 个页面 chunk。
-// 打包脚本会写 .packed.json，这里拿它跟导航对账。
+// 构建产物是否跟得上源码。
+//
+// 检查的是 **dist**（npm run verify 刚构建出来的那份），不是 zip：
+// zip 现在由 pack 脚本产出、且不再入库（构建镜像时才生成），所以「提交的产物过期」
+// 这类问题从根上没有了。剩下要守的是另一件事：**加了页面却忘了登记/懒加载** ——
+// 那样 dist 里就少一个页面 chunk，而导航里照样列着它。
 {
-  const packedPath = resolve(root, '.packed.json')
-  let packed = null
+  const assetsDir = resolve(root, 'dist/assets')
+  let pageChunks = []
   try {
-    packed = JSON.parse(readFileSync(packedPath, 'utf-8'))
+    pageChunks = readdirSync(assetsDir).filter((f) => f.endsWith('.js') && /View-/.test(f))
   } catch {
-    check(false, '找到 .packed.json（没打过包？跑 npm run pack）')
+    check(false, '找到 dist/assets（先跑 npm run build）')
   }
-  if (packed) {
-    // 登录页不在导航里，所以 +1；改这里要同时想清楚有没有别的非导航页
-    const NON_NAV_PAGES = 1
-    // 比的是**真实导航页数**（totalPages），不是 EXPECTED_PAGES：
-    // 后者是「防止有人悄悄改导航」的常量，拿它比就测不出「加了页没打包」。
-    check(
-      packed.pageChunks?.length === totalPages + NON_NAV_PAGES,
-      `web.zip 里的页面 chunk 数跟上导航（期望 ${totalPages + NON_NAV_PAGES}，实际 ${packed.pageChunks?.length}）`,
-      '不一致说明 web.zip 是旧的：跑 npm run pack',
-    )
-    check(packed.files?.includes('index.html'), 'web.zip 含 index.html（后端按根路径提供静态资源）')
-  }
+  // 登录页不在导航里，所以 +1；改这里要同时想清楚有没有别的非导航页
+  const NON_NAV_PAGES = 1
+  // 比的是**真实导航页数**（totalPages），不是 EXPECTED_PAGES：
+  // 后者是「防止有人悄悄改导航」的常量，拿它比就漏掉「加了页没打包」这个场景。
+  check(
+    pageChunks.length === totalPages + NON_NAV_PAGES,
+    `dist 里的页面 chunk 数跟上导航（期望 ${totalPages + NON_NAV_PAGES}，实际 ${pageChunks.length}）`,
+    '少一个说明有页面没登记到 pages/index.ts，或多了一个没人用的页面',
+  )
 }
 
 /** 点 Tab 再点侧栏项 */

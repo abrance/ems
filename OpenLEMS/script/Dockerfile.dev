@@ -10,6 +10,21 @@ ARG TARGETVARIANT
 
 # 第一阶段：合并的 C++ 和 Go 构建阶段
 # 注意：必须使用 TARGETPLATFORM 而非 BUILDPLATFORM，确保编译器架构与目标架构一致
+# 第一阶段：构建前端。
+#
+# 为什么要单独一个阶段：Go 侧用 //go:embed 把 web.zip 编进二进制，
+# 也就是说**编译时那个 zip 必须存在**。所以前端必须在构建镜像时就地构建出来，
+# 而不是把产物提交进仓库 —— 提交产物就会出现「改了源码忘了打包、发出去的是旧界面」，
+# 而这种问题测试全绿、最难查。
+FROM --platform=$TARGETPLATFORM node:22-alpine AS web
+WORKDIR /web
+# 先只拷依赖清单，让 npm ci 这一层能被缓存住
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+# 打到 /out/web.zip，下一阶段 COPY 到 application/manifest/（//go:embed 的位置）
+RUN npm run pack -- --out /out/web.zip
+
 FROM --platform=$TARGETPLATFORM gcc:latest AS builder
 
 # 安装 C++ 和 Go 的所有构建依赖
@@ -97,6 +112,9 @@ RUN mkdir -p /app/application/lib
 RUN cp /app/@cpp/hexlib/build/libhexlib.a /app/application/lib/
 
 # 第五步：编译 EMS 程序（此时依赖已下载，不用再下载）
+# 前端产物放到 //go:embed 期望的位置（application/manifest/web.zip）
+COPY --from=web /out/web.zip ./application/manifest/web.zip
+
 WORKDIR /app/application
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
