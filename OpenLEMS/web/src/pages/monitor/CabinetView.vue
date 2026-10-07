@@ -160,7 +160,10 @@ async function loadTrend() {
   const start = end - Number(hours.value) * 3600_000
   const collected: { name: string; unit: string; data: number[] }[] = []
   let axis: string[] = []
-  for (const d of members.value) {
+  // 走 units（柜子自己 + 子设备）：顶层储能柜没有子设备，
+  // 只遍历 members 的话它一条曲线都画不出来 —— 而且页面还会说
+  // 「该柜子下没有开启存储的数值点位」，把「没遍历到」说成了「没数据」。
+  for (const d of units.value) {
     // 点位键大小写随驱动而异，按定义里的实际 key 做不敏感匹配
     const want = TREND_KEYS[d.deviceType] ?? []
     const keys = (defsByDevice.value[d.id]?.fields ?? [])
