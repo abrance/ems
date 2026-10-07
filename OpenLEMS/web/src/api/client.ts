@@ -9,8 +9,10 @@
 const TOKEN_KEY = 'ems:user:token'
 
 /**
- * 401 处理钩子。本期不做登录页，所以一旦后端未开 AUTH_BYPASS_ROLE，
- * 所有接口都会 401 —— 至少要让人知道「为什么全是空的」，而不是一脸空白。
+ * 401 处理钩子：由壳层注册，用来清会话并回登录页。
+ *
+ * 注意后端把 401 写在**响应体**里（`WriteJson(DefaultHandlerResponse{Code:401})`），
+ * HTTP 状态码不一定是 401 —— 只看 res.status 会漏掉，于是界面一直转圈而不去登录页。
  */
 let unauthorizedHandler: (() => void) | null = null
 
@@ -83,7 +85,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     payload = undefined
   }
 
-  if (res.status === 401) unauthorizedHandler?.()
+  if (res.status === 401 || payload?.code === 401) unauthorizedHandler?.()
 
   if (!res.ok) {
     throw new ApiError(payload?.message || `请求失败（HTTP ${res.status}）`, payload?.code, res.status)

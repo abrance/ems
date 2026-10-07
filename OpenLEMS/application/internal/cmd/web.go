@@ -314,8 +314,8 @@ func buildIndexHTMLWithRuntimeConfig(ctx context.Context, webfs fs.FS) ([]byte, 
 	indexHTML := string(indexHTMLBytes)
 
 	// 新前端是一份完整构建产物，不再需要运行时注入悬浮层脚本。
-	// 这里仍然要注入「运行时配置 + 鉴权绕过会话」——后者是当前唯一的会话来源
-	// （新前端没有登录页），删掉它会让整个界面 401。
+	// 这里仍然要注入「运行时配置 + 鉴权绕过会话」。前端已有登录页，所以绕过会话不再是
+	// 唯一的会话来源 —— 它只是 AUTH_BYPASS_ROLE 打开时的捷径（内网演示/临时调试）。
 	//
 	// 注入点在 <head> 之后而不是 </head> 之前：构建产物会把 <script type="module">
 	// 放在 <head> 里，而模块脚本虽然实际是延迟执行，但位置会排在注入脚本之前，

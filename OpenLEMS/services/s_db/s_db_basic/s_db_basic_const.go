@@ -115,10 +115,15 @@ var (
 	}
 
 	// 管理员用户密码设置定义
+	//
+	// 初始密码为 admin（与登录页提示一致）。**出厂默认密码等于弱口令**，
+	// 部署后第一件事就是改掉它 —— 尤其别把管理端放到公网。
+	// 注意：改这里只影响**新建**的库；已有库里 admin_password 已存在，不会被覆盖
+	// （刻意如此：升级时重置用户改过的密码比弱默认值更危险）。
 	SystemSettingAdminPassword = &SSystemSettingDefine{
 		Id:           "admin_password",
 		Group:        c_enum.ESettingGroupSystem,
-		DefaultValue: "100086",
+		DefaultValue: "admin",
 		IsPublic:     false,
 		Remark:       "管理员用户密码",
 		FieldType:    c_enum.ESettingFieldTypeText,
