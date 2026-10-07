@@ -164,6 +164,20 @@ func initGlobal(ctx context.Context) {
 	})
 }
 
+// LocalDataReady 本地是否已有 gd_metric 缓存（调用前不会去下载）。
+//
+// 给「有数据才跑」的调用方用：GetSnapshot/GetSeries 在缓存缺失时会去拉 37MB 的文件，
+// 测试与可选功能不该有这种副作用 —— 先问这个，没数据就跳过。
+func LocalDataReady() bool {
+	initGlobal(context.Background())
+	if global.localCSVReady() {
+		return true
+	}
+	global.mu.RLock()
+	defer global.mu.RUnlock()
+	return len(global.days) > 0
+}
+
 func GetSnapshot(ctx context.Context, from, to, date string) (*Snapshot, error) {
 	initGlobal(ctx)
 	if err := global.ensureFresh(ctx); err != nil {

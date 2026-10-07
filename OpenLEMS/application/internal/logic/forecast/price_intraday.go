@@ -61,6 +61,35 @@ type SPriceForecastIntraday struct {
 	GeneratedOn string
 }
 
+// latestAvailableDate 电网日指标里最新可用的日期（空串=拿不到）。
+func latestAvailableDate(ctx context.Context) string {
+	snap, err := gdmetric.GetSnapshot(ctx, "", "", "")
+	if err != nil || snap == nil {
+		return ""
+	}
+	return snap.LatestDate
+}
+
+// clampAnchor 把预测锚点收到「数据里最新可用的那一天」。
+//
+// 为什么要收：CSV 会明显滞后于现实日期（部署上数据只到 08-31，而当天是 10-07）。
+// 按 asOf 直接取窗口会取到一段**完全空**的范围，然后报「数据不足（0 点）」——
+// 看起来像「没有数据」，实际是取错了窗口。信息披露页的 /api/gd-metric 早就是
+// 「默认取最新可用日」的口径，这里对齐它。
+//
+// latestDate 为空 / 解析失败 / 不早于 today 时原样返回 today：
+// 锚点校正只是兜底，不该因为一个辅助信息把预测直接挡住。
+func clampAnchor(today time.Time, latestDate string) time.Time {
+	if latestDate == "" {
+		return today
+	}
+	latest, err := time.ParseInLocation(priceDateLayout, latestDate, today.Location())
+	if err != nil || latest.IsZero() || !latest.Before(today) {
+		return today
+	}
+	return latest
+}
+
 // LoadPriceIntraday 用电网日指标 CSV 的 15 分钟序列做 96 点预测（以「今天」为预测起点的未来预测）。
 func LoadPriceIntraday(ctx context.Context, market string, historyDays, horizonDays int, quantiles []float64) (*SPriceForecastIntraday, error) {
 	return loadPriceIntradayAsOf(ctx, market, historyDays, horizonDays, quantiles, time.Now())
@@ -101,8 +130,10 @@ func loadPriceIntradayAsOf(
 	}
 
 	loc := priceLocation()
-	today := asOf.In(loc)
-	// 电网日指标 CSV 的滞后：最新一般到昨天，取到今天也不会报错（没数据就少一天）
+	// 锚点先按 asOf，再收到「数据里最新可用的那一天」——CSV 常常明显滞后于现实日期
+	// （部署上数据只到 08-31，而当天是 10-07）。不收的话窗口会整段为空，
+	// 报出来是「15 分钟电价数据不足（0 点）」，看着像「没数据」，其实是**取错了窗口**。
+	today := clampAnchor(asOf.In(loc), latestAvailableDate(ctx))
 	to := today.Format(priceDateLayout)
 	from := today.AddDate(0, 0, -historyDays+1).Format(priceDateLayout)
 
