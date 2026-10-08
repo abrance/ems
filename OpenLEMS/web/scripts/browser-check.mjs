@@ -70,6 +70,27 @@ const FIXTURES = {
     days: ['2026-08-30', '2026-08-31'],
     points: DAYS.flatMap((date) => curve96('dayAhead').map((p) => ({ date, time: p.time, value: p.value }))),
   },
+  '/api/gd-metric/similar-days': {
+    targetDate: '2026-08-31',
+    market: 'ahead',
+    topN: 5,
+    wPrice: 0.7,
+    wLoad: 0.3,
+    method: '皮尔逊形态相关（96 点，z-score 标准化）',
+    formula: '相似度 = (0.7×ρ价格 + 0.3×ρ负荷 + 1) / 2 × 100%',
+    from: '2021-05-01',
+    to: '2026-08-30',
+    candidates: 1791,
+    timeMs: 320,
+    days: DAYS.slice(0, 2).map((d, i) => ({
+      date: d,
+      similarity: 90 - i * 7,
+      priceCorr: 0.8 - i * 0.2,
+      loadCorr: 0.9,
+      priceAvg: 372.5,
+      loadMax: 3300,
+    })),
+  },
   '/api/gd-metric/supply-curve': {
     market: 'ahead',
     from: '2026-06-01',
@@ -370,7 +391,8 @@ class Marionette {
 
 const PAGES = [
   { name: '场景 · 信息披露', path: '/scene/disclosure', min: 2 },
-  { name: '场景 · 决策支持', path: '/scene/decision', min: 2 },
+  // 决策支持现在有三张图：电价预测、负荷预测、相似日情况分析（目标日 + 叠加日）
+  { name: '场景 · 决策支持', path: '/scene/decision', min: 3 },
   { name: '场景 · 历史信息', path: '/scene/history', min: 1 },
   { name: '场景 · 长周期电价预测', path: '/scene/forecast', min: 1 },
   {

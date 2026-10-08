@@ -541,6 +541,25 @@ const FAKE_SERIES = {
 //   E[(p−500)·1{p≥500}] = ∫₅₀₀^1000 (p−500)/1000 dp = 125
 //   E[p | p≥500] = (125 + 500×0.5)/0.5 = 750
 const uniformQ = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+const FAKE_SIMILAR = {
+  targetDate: '2026-09-21',
+  market: 'ahead',
+  topN: 8,
+  wPrice: 0.7,
+  wLoad: 0.3,
+  method: '皮尔逊形态相关（96 点，z-score 标准化）',
+  formula: '相似度 = (0.7×ρ价格 + 0.3×ρ负荷 + 1) / 2 × 100%',
+  from: '2021-05-01',
+  to: '2026-09-20',
+  candidates: 1791,
+  timeMs: 320,
+  days: [
+    { date: '2026-08-30', similarity: 92.4, priceCorr: 0.85, loadCorr: 0.94, priceAvg: 372.5, loadMax: 3300 },
+    { date: '2025-07-15', similarity: 88.1, priceCorr: 0.76, loadCorr: 0.93, priceAvg: 410.2, loadMax: 3510 },
+    { date: '2024-06-02', similarity: 71.3, priceCorr: 0.43, loadCorr: 0.98, priceAvg: 355.0, loadMax: 3200 },
+  ],
+}
+
 const FAKE_SUPPLY_BINS = [
   { loadFrom: 500, loadTo: 1500, loadMid: 1000, count: 500, q: uniformQ },
   { loadFrom: 1500, loadTo: 2500, loadMid: 2000, count: 500, q: uniformQ },
@@ -828,6 +847,7 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/effect/backtest2')) return json({})
   if (u.includes('/api/forecast/recorded')) return json(FAKE_RECORDED)
   if (u.includes('/api/forecast/backtest')) return json(FAKE_BACKTEST_RESULT)
+  if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
   if (u.includes('/api/gd-metric/supply-curve')) {
     return json(u.includes('market=real') ? FAKE_SUPPLY_DRIFT : FAKE_SUPPLY_CLEAN)
@@ -2331,9 +2351,9 @@ await clickTo('场景', '决策支持')
   check(bodyHas('80'), 'KPI 取到需量节省')
   check(bodyHas('tou-rule'), '脚注显示生效算法')
 
-  // 电价预测：日均 + 分位，且明确说明不是分时
+  // 电价预测：日均 + 分位，并说明这里不是分时（分时在「长周期电价预测」页）
   check(bodyHas('日前电价预测'), '有电价预测面板')
-  check(bodyHas('预测是'), '明确说明是日均不是分时')
+  check(bodyHas('96 点分时预测') && bodyHas('日均'), '说明这里是日均、分时在另一页')
   check(bodyHas('历史 60 点'), '展示上下文点数')
   check(bodyHas('缺数据 50 天'), '展示缺失天数（不装作数据齐全）')
 
@@ -2350,9 +2370,53 @@ await clickTo('场景', '决策支持')
   const cells = [...(btRows[0]?.querySelectorAll('td') ?? [])].map((c) => c.textContent.trim())
   check(cells.includes('314.00'), '回测表 tou-rule 的总节省单元格正确', JSON.stringify(cells))
 
-  // 待数据源的 panels
+  // 历史相似日：96 点形态相关（不是数字接近），点一行叠加到曲线图
+  check(bodyHas('历史相似日'), '有相似日面板')
+  check(bodyHas('皮尔逊形态相关'), '写明相似度算法')
+  check(bodyHas('92.4%'), '相似度按百分比列出')
+  check(bodyHas('1791'), '给出参与比较的历史日数')
+  const simRows = [...doc.querySelectorAll('.similar-list li')]
+  check(simRows.length === 3, `相似日 3 行（实际 ${simRows.length}）`)
+  check(
+    (simRows[0]?.textContent ?? '').includes('2026-08-30') && (simRows[0]?.textContent ?? '').includes('92.4%'),
+    '相似日首行日期与相似度',
+    simRows[0]?.textContent,
+  )
+  // 情况分析图按面板定位（.chart 的 DOM 顺序会随面板增删变，别用 pop()）
+  const similarChart = () => {
+    const panel = [...doc.querySelectorAll('.panel')].find((p) =>
+      (p.querySelector('.panel-title')?.textContent ?? '').includes('历史相似日情况分析'),
+    )
+    return Number(panel?.querySelector('.chart')?.dataset.chartPoints ?? 0)
+  }
+  const beforePick = similarChart()
+  check(beforePick === 3, `未叠加时只画目标日（3 点），实际 ${beforePick}`)
+  simRows[0].click()
+  await waitFor(() => bodyHas('清空叠加'))
+  check(bodyHas('清空叠加（1）'), '点相似日会叠加到曲线图')
+  check((simRows[0].className ?? '').includes('picked'), '选中行有高亮')
+  await waitFor(() => similarChart() > beforePick)
+  check(similarChart() === beforePick + 3, `叠加后图上多一天的点（${beforePick} → ${similarChart()}）`)
+
+  // 「日前/实时」切换只改曲线，不重新请求（数据已经拿到本地了）
+  const overlayBefore = requests.filter((r) => r.url.includes('/api/gd-metric')).length
+  const priceSel = [...doc.querySelectorAll('.field select')].find((s) =>
+    [...s.options].some((o) => o.textContent.trim() === '日前'),
+  )
+  check(!!priceSel, '有「价格 日前/实时」切换')
+  if (priceSel) {
+    const realOpt = [...priceSel.options].find((o) => o.textContent.trim() === '实时')
+    priceSel.selectedIndex = realOpt.index
+    priceSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await waitFor(() => bodyHas('实时电价 96 点'))
+    check(
+      requests.filter((r) => r.url.includes('/api/gd-metric')).length === overlayBefore,
+      '切换价格类型不重新请求（本地曲线复用）',
+    )
+  }
+
+  // 待数据源的 panels：相似日已经做了，只剩竞争空间
   check(bodyHas('日前市场竞争空间'), '点名缺竞争空间')
-  check(bodyHas('历史相似日分析'), '点名缺相似日')
 
   // 刷新预测要显式跳过缓存
   const reqBefore = requests.filter((r) => r.url.includes('/api/forecast/')).length
