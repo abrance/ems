@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"common"
-	"common/c_base"
 	"common/c_chart"
 	"s_db"
 	"s_forecast"
@@ -22,8 +21,6 @@ import (
 const (
 	// policySettingId 微电网策略配置所在的 setting ID（与 p_policy_mircogrid 一致）
 	policySettingId = "policy_microgrid"
-	// powerPointKey 设备实时有功功率点位 Key
-	powerPointKey = "Power"
 
 	defaultLookbackHours = 24 * 7 // 送入模型的历史窗口
 	defaultHistoryHours  = 24     // 返回给前端展示的历史窗口
@@ -230,14 +227,14 @@ func loadForecastConfig(ctx context.Context) (baseURL, gridDeviceID string, hori
 
 // loadHistorySeries 读取设备历史有功功率，返回升序的时间戳（毫秒）与数值。
 func loadHistorySeries(deviceID string, lookbackHours int) ([]int64, []float64, error) {
-	storage := common.GetStorageInstanceOrNil()
-	if storage == nil {
-		return nil, nil, errors.New("存储实例未就绪")
+	if lookbackHours <= 0 {
+		lookbackHours = defaultLookbackHours
 	}
 	end := time.Now().UnixMilli()
 	start := end - int64(lookbackHours)*3600*1000
-
-	chart, err := storage.GetStorageData(c_base.StorageTypeDevice, deviceID, []string{powerPointKey}, &start, &end, 0)
+	// 点位 Key 不能写死（ess/pv/load_demo 是 "Power"，关口电表是 "TotalActivePower"），
+	// 否则「关口电表设备ID」指向真实电表后这里读不到负荷序列。见 common.DevicePowerPointKeys。
+	chart, err := common.LoadDevicePowerSeries(deviceID, start, end)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "查询设备历史负荷失败")
 	}
