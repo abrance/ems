@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import PanelBox from '@/components/PanelBox.vue'
+import { fetchDeviceNames, type DeviceType } from '@/api/device'
 import {
   fetchPolicyConfig,
   fetchPolicyConfigFields,
@@ -25,6 +26,38 @@ const SETTING_GROUP = 'policy'
 
 /** 与充放电保护直接相关的分组，默认展开 */
 const PRIMARY_GROUPS = ['储能参数', '峰谷套利', '需量控制']
+
+/**
+ * 设备绑定字段 → 可选的设备类型。
+ *
+ * 为什么要这张表：这两项是「策略读哪台设备的功率」的**口径开关**，选错就是静默的口径错误。
+ * 它们在后端 schema 里是 singleSelect / multiSelect，但这一页以前只认 switch 与 number，
+ * 其余一律当文本框 —— 于是变成「手打一个 UUID」的输入框，实际等于不可改。
+ *
+ * 类型限制不是装饰：`gridDeviceId` 只能是电表 —— 指到储能柜会把储能自身的出力算进
+ * 「关口功率」，形成反馈回路（策略自己的代码注释写了这一点）。
+ */
+const DEVICE_FIELD_TYPES: Record<string, DeviceType[]> = {
+  gridDeviceId: ['ammeter'],
+  essDevices: ['ess', 'sess'],
+  pvDevices: ['pv'],
+  loadDevices: ['load'],
+  cpDevices: ['cp'],
+}
+
+/** 类型限制之外再给一句人话，避免「选得到但选错」 */
+const DEVICE_FIELD_HINT: Record<string, string> = {
+  gridDeviceId:
+    '策略用它读关口功率。不要指向储能柜 —— 关口功率里已包含储能自身出力，会形成反馈回路；有独立计量点就指那个。',
+  essDevices: '参与充放的储能柜；一台都没配时策略不会动作。',
+}
+
+function isDeviceField(f: ConfigField): boolean {
+  return f.component === 'singleSelect' || f.component === 'multiSelect'
+}
+
+/** 设备列表：字段 key → [{id, name}]，按上面那张表过滤类型 */
+const deviceOptions = ref<Record<string, { id: string; name: string }[]>>({})
 
 const fields = ref<ConfigField[]>([])
 const groups = ref<string[]>([])
@@ -66,8 +99,13 @@ function showToast(tone: 'green' | 'red', text: string) {
   toastTimer = window.setTimeout(() => (toast.value = null), 4000)
 }
 
-/** 把后端返回值规整成表单可用的类型（number 字段要真的是 number） */
+/** 把后端返回值规整成表单可用的类型（number 字段要真的是 number；数组字段要真的是数组） */
 function normalize(f: ConfigField, raw: unknown): unknown {
+  if (f.component === 'multiSelect') {
+    if (Array.isArray(raw)) return raw.map(String)
+    if (raw === undefined || raw === null || raw === '') return []
+    return [String(raw)]
+  }
   if (raw === undefined || raw === null) {
     if (f.default !== undefined && f.default !== '') return normalize(f, f.default)
     return f.valueType === 'bool' ? false : ''
@@ -92,6 +130,7 @@ async function load() {
     for (const g of schema.groups) {
       collapsed[g] = !PRIMARY_GROUPS.includes(g)
     }
+    await loadDeviceOptions(schema.fields)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
   } finally {
@@ -99,14 +138,60 @@ async function load() {
   }
 }
 
+/** 只给 schema 里真实存在的设备字段取选项（现在就是 gridDeviceId 与 essDevices 两个） */
+async function loadDeviceOptions(list: ConfigField[]) {
+  const wanted = list.filter(isDeviceField)
+  const entries = await Promise.all(
+    wanted.map(async (f) => {
+      const types = DEVICE_FIELD_TYPES[f.key]
+      if (!types) return [f.key, []] as const
+      try {
+        const names = await fetchDeviceNames(types)
+        return [f.key, Object.entries(names).map(([id, name]) => ({ id, name }))] as const
+      } catch {
+        // 设备列表拿不到不让整页报错：字段退化成文本框，下面会提示「没有可选设备」
+        return [f.key, []] as const
+      }
+    }),
+  )
+  deviceOptions.value = Object.fromEntries(entries)
+}
+
+/** 已绑定的设备名（选择器下面显示「当前」用；多选按顿号连） */
+function boundName(f: ConfigField): string {
+  const raw = draft[f.key]
+  const ids = Array.isArray(raw) ? raw.map(String) : raw ? [String(raw)] : []
+  if (!ids.length) return f.component === 'multiSelect' ? '未选' : '未绑定'
+  const opts = deviceOptions.value[f.key] ?? []
+  return ids
+    .map((id) => {
+      const hit = opts.find((o) => o.id === id)
+      return hit ? hit.name : `${id}（不在可选列表：类型不匹配或设备已删除）`
+    })
+    .join('、')
+}
+
+/** 字段下方那句话：描述 + 设备绑定的口径提醒 + 当前绑定 */
+function hintOf(f: ConfigField): string {
+  const parts = [f.description || f.key]
+  if (DEVICE_FIELD_HINT[f.key]) parts.push(DEVICE_FIELD_HINT[f.key])
+  if (isDeviceField(f)) parts.push(`当前：${boundName(f)}`)
+  return parts.join(' · ')
+}
+
 function isDirty(f: ConfigField): boolean {
   const before = normalize(f, original.value[f.key])
-  return String(draft[f.key]) !== String(before)
+  const after = normalize(f, draft[f.key])
+  // 数组字段（多选设备）不能用 String() 比：Array/String 的相等性会看错
+  return JSON.stringify(after) !== JSON.stringify(before)
 }
 
 function fieldError(f: ConfigField): string {
+  // 只校验数字字段。设备选择/布尔/文本没有「数值范围」这回事 ——
+  // 之前这里对**所有非布尔字段**都跑 Number()，于是文本字段（如预测服务地址）永远报
+  // 「需要是数字」，把保存整个堵死。
+  if (f.valueType !== 'int' && f.valueType !== 'float') return ''
   const v = draft[f.key]
-  if (f.valueType === 'bool') return ''
   if (v === '' || v === undefined || v === null) return ''
   const n = Number(v)
   if (Number.isNaN(n)) return '需要是数字'
@@ -210,6 +295,27 @@ onMounted(load)
             />
             <span>{{ draft[f.key] ? '开' : '关' }}</span>
           </label>
+          <!-- 设备绑定：后端 schema 标了 singleSelect / multiSelect，原来落到文本框（手打 UUID），
+               现在渲染成设备选择器，并按 DEVICE_FIELD_TYPES 限制可选类型 -->
+          <select
+            v-else-if="f.component === 'singleSelect'"
+            :id="`f-${f.key}`"
+            v-model="draft[f.key]"
+          >
+            <option value="">未绑定</option>
+            <option v-for="o in deviceOptions[f.key] ?? []" :key="o.id" :value="o.id">
+              {{ o.name }}
+            </option>
+          </select>
+          <div v-else-if="f.component === 'multiSelect'" class="device-multi">
+            <label v-for="o in deviceOptions[f.key] ?? []" :key="o.id" class="device-opt">
+              <input v-model="draft[f.key]" type="checkbox" :value="o.id" />
+              <span>{{ o.name }}</span>
+            </label>
+            <span v-if="!(deviceOptions[f.key] ?? []).length" class="hint">
+              没有可选设备（先在「管理 · 设备管理」接入）。
+            </span>
+          </div>
           <input
             v-else-if="f.component === 'number'"
             :id="`f-${f.key}`"
@@ -223,7 +329,7 @@ onMounted(load)
 
           <span v-if="fieldError(f)" class="err">{{ fieldError(f) }}</span>
           <span v-else class="hint">
-            {{ f.description || f.key }}
+            {{ hintOf(f) }}
             <template v-if="f.min !== undefined || f.max !== undefined">
               （范围 {{ f.min ?? '—' }} ~ {{ f.max ?? '—' }}）
             </template>
@@ -320,6 +426,9 @@ onMounted(load)
 }
 .switch-row { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-13); color: var(--text-1); }
 .switch-row input { width: auto; }
+.device-multi { display: flex; flex-direction: column; gap: var(--s1); }
+.device-opt { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-13); color: var(--text-1); }
+.device-opt input { width: auto; }
 .hint { font-size: var(--fs-12); color: var(--text-3); }
 .err { font-size: var(--fs-12); color: var(--red-ink); }
 .save-row { display: flex; align-items: center; gap: var(--s2); }
