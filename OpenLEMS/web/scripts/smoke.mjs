@@ -182,6 +182,11 @@ const FAKE_CONFIG_FIELDS = [
   { key: 'enableDemandControl', name: '启动需量控制模式', description: '启动需量控制模式', group: '需量控制', component: 'switch', valueType: 'bool', default: 'false' },
   { key: 'demandTarget', name: '需量目标值', description: '关口功率上限(kW)', group: '需量控制', component: 'number', valueType: 'float', min: 0, default: '0' },
   { key: 'transformerCapacity', name: '变压器容量', description: '变压器容量', group: '变压器', component: 'number', valueType: 'float', min: 0, default: '200', unit: 'kVA' },
+  // 设备绑定字段：后端 schema 标的是 singleSelect / multiSelect（真实接口里就是这两个）
+  { key: 'essDevices', name: '储能设备列表', description: '参与策略的储能设备ID列表', group: '峰谷套利', component: 'multiSelect', valueType: 'string' },
+  { key: 'gridDeviceId', name: '关口电表设备ID', description: '用于读取关口功率的设备ID', group: '需量控制', component: 'singleSelect', valueType: 'string' },
+  // 文本字段：用来钉「非数字字段不会被当数字校验」（那个 bug 会把整个保存堵死）
+  { key: 'forecastBaseUrl', name: '预测服务地址', description: 'TimesFM 预测服务地址', group: '需量控制', component: 'text', valueType: 'string' },
 ]
 const FAKE_CONFIG_GROUPS = ['储能参数', '峰谷套利', '需量控制', '变压器']
 const FAKE_POLICY_CONFIG = {
@@ -192,6 +197,10 @@ const FAKE_POLICY_CONFIG = {
   enableDemandControl: false,
   demandTarget: 0,
   transformerCapacity: 200,
+  essDevices: ['ess_1'],
+  // 故意先绑错：指向 PCS（不是电表）—— 验证页面会把「不在可选列表」标出来
+  gridDeviceId: 'pcs_1',
+  forecastBaseUrl: 'https://forecast.xiaoyxq.top',
 }
 
 const FAKE_STRATEGIES = [
@@ -757,8 +766,20 @@ globalThis.fetch = async (url, init) => {
     return json({})
   }
   if (u.includes('/api/device/name-list')) {
-    // 自动化规则会引用 BMS 与 DIDO，设备桩里要有
-    return json({ deviceNames: { ess_1: '储能柜 1', pcs_1: 'PCS 1', bms_1: '派能BMS', dido_1: '红灯' } })
+    // 按 deviceTypes 过滤（真实接口就是这么干的）：储能参数页靠它把「关口表只能选电表」
+    // 落到实处，一律返回全部的话这类断言根本测不出来。
+    const raw = new URL(u, 'http://x').searchParams.get('deviceTypes') ?? ''
+    const types = raw.split(',').map((s) => s.trim()).filter(Boolean)
+    const all = [
+      { id: 'ess_1', name: '储能柜 1', type: 'ess' },
+      { id: 'pcs_1', name: 'PCS 1', type: 'pcs' },
+      { id: 'bms_1', name: '派能BMS', type: 'bms' },
+      { id: 'dido_1', name: '红灯', type: 'gpio' },
+      { id: 'meter_1', name: '关口电表', type: 'ammeter' },
+    ]
+    const names = {}
+    for (const d of all) if (!types.length || types.includes(d.type)) names[d.id] = d.name
+    return json({ deviceNames: names })
   }
   if (u.includes('/api/control/custom-services')) {
     const dev = new URL(u, 'http://x').searchParams.get('deviceId')
@@ -2755,6 +2776,25 @@ await clickTo('配置', '储能参数')
   check(bodyHas('范围 0 ~ 1'), '带出 schema 里的上下限')
   check(bodyHas('立即生效，下一个调度周期采纳'), '标注生效语义')
 
+  // 设备绑定：schema 标了 singleSelect / multiSelect 的字段要渲染成设备选择器，
+  // 而且**类型受限** —— 以前它们落到文本框（要手打 UUID），等于不可改。
+  const gridSel = doc.querySelector('select[id="f-gridDeviceId"]')
+  check(!!gridSel, '关口表字段渲染成选择器（不再是手打 UUID 的文本框）')
+  const gridOpts = [...(gridSel?.options ?? [])].map((o) => o.textContent.trim())
+  check(gridOpts.includes('关口电表'), '关口表下拉里有电表', gridOpts.join('/'))
+  check(
+    !gridOpts.includes('储能柜 1') && !gridOpts.includes('PCS 1'),
+    '关口表下拉里没有储能柜/PCS（类型受限）',
+    gridOpts.join('/'),
+  )
+  check(bodyHas('不在可选列表'), '当前绑错（指向 PCS）时标出来，不默默显示为空')
+  const essBoxes = [...doc.querySelectorAll('.device-multi input[type="checkbox"]')]
+  check(essBoxes.length === 1 && essBoxes[0].value === 'ess_1', '储能设备列表渲染成复选（只有 ess_1）')
+  check(bodyHas('当前：储能柜 1'), '多选字段也显示当前绑定（ID → 设备名）')
+
+  // 文本字段（预测服务地址）不能被当数字校验 —— 那个 bug 会把整个保存堵死
+  check(!!doc.querySelector('input[id="f-forecastBaseUrl"]'), '文本字段渲染成文本框')
+
   // 越界值应被 schema 的 max 拦住
   const socMax = doc.querySelector('input[id="f-socMaxRatio"]')
   check(!!socMax, '按 key 渲染出 socMaxRatio 输入框')
@@ -2774,6 +2814,14 @@ await clickTo('配置', '储能参数')
     socMax.value = '0.9'
     socMax.dispatchEvent(new window.Event('input', { bubbles: true }))
     await tick()
+    // 顺手把「关口表」从 PCS 改成真正的电表（这就是本次要做的口径变更）
+    const sel = doc.querySelector('select[id="f-gridDeviceId"]')
+    if (sel) {
+      sel.value = 'meter_1'
+      sel.dispatchEvent(new window.Event('change', { bubbles: true }))
+    }
+    await tick()
+    check(bodyHas('当前：关口电表'), '换成电表后「当前」显示设备名')
     const saveBtn = [...doc.querySelectorAll('.save-row button')].find((b) => b.textContent.trim() === '保存')
     saveBtn?.click()
     await tick()
@@ -2794,6 +2842,14 @@ await clickTo('配置', '储能参数')
     check(saved.socMaxRatio === 0.9, '回写了改动项', JSON.stringify(saved))
     check(saved.transformerCapacity === 200, '未改动项原样保留，没被清空', JSON.stringify(saved))
     check(saved.enableDemandControl === false, '布尔值未被字符串化', JSON.stringify(saved))
+    // 设备字段的类型必须保持：单选取 string、多选取数组 —— 写错了策略读不到
+    check(saved.gridDeviceId === 'meter_1', 'singleSelect 回写成字符串 ID', JSON.stringify(saved.gridDeviceId))
+    check(
+      Array.isArray(saved.essDevices) && saved.essDevices[0] === 'ess_1',
+      'multiSelect 回写成数组（没被 String() 变成逗号串）',
+      JSON.stringify(saved.essDevices),
+    )
+    check(saved.forecastBaseUrl === 'https://forecast.xiaoyxq.top', '文本字段原样保留', String(saved.forecastBaseUrl))
   }
 }
 
