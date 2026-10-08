@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"common/c_chart"
+	"s_effect"
 )
 
 func TestChartToSeries(t *testing.T) {
@@ -28,6 +29,25 @@ func TestChartToSeries(t *testing.T) {
 	for ts, v := range want {
 		if got[ts] != v {
 			t.Errorf("got[%d] = %v, want %v", ts, got[ts], v)
+		}
+	}
+}
+
+func TestSeriesRange(t *testing.T) {
+	// 空序列 → 0,0（页面上据此显示「无数据」，不能当成时间戳 0 去格式化）
+	if from, to := seriesRange(nil); from != 0 || to != 0 {
+		t.Fatalf("空序列应为 0,0，得到 %d,%d", from, to)
+	}
+	// 单个点
+	if from, to := seriesRange(s_effect.SSeries{1500: 1}); from != 1500 || to != 1500 {
+		t.Fatalf("单点应为首尾相同，得到 %d,%d", from, to)
+	}
+	// 乱序也要取到正确的最早/最晚（map 遍历顺序是随机的）
+	got := s_effect.SSeries{3000: 1, 1000: 2, 2000: 3, 500: 4}
+	for i := 0; i < 20; i++ {
+		from, to := seriesRange(got)
+		if from != 500 || to != 3000 {
+			t.Fatalf("第 %d 次：应为 500,3000，得到 %d,%d", i, from, to)
 		}
 	}
 }
