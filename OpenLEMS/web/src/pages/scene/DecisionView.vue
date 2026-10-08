@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { fetchBacktest, fetchEffectSummary, type EffectBacktest, type EffectSummary } from '@/api/effect'
 import { fetchLoadForecast, fetchPriceForecast, type LoadForecast, type PriceForecast } from '@/api/forecast'
+import { fetchGdMetric, fetchSimilarDays, type DayCurve, type SimilarDaysResult } from '@/api/gdmetric'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
+import { useAppStore } from '@/stores/app'
 
 /**
  * 场景 · 决策支持。
@@ -14,11 +16,15 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  * 内容来源：
  *   实测效果 KPI + 算法回测 → effect-overlay 迁入（/api/effect/*）
  *   负荷预测 / 电价预测     → TimesFM（/api/forecast/*）
- * 两套都走同一套成本模型/同一个预测服务，页面不另做估算。
+ *   历史相似日             → /api/gd-metric/similar-days（96 点形态相关，见后端 similar.go）
+ * 都走同一套成本模型/同一个预测服务，页面不另做估算。
  *
- * 「日前市场竞争空间」「历史相似日分析」没有数据源，底部明确列出，不造数。
+ * 「日前市场竞争空间」仍无数据源，底部明确列出，不造数。
  */
 type Preset = 'week' | 'month' | 'custom'
+
+/** 最多叠加 3 天：再多就分不清那条线是谁了（设计稿 §5.3） */
+const MAX_PICKS = 3
 
 const PRESETS: { v: Preset; t: string }[] = [
   { v: 'week', t: '近 7 天' },
@@ -36,6 +42,8 @@ const summary = ref<EffectSummary | null>(null)
 const backtest = ref<EffectBacktest | null>(null)
 const load = ref<LoadForecast | null>(null)
 const price = ref<PriceForecast | null>(null)
+
+const app = useAppStore()
 
 const loading = reactive({ summary: false, backtest: false, load: false, price: false })
 const errors = reactive<Record<string, string>>({})
@@ -104,7 +112,7 @@ async function loadForecast(force = false) {
 }
 
 function refreshAll(force = false) {
-  void Promise.all([loadSummary(), loadBacktest(), loadForecast(force)])
+  void Promise.all([loadSummary(), loadBacktest(), loadForecast(force), loadSimilar()])
 }
 
 function onPreset(p: Preset) {
@@ -118,6 +126,120 @@ function onPreset(p: Preset) {
 function money(v: number | undefined): string {
   return v === undefined || v === null ? '—' : v.toFixed(0)
 }
+
+/* ---------- 历史相似日 ---------- */
+
+const similar = ref<SimilarDaysResult | null>(null)
+const similarLoading = ref(false)
+const similarError = ref('')
+/** 勾选叠加的历史日（最多 MAX_PICKS） */
+const picked = ref<string[]>([])
+/** date → 当天 96 点曲线（含目标日与勾选日），懒加载 */
+const curveOf = ref<Record<string, DayCurve | null>>({})
+const overlayPrice = ref<'dayAhead' | 'realtime'>('dayAhead')
+
+async function ensureCurve(date: string) {
+  if (date in curveOf.value) return
+  try {
+    const snap = await fetchGdMetric({ date })
+    curveOf.value = { ...curveOf.value, [date]: snap.curve ?? null }
+  } catch {
+    curveOf.value = { ...curveOf.value, [date]: null }
+  }
+}
+
+async function loadSimilar() {
+  similarLoading.value = true
+  similarError.value = ''
+  try {
+    // 不给日期就让后端用最新可用运行日（与 /api/gd-metric 的默认行为一致）
+    const r = await fetchSimilarDays({ date: app.runDate || undefined, top: 8 })
+    similar.value = r
+    picked.value = []
+    curveOf.value = {}
+    await ensureCurve(r.targetDate)
+  } catch (err) {
+    similar.value = null
+    similarError.value = err instanceof Error ? err.message : '加载失败'
+  } finally {
+    similarLoading.value = false
+  }
+}
+
+function togglePick(date: string) {
+  const i = picked.value.indexOf(date)
+  if (i >= 0) {
+    picked.value.splice(i, 1)
+    return
+  }
+  if (picked.value.length >= MAX_PICKS) picked.value.shift()
+  picked.value.push(date)
+  void ensureCurve(date)
+}
+
+function clearPicks() {
+  picked.value = []
+}
+
+const targetCurve = computed(() => {
+  const d = similar.value?.targetDate
+  return d ? (curveOf.value[d] ?? null) : null
+})
+
+const similarEl = ref<HTMLElement>()
+useECharts(
+  similarEl,
+  (): EChartsOption => {
+    const target = targetCurve.value
+    const axis = target?.[overlayPrice.value].map((s) => s.time) ?? []
+    const series: EChartsOption['series'] = []
+    if (target) {
+      series.push({
+        name: `目标日 ${similar.value?.targetDate ?? ''}`,
+        type: 'line',
+        showSymbol: false,
+        lineStyle: { width: 2.5 },
+        itemStyle: { color: CHART_COLORS.brand },
+        data: target[overlayPrice.value].map((s) => s.value),
+      })
+    }
+    picked.value.forEach((date, i) => {
+      const curve = curveOf.value[date]
+      if (!curve) return
+      series.push({
+        name: date,
+        type: 'line',
+        showSymbol: false,
+        lineStyle: { type: 'dashed', width: 1.5, opacity: 0.85 },
+        itemStyle: { color: [CHART_COLORS.blue, CHART_COLORS.cyan, CHART_COLORS.purple][i % 3] },
+        data: curve[overlayPrice.value].map((s) => s.value),
+      })
+    })
+    return {
+      grid: { left: 60, right: 20, top: 32, bottom: 44 },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : `${v}`) },
+      legend: { top: 0, icon: 'rect', itemWidth: 12, itemHeight: 3, textStyle: { fontSize: 12 } },
+      xAxis: {
+        type: 'category',
+        data: axis,
+        axisLabel: {
+          fontSize: 12,
+          color: CHART_COLORS.gray,
+          interval: (_i: number, value: string) => /^(00:00|04:00|08:00|12:00|16:00|20:00|24:00)$/.test(value),
+        },
+      },
+      yAxis: {
+        type: 'value',
+        name: '元/MWh',
+        nameTextStyle: { fontSize: 12 },
+        axisLabel: { fontSize: 12, color: CHART_COLORS.gray },
+        splitLine: { lineStyle: { color: 'var(--divider)' } },
+      },
+      series,
+    }
+  },
+  [similar, picked, curveOf, overlayPrice],
+)
 
 /* ---------- 负荷预测：实际 vs 预测 + 分位带 ---------- */
 const loadEl = ref<HTMLElement>()
@@ -188,6 +310,12 @@ onMounted(() => {
   applyPreset()
   refreshAll(false)
 })
+
+// 运行日变了要重算相似日（目标日就是它）
+watch(
+  () => app.runDate,
+  () => void loadSimilar(),
+)
 </script>
 
 <template>
@@ -255,11 +383,70 @@ onMounted(() => {
       <div v-if="errors.price" class="empty">{{ errors.price }}</div>
       <template v-else>
         <div class="warn">
-          预测是<strong>日均</strong>不是 96 点分时：日报未提取价格曲线，所以这里只能给日均与分位。
-          分时预测要等图4 价格曲线纳入提取（见设计稿 §14.5）。
+          本块出的是<strong>日均</strong>序列。要看 96 点分时预测，去「长周期电价预测」页的
+          「分时」视图 —— 那条序列走电网日指标 CSV，与这里的日报日均序列**不是同一份数据**。
         </div>
         <div ref="priceEl" class="chart" />
       </template>
+    </PanelBox>
+
+    <PanelBox
+      title="历史相似日"
+      :sub="similar ? `目标日 ${similar.targetDate} · 候选 ${similar.candidates} 天` : ''"
+      :span="4"
+      :loading="similarLoading"
+      :foot="similar ? `${similar.method}｜${similar.formula}` : '数据来源：/api/gd-metric/similar-days'"
+    >
+      <div v-if="similarError" class="empty">{{ similarError }}</div>
+      <template v-else-if="similar">
+        <div class="muted">点一行叠加到右图（最多 {{ MAX_PICKS }} 天）。</div>
+        <ul class="similar-list">
+          <li
+            v-for="d in similar.days"
+            :key="d.date"
+            :class="{ picked: picked.includes(d.date) }"
+            @click="togglePick(d.date)"
+          >
+            <span class="date">{{ d.date }}</span>
+            <span class="bar"><i :style="{ width: `${Math.max(2, d.similarity)}%` }" /></span>
+            <span class="pct">{{ d.similarity.toFixed(1) }}%</span>
+            <span class="meta">{{ d.priceAvg.toFixed(0) }} 元/MWh · 峰 {{ d.loadMax.toFixed(0) }} MW</span>
+          </li>
+        </ul>
+        <div class="muted">
+          相似度按 96 点<strong>形态</strong>算（z-score 后加权皮尔逊相关），不是价位接近；
+          只做参考，不产出预测值。区间 {{ similar.from }} ~ {{ similar.to }}。
+        </div>
+      </template>
+    </PanelBox>
+
+    <PanelBox
+      title="历史相似日情况分析"
+      :sub="overlayPrice === 'dayAhead' ? '日前电价 96 点' : '实时电价 96 点'"
+      :span="8"
+      :loading="similarLoading"
+      foot="目标日实线加粗；勾选的相似日为虚线（先切「日前/实时」再叠加）"
+    >
+      <template v-if="similar">
+        <div class="toolbar">
+          <label class="field">
+            价格
+            <select v-model="overlayPrice">
+              <option value="dayAhead">日前</option>
+              <option value="realtime">实时</option>
+            </select>
+          </label>
+          <span class="spacer" />
+          <button v-if="picked.length" class="btn" type="button" @click="clearPicks">
+            清空叠加（{{ picked.length }}）
+          </button>
+        </div>
+        <div v-if="targetCurve" ref="similarEl" class="chart" />
+        <div v-else class="empty">
+          目标日 {{ similar.targetDate }} 没有 96 点曲线数据（CSV 只覆盖有数据的运行日）。
+        </div>
+      </template>
+      <div v-else class="empty">等相似日结果。</div>
     </PanelBox>
 
     <PanelBox
@@ -311,7 +498,7 @@ onMounted(() => {
       <div v-else class="empty">该区间没有可回测的数据（需要关口与储能的实测序列）。</div>
     </PanelBox>
 
-    <PanelBox title="待数据源的面板" :span="12" foot="设计稿 §5.3 里列出的其余两块">
+    <PanelBox title="待数据源的面板" :span="12" foot="设计稿 §5.3 里列出的其余一块">
       <div class="pending-list">
         <div class="pending">
           <StatusTag tone="brand">待数据源</StatusTag>
@@ -319,10 +506,6 @@ onMounted(() => {
             日前市场竞争空间：需要「火电最小出力 / 固定出力 / 风电 / 光伏 / 各类可调」分档数据，
             日报未提取。
           </span>
-        </div>
-        <div class="pending">
-          <StatusTag tone="brand">待口径</StatusTag>
-          <span>历史相似日分析：相似度判定依据（价格形态？负荷？新能源？）与阈值未定（§10.9）。</span>
         </div>
       </div>
     </PanelBox>
@@ -380,6 +563,23 @@ th {
 td { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--divider); font-variant-numeric: tabular-nums; }
 th.num, td.num { text-align: right; }
 .pending-list { display: flex; flex-direction: column; gap: var(--s3); }
+.similar-list { list-style: none; margin: var(--s2) 0; padding: 0; }
+.similar-list li {
+  display: grid;
+  grid-template-columns: 88px 1fr 52px;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s1);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.similar-list li:hover { background: var(--bg-2); }
+.similar-list li.picked { background: var(--brand-soft); }
+.similar-list .date { font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
+.similar-list .bar { height: 8px; border-radius: 4px; background: var(--bg-3); overflow: hidden; }
+.similar-list .bar i { display: block; height: 100%; background: var(--brand); }
+.similar-list .pct { text-align: right; font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
+.similar-list .meta { grid-column: 2 / -1; color: var(--text-3); font-size: var(--fs-12); }
 .pending { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--fs-13); color: var(--text-3); }
 .empty { padding: var(--s4); color: var(--text-3); font-size: var(--fs-13); text-align: center; }
 .muted { color: var(--text-3); font-size: var(--fs-12); }
