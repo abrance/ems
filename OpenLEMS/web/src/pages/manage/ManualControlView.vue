@@ -7,6 +7,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import { fetchDeviceNames, fetchHistory, fetchTelemetry, type ChartData, type DeviceType } from '@/api/device'
 import { controlDevice, fetchCustomServices, type DriverService, type FieldDefinition } from '@/api/control'
 import { fetchPolicyConfig } from '@/api/policy'
+import { fetchPublicSettings } from '@/api/settings'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
 /**
@@ -319,7 +320,33 @@ useECharts(chartEl, (): EChartsOption => {
   }
 }, [history])
 
+/**
+ * 手动控制是否打开（设置 manual_control_enabled，后端默认关闭）。
+ *
+ * 为什么默认关：手动指令会被运行中的策略覆盖 —— 策略每个周期都会按自己的决策重写
+ * 目标功率（线上实测：手动下发 12 kW 后大约一分钟被压回 0.5 kW），而当下没有「临时接管」
+ * 机制，页面上也提示不到。留一个会静默被覆盖的按钮比不做更糟，所以先停用；
+ * 后端 /control/device 也会拒绝（不是只在前端藏起来），要临时启用得改设置。
+ */
+const manualEnabled = ref(false)
+const settingLoaded = ref(false)
+
+async function loadManualFlag() {
+  try {
+    const settings = await fetchPublicSettings()
+    const hit = settings.find((s) => s.id === 'manual_control_enabled')
+    // 读不到就按关闭处理：宁可少给一个入口，也不要给一个会被静默覆盖的按钮
+    manualEnabled.value = hit ? String(hit.value).trim().toLowerCase() === 'true' : false
+  } catch {
+    manualEnabled.value = false
+  } finally {
+    settingLoaded.value = true
+  }
+}
+
 onMounted(async () => {
+  await loadManualFlag()
+  if (!manualEnabled.value) return // 停用时不做任何取数：没有可执行的东西
   await loadDevices()
   await loadDeviceData()
   // 实时状态 10s 一拉。壳层还没接 WebSocket 推送，先用轮询；
@@ -345,7 +372,34 @@ watch(deviceId, loadDeviceData)
     <button type="button" @click="loadDevices().then(loadDeviceData)">重试</button>
   </div>
 
-  <div class="grid">
+  <div v-if="settingLoaded && !manualEnabled" class="grid">
+    <PanelBox title="手动控制已停用" :span="12" :foot="false">
+      <div class="paused">
+        <StatusTag tone="brand">已停用</StatusTag>
+        <div>
+          <p>
+            手动下发会被<strong>运行中的策略覆盖</strong>：策略每个调度周期都会按自己的决策重写
+            目标功率（线上实测：手动下发 12 kW 后大约一分钟被压回 0.5 kW），而当前没有
+            「临时接管」机制，页面上也提示不到被覆盖这件事。
+          </p>
+          <p>
+            所以这个入口先停用：无论前端还是 <code>/api/control/device</code> 接口都会拒绝下发
+            （不是只把按钮藏起来）。
+          </p>
+          <p>
+            <strong>要临时手动充放</strong>：先在「管理 · 策略管理」停用相关策略，再把设置
+            <code>manual_control_enabled</code> 改成 <code>true</code>。
+          </p>
+          <p>
+            <strong>常规充放</strong>：走「管理 · 策略管理」（参数表单 + 计划预览 + 试运行）。
+            临时接管机制（手动后 N 分钟内策略不插手）列入后续。
+          </p>
+        </div>
+      </div>
+    </PanelBox>
+  </div>
+
+  <div v-else-if="manualEnabled" class="grid">
     <PanelBox title="目标设备" :span="12" :foot="false">
       <template #actions>
         <button class="btn" type="button" :disabled="loading" @click="loadDeviceData">刷新</button>
@@ -608,6 +662,15 @@ watch(deviceId, loadDeviceData)
   border-color: var(--brand-line);
 }
 .hint { font-size: var(--fs-12); color: var(--text-3); }
+.paused { display: flex; align-items: flex-start; gap: var(--s3); font-size: var(--fs-13); color: var(--text-2); }
+.paused p { margin: 0 0 var(--s2); }
+.paused p:last-child { margin-bottom: 0; }
+.paused code {
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--bg-3);
+  font-size: var(--fs-12);
+}
 .err { font-size: var(--fs-12); color: var(--red-ink); }
 .pending {
   display: flex;

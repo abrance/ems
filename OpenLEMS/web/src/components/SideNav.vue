@@ -19,7 +19,9 @@ const tab = computed(() => findTabByKey(props.tabKey))
     >
       <span class="dot" />
       <span class="side-label">{{ page.title }}</span>
-      <span v-if="page.status === 'todo'" class="badge">TODO</span>
+      <span v-if="page.status === 'todo' || page.status === 'paused'" class="badge">
+        {{ page.status === 'paused' ? '暂停' : 'TODO' }}
+      </span>
     </RouterLink>
   </aside>
 </template>

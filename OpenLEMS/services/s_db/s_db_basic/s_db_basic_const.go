@@ -54,6 +54,22 @@ var (
 		FieldType:    c_enum.ESettingFieldTypeNumber,
 	}
 
+	// 手动控制（/control/device）总开关，**默认关闭**。
+	//
+	// 为什么默认关：手动指令与运行中的策略会互相覆盖 —— 策略每个周期都会按自己的决策
+	// 重写目标功率，手动下发 12 kW 后大约一分钟就被压回去（线上实测），而当时没有任何
+	// 「临时接管」机制，用户看不到这件事。与其留一个会静默被覆盖的按钮，不如先关掉，
+	// 等接管机制（手动作业 N 分钟内策略不插手）做好再默认打开。
+	// 打开方式：把该设置改成 true（无需改代码）。
+	SystemSettingManualControlEnabled = &SSystemSettingDefine{
+		Id:           "manual_control_enabled",
+		Group:        c_enum.ESettingGroupSystem,
+		DefaultValue: "false",
+		IsPublic:     true,
+		Remark:       "允许手动控制（手动指令会被运行中的策略覆盖，默认关闭）",
+		FieldType:    c_enum.ESettingFieldTypeText,
+	}
+
 	// 设备数据保留天数设置定义
 	SystemSettingDeviceRetentionDays = &SSystemSettingDefine{
 		Id:           "DeviceRetentionDays",

@@ -679,6 +679,8 @@ const FAKE_IGNORE_ALARMS = [
 
 const requests = []
 let cleaned = false
+/** 手动控制开关（后端默认关闭）：默认给开，专门留一段测停用路径 */
+let manualEnabled = true
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -711,6 +713,10 @@ globalThis.fetch = async (url, init) => {
         { id: 'LogLevelAutomation', value: 'DEBUG', groupName: '系统', remark: 'automation 业务日志级别' },
         { id: 'LogLevelRemote', value: 'DEBUG', groupName: '系统', remark: 'remote 业务日志级别' },
         { id: 'SystemEnableDebugLog', value: 'false', groupName: '系统', remark: '启用系统调试日志' },
+        // 手动控制总开关：默认**关闭**（后端默认 false）。这里默认给 true，
+        // 好让「手动控制页」那一大段断言继续测「打开后能用」的路径；
+        // 停用路径在后面的专门一段里把 manualEnabled 翻成 false 再验证。
+        { id: 'manual_control_enabled', value: manualEnabled ? 'true' : 'false', groupName: '系统', remark: '允许手动控制' },
       ],
     })
   }
@@ -2091,7 +2097,15 @@ for (const tab of NAV) {
       const h1 = h1Text()
       const body = doc.body.textContent ?? ''
       check(h1 === page.title, `${tab.key}/${page.key} 标题`, `期望 ${page.title}，实际 ${h1}`)
-      if (page.status !== 'ready') {
+      // paused = 页面是真的（已做过、已停用），只是功能关着。占位面板/状态提示是给
+      // planned / 未做页面用的，不适用于它；这里只钉「侧栏不假装它 ready」。
+      if (page.status === 'paused') {
+        check(
+          (item.textContent ?? '').includes('暂停'),
+          `${tab.key}/${page.key} 侧栏标「暂停」`,
+          item.textContent ?? '',
+        )
+      } else if (page.status !== 'ready') {
         const missing = (page.panels ?? []).filter((n) => !body.includes(n))
         check(
           missing.length === 0 && (page.panels ?? []).length > 0,
@@ -2865,6 +2879,39 @@ await clickTo('管理', '手动控制')
     JSON.stringify(call?.body?.parameters),
   )
   check(call?.body?.parameters?.every((p) => typeof p === 'number'), 'int 字段转成了数字')
+}
+
+// 停用路径：设置 manual_control_enabled=false 时，页面只给说明，不容许下发。
+// 后端 /control/device 也会拒绝 —— 这里只能验前端那一半。
+console.log('\n== 手动控制页（已停用）== ')
+{
+  manualEnabled = false
+  await clickTo('管理', '设备管理')
+  await clickTo('管理', '手动控制')
+  await waitFor(() => (doc.body.textContent ?? '').includes('手动控制已停用'), 2000)
+  const bodyText = () => doc.body.textContent ?? ''
+  check(bodyText().includes('手动控制已停用'), '停用时显示说明，不是空白页')
+  check(bodyText().includes('运行中的策略覆盖'), '说明停用原因（手动会被策略覆盖）')
+  check(bodyText().includes('manual_control_enabled'), '给出临时启用办法（改设置）')
+  check(
+    bodyText().includes('接口都会拒绝下发'),
+    '说明后端也拒绝，不是只在前端藏按钮',
+  )
+  check(
+    ![...doc.querySelectorAll('button')].some((b) => b.textContent.trim() === '执行'),
+    '停用时没有「执行」按钮',
+  )
+  const before = requests.filter((r) => r.url.includes('/api/control/custom-services')).length
+  await tick()
+  check(
+    requests.filter((r) => r.url.includes('/api/control/custom-services')).length === before,
+    '停用时不再去拉可执行服务',
+  )
+  check(
+    [...doc.querySelectorAll('.side-item')].some((a) => a.textContent.includes('手动控制') && a.textContent.includes('暂停')),
+    '侧栏给「暂停」标，不假装 ready',
+  )
+  manualEnabled = true
 }
 
 

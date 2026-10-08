@@ -440,6 +440,7 @@ func initSystemSettings(ctx context.Context) {
 	systemSettings := []*s_db_basic.SSystemSettingDefine{
 		s_db_basic.SystemSettingActiveDeviceRootId,
 		s_db_basic.SystemSettingActivePolicyId,
+		s_db_basic.SystemSettingManualControlEnabled,
 		s_db_basic.SystemSettingAutomationInternalMilliseconds,
 		s_db_basic.SystemSettingDeviceRetentionDays,
 		s_db_basic.SystemSettingSystemRetentionDays,

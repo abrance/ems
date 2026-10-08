@@ -6,12 +6,34 @@ import (
 	"common/c_base"
 	"common/c_log"
 	"context"
+	"strings"
+
+	"s_db"
+	"s_db/s_db_basic"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
+// manualControlEnabled 读「允许手动控制」开关。
+//
+// 默认关闭（见 s_db_basic.SystemSettingManualControlEnabled 的定义）：手动指令与运行中的
+// 策略会互相覆盖，策略每个周期都会重写目标功率，而当前没有临时接管机制 —— 留一个会静默
+// 被覆盖的按钮比不做更糟。要做临时手动控制，先把该设置改成 true。
+func manualControlEnabled(ctx context.Context) bool {
+	value := s_db.GetSettingService().GetSettingValueBySystemSettingDefine(ctx, s_db_basic.SystemSettingManualControlEnabled)
+	return value != nil && strings.EqualFold(strings.TrimSpace(*value), "true")
+}
+
 func (c *ControllerV1) ControlDevice(ctx context.Context, req *v1.ControlDeviceReq) (res *v1.ControlDeviceRes, err error) {
+
+	if !manualControlEnabled(ctx) {
+		c_log.BizInfof(ctx, "手动控制被拒绝：开关未开启（manual_control_enabled）")
+		return nil, gerror.NewCode(gcode.CodeBusinessValidationFailed,
+			"手动控制当前已停用：手动指令会被运行中的策略覆盖（策略每个周期都会重写目标功率），"+
+				"且暂无临时接管机制。如需临时启用，请把设置 manual_control_enabled 改为 true；"+
+				"常规充放请走「管理 · 策略管理」。")
+	}
 
 	device := common.GetDeviceManager().GetDeviceById(req.DeviceId)
 	if device == nil {
