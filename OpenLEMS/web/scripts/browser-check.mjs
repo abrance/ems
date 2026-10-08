@@ -237,7 +237,20 @@ const FIXTURES = {
     backtest: { start: '2026-08-25', end: '2026-08-31', points: 672, gridDeviceId: 'dev_meter', essDeviceIds: ['dev_ess_1'], demandTarget: 200, demandPrice: 40, ratedPowerKw: 100, capacityKwh: 200, results: [{ algorithm: 'rule_based', chargeEnergy: 1200, dischargeEnergy: 1100, chargeCost: 380, dischargeRevenue: 620, arbitrageProfit: 240, actualMaxDemand: 180, baselineMaxDemand: 210, demandSaving: 1200, totalSaving: 1440, finalSocPct: 61 }] },
   },
   '/api/auth/current': { role: 'admin' },
-  '/api/spot-report/trend': { from: '2026-08-25', to: '2026-08-31', grain: 'day', excludedPending: 0, points: DAYS.map((d) => ({ bucket: d, series: [{ name: '日前加权平均电价', value: 380 }] })) },
+  // 形状要与真实响应一致（dataset/scope/metric/avg）：
+  // 四条线面板按 dataset=day_ahead_trade|realtime_trade + scope=发电侧 取数，
+  // 用旧那种 { series:[...] } 的假形状，TrendChart 也画不出东西，检查等于白做。
+  '/api/spot-report/trend': {
+    from: '2026-08-25',
+    to: '2026-08-31',
+    grain: 'day',
+    excludedPending: 0,
+    points: DAYS.flatMap((d) => [
+      { bucket: d, from: d, to: d, dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 380, max: 460, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+      { bucket: d, from: d, to: d, dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', avg: 392, max: 470, min: 320, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+      { bucket: d, from: d, to: d, dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 365, max: 450, min: 280, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+    ]),
+  },
 }
 
 /** 点位定义：按设备 id 给一份（名字/单位/枚举色都从这里来） */
@@ -393,7 +406,7 @@ const PAGES = [
   { name: '场景 · 信息披露', path: '/scene/disclosure', min: 2 },
   // 决策支持现在有三张图：电价预测、负荷预测、相似日情况分析（目标日 + 叠加日）
   { name: '场景 · 决策支持', path: '/scene/decision', min: 3 },
-  { name: '场景 · 历史信息', path: '/scene/history', min: 1 },
+  { name: '场景 · 历史信息', path: '/scene/history', min: 2 },
   { name: '场景 · 长周期电价预测', path: '/scene/forecast', min: 1 },
   {
     // 「分时」视图是 480 个点（96×5）的连续曲线 + 分位带：happy-dom 没有 canvas，

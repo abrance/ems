@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import TrendChart from '@/components/TrendChart.vue'
+import { fetchRecordedForecast } from '@/api/forecast'
 import { DATASET_LABELS, fetchTrend, listReports, type SpotTrend, type SpotTrendPoint } from '@/api/spotreport'
+import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 import { anchorEndDate } from '@/utils/latestRange'
 
 /**
@@ -158,10 +161,143 @@ async function load() {
   }
 }
 
+/* ---------- 日前-实时出清与预测价格（设计稿 §5.7 的四条线） ---------- */
+
+/** 一行 = 一个运行日 */
+interface PriceCompareRow {
+  date: string
+  dayAhead: number | null
+  realtime: number | null
+  aheadForecast: number | null
+  realForecast: number | null
+}
+
+const priceRows = ref<PriceCompareRow[]>([])
+const priceLoading = ref(false)
+const priceError = ref('')
+/** 日报侧（实际）真实区间，来自 trend 的收口结果 */
+const priceRange = ref('')
+/** 有留痕的生成日：留痕是「当时真发的预测」，不是回测重跑 */
+const recordedDays = ref<string[]>([])
+
+/**
+ * 四条线：实际两条与预测两条都取**日报域**。
+ *
+ * 为什么不用电网日指标 CSV 当实际：CSV 现在只覆盖到 2026-08-31，而留痕的目标运行日从 09-22 起，
+ * 两者永远不重叠，图会永远只有两条线。日报的「日前/实时成交电价」与留痕是同一个域（同一个运行日），
+ * 对得上才有意义。
+ *
+ * 本块**固定按运行日**（不跟上面的粒度走）：留痕天生就是一天一个点，混周/月会把口径搞乱。
+ */
+async function loadPriceCompare() {
+  if (!range.from || !range.to) return
+  priceLoading.value = true
+  priceError.value = ''
+  try {
+    const [daily, ahead, real] = await Promise.all([
+      fetchTrend({ from: range.from, to: range.to, grain: 'day' }),
+      // 留痕查不到不算错（还没积累），降级成只有实际线
+      fetchRecordedForecast({ from: range.from, to: range.to, market: 'ahead', grain: 'day' }).catch(() => null),
+      fetchRecordedForecast({ from: range.from, to: range.to, market: 'real', grain: 'day' }).catch(() => null),
+    ])
+    priceRange.value = daily.from && daily.to ? `${daily.from} ~ ${daily.to}` : ''
+
+    /** 只看「发电侧 · 平均电价」，与留痕的口径一致（别把燃煤/市场加权混进来） */
+    const priceOf = (dataset: string): Map<string, number> => {
+      const map = new Map<string, number>()
+      for (const p of daily.points ?? []) {
+        if (p.dataset === dataset && p.metric === '平均电价' && p.scope === '发电侧') map.set(p.bucket, p.avg)
+      }
+      return map
+    }
+    const aheadActual = priceOf('day_ahead_trade')
+    const realActual = priceOf('realtime_trade')
+
+    const byDate = new Map<string, PriceCompareRow>()
+    for (const date of [...aheadActual.keys(), ...realActual.keys()].sort()) {
+      byDate.set(date, {
+        date,
+        dayAhead: aheadActual.has(date) ? (aheadActual.get(date) as number) : null,
+        realtime: realActual.has(date) ? (realActual.get(date) as number) : null,
+        aheadForecast: null,
+        realForecast: null,
+      })
+    }
+    const fill = (
+      points: { targetTime: string; point: number }[] | undefined,
+      key: 'aheadForecast' | 'realForecast',
+    ) => {
+      for (const p of points ?? []) {
+        const date = String(p.targetTime ?? '').slice(0, 10)
+        const row = byDate.get(date)
+        if (row) row[key] = p.point // 实际那两天没有记录的日子不硬凑轴
+      }
+    }
+    fill(ahead?.points, 'aheadForecast')
+    fill(real?.points, 'realForecast')
+
+    priceRows.value = [...byDate.values()]
+    recordedDays.value = [...new Set([...(ahead?.generatedDates ?? []), ...(real?.generatedDates ?? [])])].sort()
+  } catch (err) {
+    priceRows.value = []
+    priceError.value = err instanceof Error ? err.message : '加载失败'
+  } finally {
+    priceLoading.value = false
+  }
+}
+
+const priceEl = ref<HTMLElement>()
+useECharts(
+  priceEl,
+  (): EChartsOption => {
+    const rows = priceRows.value
+    const pick = (key: keyof PriceCompareRow) => rows.map((r) => (r[key] as number | null))
+    return {
+      grid: { left: 60, right: 20, top: 40, bottom: 48 },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : `${v}`) },
+      legend: { top: 0, icon: 'rect', itemWidth: 12, itemHeight: 3, textStyle: { fontSize: 12 } },
+      xAxis: {
+        type: 'category',
+        data: rows.map((r) => r.date),
+        axisLabel: { fontSize: 12, color: CHART_COLORS.gray, rotate: rows.length > 20 ? 40 : 0 },
+      },
+      yAxis: {
+        type: 'value',
+        name: '元/MWh',
+        nameTextStyle: { fontSize: 12 },
+        axisLabel: { fontSize: 12, color: CHART_COLORS.gray },
+        splitLine: { lineStyle: { color: 'var(--divider)' } },
+      },
+      series: [
+        { name: '日前出清价（实际）', type: 'line', showSymbol: true, symbolSize: 5, itemStyle: { color: CHART_COLORS.brand }, data: pick('dayAhead') },
+        { name: '实时出清价（实际）', type: 'line', showSymbol: true, symbolSize: 5, itemStyle: { color: CHART_COLORS.cyan }, data: pick('realtime') },
+        // 预测一律虚线（与「实际」区分）；留痕没有的日期是 null，图直接断点
+        { name: '日前预测价（留痕）', type: 'line', showSymbol: true, symbolSize: 5, lineStyle: { type: 'dashed' }, itemStyle: { color: CHART_COLORS.brand }, data: pick('aheadForecast') },
+        { name: '实时预测价（留痕）', type: 'line', showSymbol: true, symbolSize: 5, lineStyle: { type: 'dashed' }, itemStyle: { color: CHART_COLORS.cyan }, data: pick('realForecast') },
+      ],
+    }
+  },
+  [priceRows],
+)
+
+const priceFoot = computed(() => {
+  const parts = [`实际：日报已确认的日前/实时成交电价（发电侧·平均电价），区间 ${priceRange.value || '—'}`]
+  parts.push(
+    recordedDays.value.length
+      ? `预测：留痕 ${recordedDays.value.length} 个生成日（${recordedDays.value[0]} 起）`
+      : '预测：暂无留痕（这是「当时真发的预测」，不是回测重跑）',
+  )
+  return parts.join(' · ')
+})
+
+function reload() {
+  void Promise.all([load(), loadPriceCompare()])
+}
+
 function onPreset(p: 'week' | 'month' | 'custom') {
   range.preset = p
   if (p !== 'custom') applyPreset()
-  if (p !== 'custom') void load()
+  if (p !== 'custom') reload()
 }
 
 onMounted(async () => {
@@ -174,14 +310,14 @@ onMounted(async () => {
     latestReportDate.value = null
   }
   applyPreset()
-  await load()
+  await Promise.all([load(), loadPriceCompare()])
 })
 </script>
 
 <template>
   <div v-if="error" class="notice error">
     <strong>加载失败</strong><span>　{{ error }}</span>
-    <button type="button" @click="load">重试</button>
+    <button type="button" @click="reload">重试</button>
   </div>
 
   <div class="grid">
@@ -211,7 +347,7 @@ onMounted(async () => {
         </label>
 
         <span class="spacer" />
-        <button class="btn primary" type="button" :disabled="loading" @click="load">
+        <button class="btn primary" type="button" :disabled="loading" @click="reload">
           {{ loading ? '查询中…' : '查询' }}
         </button>
       </div>
@@ -315,6 +451,27 @@ onMounted(async () => {
       </div>
     </PanelBox>
 
+    <PanelBox
+      title="日前-实时出清与预测价格"
+      sub="按运行日（固定日粒度，不跟上面的粒度）· 实际两条 + 留痕预测两条"
+      :span="12"
+      :loading="priceLoading"
+      :foot="priceFoot"
+    >
+      <div v-if="priceError" class="empty">{{ priceError }}</div>
+      <template v-else>
+        <div v-if="!recordedDays.length" class="hint">
+          预测两条线来自<strong>留痕</strong>（当时真发出去的预测）：目前还没有留痕，所以只有实际两条线。
+          留痕从 2026-10-08 起开始积累，攒起来后会自动出现；
+          「用现在模型在历史重跑」是另一条腿，见「预测复盘」页，不画在这里。
+        </div>
+        <div v-if="priceRows.length" ref="priceEl" class="chart" />
+        <div v-else class="empty">
+          本区间没有已确认的日前/实时成交电价。到「管理 · 采集管理」采集并复核日报后回来。
+        </div>
+      </template>
+    </PanelBox>
+
     <PanelBox title="待数据源的面板" :span="12" foot="设计稿 §5.7 里列出的其余几块">
       <div class="pending-list">
         <div class="pending">
@@ -415,6 +572,8 @@ th.num, td.num { text-align: right; }
 .right { color: var(--text-3); font-size: var(--fs-12); }
 .pending-list { display: flex; flex-direction: column; gap: var(--s3); }
 .pending { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--fs-13); color: var(--text-3); }
+.hint { margin-bottom: var(--s3); font-size: var(--fs-12); color: var(--text-3); }
+.chart { height: 360px; }
 .empty { padding: var(--s4); color: var(--text-3); font-size: var(--fs-13); text-align: center; }
 .muted { color: var(--text-3); font-size: var(--fs-12); }
 .btn {
