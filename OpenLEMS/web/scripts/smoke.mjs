@@ -304,6 +304,25 @@ const FAKE_TREND_POINTS = [
   { bucket: '2026-W40', from: '2026-09-28', to: '2026-10-04', dataset: 'summary', scope: '市场', metric: '日前加权平均电价', avg: 390, max: 410, min: 375, sum: 0, days: 7, unit: '元/MWh', value: 0 },
 ]
 
+// 四条线面板专用：按运行日（grain=day）的日报数据，日前 + 实时两条实际价
+const FAKE_TREND_DAILY = [
+  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 402.6, max: 480, min: 320, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-25', from: '2026-09-25', to: '2026-09-25', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 398.4, max: 470, min: 310, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 381.2, max: 460, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-25', from: '2026-09-25', to: '2026-09-25', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 374.5, max: 450, min: 290, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  // 燃煤分档：四条线只取「发电侧」，不该把这条画进去
+  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', avg: 412.9, max: 470, min: 350, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+]
+
+// 留痕（日粒度）：目标运行日要与上面那两天对上，否则预测两条线会是空的
+const FAKE_RECORDED_DAY = {
+  generatedDates: ['2026-09-23', '2026-09-24'],
+  points: [
+    { generatedOn: '2026-09-23', targetTime: '2026-09-24', point: 401.2, q10: 380, q50: 401.2, q90: 425, model: 'timesfm-3.0', unit: '元/MWh', source: 'day_ahead_trade' },
+    { generatedOn: '2026-09-24', targetTime: '2026-09-25', point: 396.8, q10: 372, q50: 396.8, q90: 418, model: 'timesfm-3.0', unit: '元/MWh', source: 'day_ahead_trade' },
+  ],
+}
+
 const FAKE_SUMMARY = {
   start: '2026-09-30', end: '2026-10-06', points: 672, algorithm: 'tou-rule',
   gridDeviceId: 'grid_1', essDeviceIds: ['ess_1'], demandPrice: 40,
@@ -845,7 +864,9 @@ globalThis.fetch = async (url, init) => {
   }
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
-  if (u.includes('/api/forecast/recorded')) return json(FAKE_RECORDED)
+  if (u.includes('/api/forecast/recorded')) {
+    return json(u.includes('grain=day') ? FAKE_RECORDED_DAY : FAKE_RECORDED)
+  }
   if (u.includes('/api/forecast/backtest')) return json(FAKE_BACKTEST_RESULT)
   if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
@@ -863,7 +884,7 @@ globalThis.fetch = async (url, init) => {
       to: q.get('to') || '2026-10-06',
       grain: q.get('grain') || 'week',
       excludedPending: 8,
-      points: FAKE_TREND_POINTS,
+      points: q.get('grain') === 'day' ? FAKE_TREND_DAILY : FAKE_TREND_POINTS,
     })
   }
   if (u.includes('/api/spot-report/collect')) return json({ report: FAKE_REPORTS[0] })
@@ -2452,6 +2473,24 @@ await clickTo('场景', '历史信息')
   // 图表按数据集分组
   const chartTitles = [...doc.querySelectorAll('.panel-title')].map((e) => e.textContent.trim())
   check(chartTitles.includes('日前成交电价') && chartTitles.includes('正文摘要指标'), '按数据集出图')
+
+  // 四条线：实际两条（日报日前/实时成交电价）+ 预测两条（留痕），同一日报域、日期对得上
+  check(chartTitles.includes('日前-实时出清与预测价格'), '有四条线面板')
+  check(bodyHas('实际：日报已确认的日前/实时成交电价'), '写明实际线的来源与口径')
+  check(bodyHas('留痕 2 个生成日'), '写明留痕有几个生成日')
+  const pricePanel = [...doc.querySelectorAll('.panel')].find((p) =>
+    (p.querySelector('.panel-title')?.textContent ?? '').includes('日前-实时出清与预测价格'),
+  )
+  const pricePoints = Number(pricePanel?.querySelector('.chart')?.dataset.chartPoints ?? 0)
+  check(pricePoints === 8, `4 条线 × 2 个运行日 = 8 个点（实际 ${pricePoints}）`)
+  check(
+    requests.some((r) => r.url.includes('/api/spot-report/trend') && r.url.includes('grain=day')),
+    '本块固定按运行日取数（不跟上面的粒度）',
+  )
+  check(
+    requests.some((r) => r.url.includes('/api/forecast/recorded') && r.url.includes('grain=day')),
+    '预测线走留痕（日粒度）',
+  )
 
   // 桶明细：2 行（2 个桶）× 3 条序列
   const rows = [...doc.querySelectorAll('.table-wrap tbody tr')]
