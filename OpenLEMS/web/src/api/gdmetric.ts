@@ -160,3 +160,45 @@ export function fetchSupplyCurve(
     steps: r.steps ?? [],
   }))
 }
+
+/** 历史相似日 · 单个候选日 */
+export interface SimilarDay {
+  date: string
+  /** 0~100 = (ρ+1)/2×100 */
+  similarity: number
+  priceCorr: number
+  loadCorr: number
+  priceAvg: number
+  loadMax: number
+}
+
+/**
+ * 历史相似日结果。
+ *
+ * 口径来自后端 `internal/logic/gdmetric/similar.go`：96 点价格/负荷形态的加权
+ * 皮尔逊相关（z-score 标准化后），不是绝对价位相近。页面要把 method/formula 展示出来，
+ * 别让人以为「相似」= 数字接近。
+ */
+export interface SimilarDaysResult {
+  targetDate: string
+  market: string
+  topN: number
+  wPrice: number
+  wLoad: number
+  method: string
+  formula: string
+  from: string
+  to: string
+  candidates: number
+  days: SimilarDay[]
+  timeMs: number
+}
+
+export function fetchSimilarDays(
+  params: { date?: string; market?: string; top?: number; wPrice?: number; wLoad?: number },
+  signal?: AbortSignal,
+): Promise<SimilarDaysResult> {
+  return api
+    .get<SimilarDaysResult>('/api/gd-metric/similar-days', params, signal)
+    .then((r) => ({ ...r, days: r.days ?? [] }))
+}
