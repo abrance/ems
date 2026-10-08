@@ -85,9 +85,26 @@ func (s *sPriceForecastServiceImpl) GeneratedDates(
 	if strings.TrimSpace(grain) != "" {
 		m = m.Where(s_db_model.FieldPriceForecastGrain, grain)
 	}
-	var dates []string
-	if err := m.OrderAsc(s_db_model.FieldPriceForecastGeneratedOn).Scan(&dates); err != nil {
+	// 注意：不能直接 `Scan(&[]string)` —— 单字段查询扫进 []string 时，gf 会把**整行**
+	// 序列化成 JSON 字符串塞进数组（线上实测拿到的是 `{"generated_on":"2026-10-07"}`，
+	// 页面直接把这段字符串显示给用户了）。按行结构体接，再自己取字段。
+	var rows []struct {
+		GeneratedOn string `orm:"generated_on"`
+	}
+	if err := m.OrderAsc(s_db_model.FieldPriceForecastGeneratedOn).Scan(&rows); err != nil {
 		return nil, errors.Wrap(err, "查询预测留痕生成日失败")
+	}
+	dates := make([]string, 0, len(rows))
+	for _, row := range rows {
+		date := strings.TrimSpace(row.GeneratedOn)
+		if date == "" {
+			continue
+		}
+		// 只管日期部分（列里存的是 YYYY-MM-DD，防御性截一下时间）
+		if len(date) > 10 {
+			date = date[:10]
+		}
+		dates = append(dates, date)
 	}
 	return dates, nil
 }
