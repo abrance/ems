@@ -322,7 +322,8 @@ const FAKE_LOAD = {
 }
 
 const FAKE_PRICE = {
-  market: 'ahead', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价',
+  market: 'ahead', grain: 'day', stepMinutes: 1440,
+  dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价',
   unit: '元/MWh', model: 'timesfm-3.0', from: '2026-07-24', to: '2026-09-21',
   historyDates: ['2026-09-19', '2026-09-20', '2026-09-21'],
   historyValues: [380, 390, 400],
@@ -331,6 +332,32 @@ const FAKE_PRICE = {
     { runDate: '2026-09-23', point: 372.1, quantiles: { '0.1': 345, '0.5': 372.1, '0.9': 408 } },
   ],
   contextPoints: 60, inputTruncated: false, missingDays: 50, timeMs: 2063,
+}
+
+/**
+ * 分时（grain=intraday）：序列源是电网日指标 CSV（gd_metric.csv）的 15 分钟电价，
+ * 2 个预测日 × 96 点。后端早就支持，原先缺的是这个视图。
+ */
+const FAKE_PRICE_INTRADAY = {
+  market: 'ahead', grain: 'intraday', stepMinutes: 15,
+  dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价',
+  unit: '元/兆瓦时', model: 'timesfm-3.0', from: '2026-08-02 00:15', to: '2026-09-01 00:00',
+  historyDates: ['2026-09-01 00:00'], historyValues: [300],
+  forecast: Array.from({ length: 192 }, (_, i) => {
+    const day = i < 96 ? '2026-09-01' : '2026-09-02'
+    const slot = (i % 96) * 15
+    const hh = String(Math.floor(slot / 60)).padStart(2, '0')
+    const mm = String(slot % 60).padStart(2, '0')
+    const point = 300 + (i % 96) * 2
+    return {
+      runDate: day,
+      atTime: `${hh}:${mm}`,
+      targetTime: `${day} ${hh}:${mm}`,
+      point,
+      quantiles: { '0.1': point - 30, '0.5': point, '0.9': point + 40 },
+    }
+  }),
+  contextPoints: 2880, inputTruncated: false, missingDays: 0, timeMs: 1800,
 }
 
 const FAKE_SYS = {
@@ -806,7 +833,9 @@ globalThis.fetch = async (url, init) => {
     return json(u.includes('market=real') ? FAKE_SUPPLY_DRIFT : FAKE_SUPPLY_CLEAN)
   }
   if (u.includes('/api/forecast/load')) return json({ forecast: FAKE_LOAD })
-  if (u.includes('/api/forecast/price')) return json({ forecast: FAKE_PRICE })
+  if (u.includes('/api/forecast/price')) {
+    return json({ forecast: u.includes('grain=intraday') ? FAKE_PRICE_INTRADAY : FAKE_PRICE })
+  }
   if (u.includes('/api/spot-report/trend')) {
     const q = new URL(u, 'http://x').searchParams
     return json({
@@ -2180,7 +2209,7 @@ await clickTo('场景', '长周期电价预测')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('预测概览'))
-  check(bodyHas('目前只有「平均」视图'), '显式声明只有平均视图（不是分时）')
+  check(bodyHas('平均视图'), '默认平均视图，并说明序列源是日报日均价')
   check(bodyHas('1683.20') || bodyHas('368.4'), '首日预测取到值（证明 { forecast } 拆包对）')
   check(bodyHas('372.1'), '末日预测取到值')
   check(bodyHas('历史 60 点'), '展示上下文点数')
@@ -2217,7 +2246,30 @@ await clickTo('场景', '长周期电价预测')
   const forced = requests.filter((r) => r.url.includes('/api/forecast/price')).pop()
   check(forced.url.includes('forceRefresh=true'), '刷新预测带 forceRefresh=true', forced.url)
 
-  check(bodyHas('分时视图'), '点名待做的是分时视图，并说明怎么补')
+  // 切「分时」视图：序列源换成电网日指标 CSV（96 点/日）。
+  // 后端 grain=intraday 早就实现了（96×5=480 ≤ max_horizon 512），原先缺的只是这个视图。
+  const viewSel = [...doc.querySelectorAll('.toolbar .field select')][1]
+  const intraOpt = [...viewSel.options].find((o) => o.textContent.trim() === '分时')
+  viewSel.selectedIndex = intraOpt.index
+  viewSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => bodyHas('未来多日分时电价预测'))
+  const priceCalls = requests.filter((r) => r.url.includes('/api/forecast/price'))
+  const intraCall = priceCalls[priceCalls.length - 1]
+  check(intraCall.url.includes('grain=intraday'), '切分时带 grain=intraday', intraCall.url)
+  check(intraCall.url.includes('historyDays=30'), '分时用 30 天历史窗口（日均用 60 天）', intraCall.url)
+  check(bodyHas('预测点数') && bodyHas('192'), '分时按「点」计数而不是按天')
+  check(bodyHas('395.0'), '分日汇总给出该预测日均价（300+(0..95)×2 的均值）')
+
+  // 预测日按 96 点切，不是按日历日（连续序列按日历切会出 95/96/1 的碎块）
+  const intraRows = [...doc.querySelectorAll('tbody tr')]
+  check(intraRows.length === 2, `分日汇总 2 行（实际 ${intraRows.length}）`)
+  const firstDay = [...(intraRows[0]?.querySelectorAll('td') ?? [])].map((c) => c.textContent.trim())
+  check(firstDay[0] === 'D+1' && firstDay[2] === '96', '预测日按 96 点切分', JSON.stringify(firstDay))
+
+  // 分时天数上限就是 5 日（96×5=480 ≤ TimesFM max_horizon 512）
+  const hSel = [...doc.querySelectorAll('.toolbar .field select')][2]
+  const opts = [...hSel.options].map((o) => o.textContent.trim()).join('/')
+  check(opts === '1 日/2 日/3 日/4 日/5 日', '分时只给 1~5 日', opts)
 }
 
 console.log('\n== 市场出清页 ==')

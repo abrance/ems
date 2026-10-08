@@ -26,6 +26,8 @@ export interface PriceForecastPoint {
   point: number
   /** 键为分位字符串，如 "0.1" / "0.5" / "0.9" */
   quantiles: Record<string, number>
+  /** 仅 intraday：HH:MM，便于按天分组绘图（day 粒度不下发） */
+  atTime?: string
 }
 
 /** 预测留痕：复盘的第一条腿 —— **当时**发出去的预测 */
@@ -72,6 +74,10 @@ export interface PriceBacktest {
 
 export interface PriceForecast {
   market: string
+  /** day=日均（日报已确认）/ intraday=96 点（电网日指标 CSV） */
+  grain: string
+  /** 采样步长（分钟）：day=1440，intraday=15 */
+  stepMinutes: number
   dataset: string
   scope: string
   metric: string

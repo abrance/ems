@@ -91,6 +91,8 @@ const FIXTURES = {
   '/api/forecast/price': {
     forecast: {
       market: 'ahead',
+      grain: 'day',
+      stepMinutes: 1440,
       dataset: 'day_ahead_trade',
       scope: '发电侧',
       metric: '平均电价',
@@ -111,6 +113,42 @@ const FIXTURES = {
         point: 300 + ((i * 13) % 200),
         quantiles: { '0.1': 260, '0.5': 300, '0.9': 420 },
       })),
+    },
+  },
+  // 分时（grain=intraday）：序列源是电网日指标 CSV，5 个预测日 × 96 点 = 480 点
+  // （96×5=480 ≤ TimesFM max_horizon 512）。stub 里按 query 选这一份。
+  '/api/forecast/price?grain=intraday': {
+    forecast: {
+      market: 'ahead',
+      grain: 'intraday',
+      stepMinutes: 15,
+      dataset: 'day_ahead_trade',
+      scope: '发电侧',
+      metric: '平均电价',
+      unit: '元/兆瓦时',
+      model: 'timesfm-3.0',
+      from: '2026-08-02 00:15',
+      to: '2026-09-01 00:00',
+      historyDates: ['2026-09-01 00:00'],
+      historyValues: [380],
+      contextPoints: 2880,
+      inputTruncated: false,
+      missingDays: 0,
+      timeMs: 1800,
+      forecast: Array.from({ length: 480 }, (_, i) => {
+        const slot = (i % 96) * 15
+        const hh = String(Math.floor(slot / 60)).padStart(2, '0')
+        const mm = String(slot % 60).padStart(2, '0')
+        const day = `2026-09-0${1 + Math.floor(i / 96)}`
+        const point = 300 + ((i * 13) % 200)
+        return {
+          runDate: day,
+          atTime: `${hh}:${mm}`,
+          targetTime: `${day} ${hh}:${mm}`,
+          point,
+          quantiles: { '0.1': point - 40, '0.5': point, '0.9': point + 50 },
+        }
+      }),
     },
   },
   '/api/forecast/backtest': {
@@ -230,6 +268,9 @@ window.fetch = async (input) => {
   const url = new URL(typeof input === 'string' ? input : input.url, location.origin);
   const p = url.pathname;
   let data = __FIXTURES__[p];
+  if (p === '/api/forecast/price' && url.searchParams.get('grain') === 'intraday') {
+    data = __FIXTURES__['/api/forecast/price?grain=intraday'];
+  }
   if (data === undefined && /\\/points\\/definitions$/.test(p)) data = ${JSON.stringify(pointDefinitions('x'))};
   if (data === undefined) data = {};
   return new Response(JSON.stringify({ code: 0, message: 'OK', data }), {
@@ -332,6 +373,22 @@ const PAGES = [
   { name: '场景 · 决策支持', path: '/scene/decision', min: 2 },
   { name: '场景 · 历史信息', path: '/scene/history', min: 1 },
   { name: '场景 · 长周期电价预测', path: '/scene/forecast', min: 1 },
+  {
+    // 「分时」视图是 480 个点（96×5）的连续曲线 + 分位带：happy-dom 没有 canvas，
+    // 这张图只有真浏览器能验证它真的画出来了（切下拉 → 等图 → 数 canvas）。
+    name: '场景 · 长周期电价预测（分时）',
+    path: '/scene/forecast',
+    min: 1,
+    act: `(() => {
+      const sel = [...document.querySelectorAll('.toolbar .field select')][1];
+      if (!sel) return false;
+      const opt = [...sel.options].find((o) => o.textContent.trim() === '分时');
+      if (!opt) return false;
+      sel.selectedIndex = opt.index;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`,
+  },
   { name: '场景 · 策略反演', path: '/scene/inference', min: 1 },
   { name: '场景 · 预测复盘', path: '/scene/review', min: 1 },
   { name: '运行监控 · 能源总览', path: '/monitor/overview', min: 1 },
@@ -389,6 +446,11 @@ async function main() {
       await m.call('WebDriver:Navigate', { url: base + '/' })
       await new Promise((r) => setTimeout(r, 300))
       await m.call('WebDriver:Navigate', { url: base + page.path })
+
+      // 有的页面要先把界面切到目标状态（下拉/开关），否则那块图根本不在 DOM 里
+      if (page.act) {
+        await m.call('WebDriver:ExecuteScript', { script: page.act, args: [] })
+      }
 
       // 轮询等图出现，不用固定 sleep：有的页面要等接口回来才渲染（固定 2.5s 会偶发 0 图，
       // 那是检查自己不稳，不是页面有问题）。最多等 8 秒。
