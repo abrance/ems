@@ -6,8 +6,8 @@
  * 口径见 .monkeycode/specs/2026-10-06-ems-frontend-shell/design.md §3。
  */
 
-/** ready=已实现；planned=本期做但还没写；todo=本期不做，仅留入口 */
-export type PageStatus = 'ready' | 'planned' | 'todo'
+/** ready=已实现；planned=本期做但还没写；todo=本期不做，仅留入口；paused=做过但已停用（页面会说明原因） */
+export type PageStatus = 'ready' | 'planned' | 'todo' | 'paused'
 
 export interface NavPage {
   key: string
@@ -81,8 +81,9 @@ export const NAV: NavTab[] = [
         key: 'manual',
         title: '手动控制',
         path: '/manage/manual',
-        status: 'ready',
+        status: 'paused',
         perm: 'manage:control',
+        note: '已停用：手动指令会被运行中的策略覆盖（策略每周期重写目标功率），且暂无临时接管机制。后端接口也拒绝下发；要临时启用需改设置 manual_control_enabled。',
       },
       { key: 'policies', title: '策略管理', path: '/manage/policies', status: 'ready', perm: 'manage:policy' },
       { key: 'automation', title: '自动化联动', path: '/manage/automation', status: 'ready', perm: 'manage:automation' },
