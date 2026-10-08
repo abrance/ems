@@ -93,11 +93,15 @@ const socOutOfRange = computed(
   () => socNow.value !== null && (socNow.value < limits.value.socMinPct || socNow.value > limits.value.socMaxPct),
 )
 
-/** 服务参数里以 kW 为单位的字段，按保护上限校验 */
-function powerCapFor(p: FieldDefinition): number | null {
+/**
+ * 服务参数里以 kW 为单位的字段：按「幅值」对着保护上限校验，
+ * 正值用充电上限、负值用放电上限（驱动约定 正=充 负=放，见 build.yaml 的参数说明）。
+ * 方向语义来自参数取值的正负，不额外假设驱动元数据。
+ */
+function powerCapFor(p: FieldDefinition, value: number): number | null {
   const unit = (p.unit ?? '').toUpperCase()
   if (unit !== 'KW') return null
-  const cap = limits.value.chargeCap || limits.value.dischargeCap
+  const cap = value < 0 ? limits.value.dischargeCap : limits.value.chargeCap
   return Number.isFinite(cap) && cap > 0 ? cap : null
 }
 
@@ -205,9 +209,11 @@ function validateField(p: FieldDefinition, raw: unknown): string {
   if (Number.isNaN(n)) return `${label} 需要是数字`
   if (p.min !== undefined && p.min !== null && n < p.min) return `${label} 不能小于 ${p.min}`
   if (p.max !== undefined && p.max !== null && n > p.max) return `${label} 不能大于 ${p.max}`
-  // EMS 侧保护：不超过「储能参数」推导出的功率上限
-  const cap = powerCapFor(p)
-  if (cap !== null && n > cap) return `${label} 超过保护上限 ${cap} kW（来自配置 · 储能参数）`
+  // EMS 侧保护：不超过「储能参数」推导出的功率上限（充电看充电上限，放电看放电上限）
+  const cap = powerCapFor(p, n)
+  if (cap !== null && Math.abs(n) > cap) {
+    return `${label} 超过保护上限 ${cap} kW（来自配置 · 储能参数）`
+  }
   return ''
 }
 

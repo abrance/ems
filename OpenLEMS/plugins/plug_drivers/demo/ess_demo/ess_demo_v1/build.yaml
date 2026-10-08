@@ -62,6 +62,29 @@ telemetry:
 
 
 service:
+  - key: CustomSetPowerService
+    name: "设定功率"
+    description: "人工设定充放功率（正=充电，负=放电）"
+    icon: "power"
+    params:
+      - key: power
+        name: "功率"
+        value_type: float
+        component_type: number
+        unit: "kW"
+        required: true
+        min: -100
+        max: 100
+        default: "0"
+        description: "正=充电，负=放电；超出设备上报的充/放电能力会自动钳位"
+  - key: CustomStartService
+    name: "开机"
+    description: "写 DeviceControl=1，恢复充放能力"
+    icon: "play"
+  - key: CustomStopService
+    name: "关机"
+    description: "目标功率清零并写 DeviceControl=0"
+    icon: "stop"
   - key: CustomPowerZeroService
     name: "零功率"
     description: "设置功率为零"
