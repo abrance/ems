@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"common"
-	"common/c_base"
 	"common/c_chart"
 	"s_db"
 	"s_effect"
@@ -20,8 +19,6 @@ import (
 const (
 	// policySettingId 微电网策略配置所在的 setting ID（与 p_policy_mircogrid 一致）
 	policySettingId = "policy_microgrid"
-	// powerPointKey 设备实时有功功率点位 Key
-	powerPointKey = "Power"
 	// demandWindowMin 需量计算窗口（分钟）
 	demandWindowMin = 15
 )
@@ -149,11 +146,10 @@ func (c *policyConfig) applyDefaults() {
 
 // loadSeries 读取单个设备的有功功率历史。
 func loadSeries(ctx context.Context, deviceID string, startMs, endMs int64) (s_effect.SSeries, error) {
-	storage := common.GetStorageInstanceOrNil()
-	if storage == nil {
-		return nil, errors.New("存储实例未就绪")
-	}
-	chart, err := storage.GetStorageData(c_base.StorageTypeDevice, deviceID, []string{powerPointKey}, &startMs, &endMs, 0)
+	// 点位 Key 不能写死：ess/pv/load_demo 是 "Power"，关口电表（ammeter_demo）是
+	// "TotalActivePower" —— 写死会让「关口指向真实电表」之后这里静默读不到数据。
+	// 详见 common.DevicePowerPointKeys。
+	chart, err := common.LoadDevicePowerSeries(deviceID, startMs, endMs)
 	if err != nil {
 		return nil, err
 	}
