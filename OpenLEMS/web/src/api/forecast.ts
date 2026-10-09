@@ -69,6 +69,8 @@ export interface PriceBacktest {
   targetDates: string[]
   skipped: string[]
   points: BacktestPoint[]
+  /** 因该时刻没有实际值而丢弃的预测点数（按时间戳配对配不上的） */
+  actualMissing?: number
   timeMs: number
 }
 

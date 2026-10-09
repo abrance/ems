@@ -109,8 +109,15 @@ export const DATASETS: Dataset[] = [
         p.kind === 'load' ? '系统负荷 MW' : p.kind === 'dayAhead' ? '日前出清价 元/MWh' : '实时出清价 元/MWh'
       const res = await fetchMetricSeries({ from: p.from, to: p.to, kind: p.kind })
       return {
-        columns: ['日期', '时刻', '类别', '数值'],
-        rows: res.points.map((s) => [s.date, s.time, kindLabel, s.value]),
+        columns: ['日期', '时刻', '类别', '数值', '来源'],
+        rows: res.points.map((s) => [
+          s.date,
+          s.time,
+          kindLabel,
+          s.value,
+          // 导出必须带来源：999 是电查查预测占位，不是实际值
+          s.sourceId === 999 ? '电查查预测占位' : s.sourceId === 9 ? '广东电力交易中心' : '未标注来源',
+        ]),
       }
     },
   },

@@ -11,6 +11,8 @@ export interface SeriesStat {
   last: number
   count: number
   unit: string
+  /** 999 = 这天只有电查查预测占位，实际值还没出 */
+  sourceId?: number
 }
 
 export interface DayRow {
@@ -34,6 +36,8 @@ export interface DayCurve {
 
 export interface GdMetricSnapshot {
   latestDate: string
+  /** 最近一个有**实际值**的日期（latestDate 之后可能只有电查查预测占位） */
+  latestRealDate?: string
   from: string
   to: string
   date: string
@@ -65,6 +69,8 @@ export interface MetricSeriesPoint {
   date: string
   time: string
   value: number
+  /** 9 = 广东电力交易中心实际值；999 = 电查查预测占位，**不是实际值** */
+  sourceId?: number
 }
 
 export interface MetricSeries {
