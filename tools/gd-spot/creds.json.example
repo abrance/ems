@@ -1,0 +1,5 @@
+{
+  "authorization": "请求头 Authorization 的值（32 位串）",
+  "jwt": "请求头 JWTHeaderName 的值（HS512 JWT）",
+  "cookie": "浏览器上的 Cookie（可选，CURL 里的 -b 那段）"
+}

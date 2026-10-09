@@ -1,0 +1,19 @@
+# 本地凭证：绝不入库（电查查 token 等）
+creds.json
+.env
+*.local.json
+
+# 抓取产物 / 数据快照：大文件，从数据源重新拉，不入库
+/gd_metric.csv
+gd_metric_*.csv
+gd_spot_*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器 / 系统
+.DS_Store
+*.swp
