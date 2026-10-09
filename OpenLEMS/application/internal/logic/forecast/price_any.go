@@ -31,9 +31,11 @@ type TPriceForecastResult struct {
 	Points         []TPriceForecastPoint
 	ContextPoints  int
 	InputTruncated bool
-	MissingDays    int
-	TimeMs         float64
-	GeneratedOn    string
+	// InputChannels 送入模型的通道数（1=只用本市场历史；实时电价=3）
+	InputChannels int
+	MissingDays   int
+	TimeMs        float64
+	GeneratedOn   string
 	// Recorded 本次写入留痕的条数；0 表示没写进去（已在日志里告警）
 	Recorded int
 }
@@ -145,6 +147,7 @@ func loadIntradayCached(ctx context.Context, req PriceRequest) (*TPriceForecastR
 		Points:         raw.Points,
 		ContextPoints:  raw.ContextPoints,
 		InputTruncated: raw.InputTruncated,
+		InputChannels:  raw.InputChannels,
 		MissingDays:    daysBetween(raw.From, raw.To) - raw.CoveredDays,
 		TimeMs:         raw.TimeMs,
 		GeneratedOn:    raw.GeneratedOn,

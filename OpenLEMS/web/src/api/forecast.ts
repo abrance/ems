@@ -92,6 +92,8 @@ export interface PriceForecast {
   forecast: PriceForecastPoint[]
   contextPoints: number
   inputTruncated: boolean
+  /** 送入模型的通道数：1=只用本市场历史；实时电价=3（实时价+日前价+负荷） */
+  inputChannels?: number
   missingDays: number
   timeMs: number
 }

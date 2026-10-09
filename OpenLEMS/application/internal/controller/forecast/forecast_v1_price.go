@@ -67,6 +67,7 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		HistoryValues:  result.HistoryValues,
 		Forecast:       points,
 		ContextPoints:  result.ContextPoints,
+		InputChannels:  result.InputChannels,
 		InputTruncated: result.InputTruncated,
 		MissingDays:    result.MissingDays,
 		TimeMs:         result.TimeMs,
