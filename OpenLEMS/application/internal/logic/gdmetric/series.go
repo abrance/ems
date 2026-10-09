@@ -28,6 +28,9 @@ type TimedSample struct {
 	Date  string  `json:"date"`
 	Time  string  `json:"time"`
 	Value float64 `json:"value"`
+	// SourceID 见 gdmetric.SourceExchange / SourceForecastPlaceholder：
+	// 999 表示这一时刻的**实际值还没出**，值是电查查的预测占位。
+	SourceID int `json:"sourceId"`
 }
 
 // NormalizeKind 归一化类别名，接受常见别名。
@@ -63,7 +66,11 @@ func GetSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSa
 		}
 		// 有缓存就沿用：复盘看的是历史，不该因为一次拉取失败而打不开
 	}
+	return global.series(from, to, kind)
+}
 
+// series 读区间序列（不含初始化/刷新）。拆出来是为了能在测试里直接跑，不去碰网络。
+func (s *store) series(from, to string, kind SeriesKind) ([]TimedSample, error) {
 	loc := time.UTC
 	fromT, err := time.ParseInLocation(dateLayout, strings.TrimSpace(from), loc)
 	if err != nil {
@@ -81,12 +88,12 @@ func GetSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSa
 	}
 
 	// 只遍历 store 里真实存在的日期，避免对每个空日期都做一次文件读
-	global.mu.RLock()
-	exist := make(map[string]bool, len(global.days))
-	for _, d := range global.days {
+	s.mu.RLock()
+	exist := make(map[string]bool, len(s.days))
+	for _, d := range s.days {
 		exist[d.Date] = true
 	}
-	global.mu.RUnlock()
+	s.mu.RUnlock()
 
 	out := make([]TimedSample, 0, int(toT.Sub(fromT).Hours()/24+1)*96)
 	for d := fromT; !d.After(toT); d = d.AddDate(0, 0, 1) {
@@ -94,7 +101,7 @@ func GetSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSa
 		if !exist[date] {
 			continue
 		}
-		curve, err := global.getCurve(date)
+		curve, err := s.getCurve(date)
 		if err != nil {
 			return nil, errors.Wrapf(err, "读取 %s 曲线失败", date)
 		}
@@ -110,11 +117,35 @@ func GetSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSa
 		case KindLoad:
 			samples = curve.Load
 		}
-		for _, s := range samples {
-			out = append(out, TimedSample{Date: date, Time: s.Time, Value: s.Value})
+		for _, smp := range samples {
+			out = append(out, TimedSample{Date: date, Time: smp.Time, Value: smp.Value, SourceID: smp.SourceID})
 		}
 	}
 	return out, nil
+}
+
+// GetRealSeries 同 GetSeries，但只保留**实际值**（剔除电查查预测占位 999）。
+//
+// 复盘/回测必须用它：占位行是另一个模型的预测，拿它当基准真值去算准确度，
+// 算出来的只是「两个模型差多少」，与「预测准不准」无关。
+func GetRealSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSample, error) {
+	all, err := GetSeries(ctx, from, to, kind)
+	if err != nil {
+		return nil, err
+	}
+	return realOnly(all), nil
+}
+
+// realOnly 剔除占位来源（999），只留实际值。
+func realOnly(all []TimedSample) []TimedSample {
+	out := make([]TimedSample, 0, len(all))
+	for _, s := range all {
+		if s.SourceID == SourceForecastPlaceholder {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // AvailableDates 返回区间内确实有数据的日期（升序），供前端灰显无数据的日期。

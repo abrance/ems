@@ -48,6 +48,16 @@ const hasData = computed(() => snapshot.value?.curve != null)
 
 const latest = computed(() => snapshot.value?.latest ?? null)
 
+/** 这天只有电查查预测占位（999）→ 日前/实时两个数字不是实际值 */
+const placeholderDay = computed(
+  () =>
+    latest.value?.dayAhead?.sourceId === 999 ||
+    latest.value?.realtime?.sourceId === 999,
+)
+const priceHint = computed(() =>
+  placeholderDay.value ? '电查查预测占位，实际值还没出' : '统一结算点',
+)
+
 function num(v: number | undefined, digits = 1): string {
   return v === undefined || Number.isNaN(v) ? '—' : v.toFixed(digits)
 }
@@ -105,12 +115,17 @@ useECharts(trendEl, (): EChartsOption => {
     <span>　gd-metric 只覆盖 CSV 内有数据的运行日，可在右上角换日期。</span>
   </div>
 
+  <div v-if="!loading && !error && placeholderDay" class="notice">
+    <strong>{{ snapshot?.date }} 的日前/实时价格是电查查预测占位</strong>
+    <span>　这天的实际出清价还没进 CSV，两个价格来自电查查的预测（sourceId 999），不能当实际值用。</span>
+  </div>
+
   <div class="kpis">
     <KpiCard label="运行日" :value="snapshot?.date || '—'" :hint="snapshot?.latestDate ? `最新可用 ${snapshot.latestDate}` : ''" />
     <KpiCard label="负荷均值" :value="num(latest?.load.avg)" :unit="latest?.load.unit || 'MW'" hint="全时段算术平均" />
     <KpiCard label="最大负荷" :value="num(latest?.load.max)" :unit="latest?.load.unit || 'MW'" hint="当日 15 分钟峰值" />
-    <KpiCard label="日前均价" :value="num(latest?.dayAhead.avg)" :unit="latest?.dayAhead.unit || '元/MWh'" hint="统一结算点" />
-    <KpiCard label="实时均价" :value="num(latest?.realtime.avg)" :unit="latest?.realtime.unit || '元/MWh'" hint="统一结算点" />
+    <KpiCard label="日前均价" :value="num(latest?.dayAhead.avg)" :unit="latest?.dayAhead.unit || '元/MWh'" :hint="priceHint" />
+    <KpiCard label="实时均价" :value="num(latest?.realtime.avg)" :unit="latest?.realtime.unit || '元/MWh'" :hint="priceHint" />
     <KpiCard label="数据来源" :value="snapshot?.source || '—'" :hint="snapshot?.updatedAt ? `更新于 ${snapshot.updatedAt}` : ''" />
   </div>
 

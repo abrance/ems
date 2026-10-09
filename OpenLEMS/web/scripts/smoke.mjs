@@ -563,8 +563,8 @@ const FAKE_SERIES = {
   to: '2026-09-20',
   days: ['2026-09-20'],
   points: [
-    { date: '2026-09-20', time: '00:00', value: 100 },
-    { date: '2026-09-20', time: '06:00', value: 100 },
+    { date: '2026-09-20', time: '00:00', value: 100, sourceId: 9 },
+    { date: '2026-09-20', time: '06:00', value: 100, sourceId: 999 },
   ],
 }
 
@@ -1862,11 +1862,14 @@ console.log('\n== 报表导出页 ==')
   const rows = [...doc.querySelectorAll('.table tbody tr')]
   check(rows.length === 2, `预览 2 行（实际 ${rows.length}）`)
   const firstRow = [...rows[0].querySelectorAll('td')].map((td) => td.textContent.trim()).join('|')
-  check(firstRow === '2026-09-20|00:00|日前出清价 元/MWh|100', '第一行内容按列定义', firstRow)
-  check(bodyHas('2 行 × 4 列'), '显示行数 × 列数')
+  check(firstRow === '2026-09-20|00:00|日前出清价 元/MWh|100|广东电力交易中心', '第一行内容按列定义', firstRow)
+  check(bodyHas('2 行 × 5 列'), '显示行数 × 列数')
+  // 999 是电查查预测占位，导出里必须点名，不能和实际值长得一样
+  const secondRow = [...rows[1].querySelectorAll('td')].map((td) => td.textContent.trim()).join('|')
+  check(secondRow === '2026-09-20|06:00|日前出清价 元/MWh|100|电查查预测占位', '占位行标出来源', secondRow)
   const pre = doc.querySelector('.raw pre')?.textContent ?? ''
-  check(pre.includes('日期,时刻,类别,数值'), 'CSV 原文预览含表头', pre.split('\n')[0])
-  check(pre.includes('2026-09-20,00:00,日前出清价 元/MWh,100'), 'CSV 原文预览含数据行')
+  check(pre.includes('日期,时刻,类别,数值,来源'), 'CSV 原文预览含表头', pre.split('\n')[0])
+  check(pre.includes('2026-09-20,00:00,日前出清价 元/MWh,100,广东电力交易中心'), 'CSV 原文预览含数据行')
   check(bodyHas('.csv'), '显示下载文件名')
 
   // 区间超上限 → 拦下且不发请求（后端 MaxSeriesDays=400 会直接 400，先在本地说清）

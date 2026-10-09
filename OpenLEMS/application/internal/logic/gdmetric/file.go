@@ -38,7 +38,7 @@ func ingestFile(path string) ([]DayRow, map[string]int64, error) {
 		}
 		start := pos
 		pos += int64(len(line))
-		date, clock, typeID, unit, value, ok := parseMetricLine(line)
+		date, clock, typeID, unit, value, sourceID, ok := parseMetricLine(line)
 		if !ok {
 			if err == io.EOF {
 				break
@@ -60,7 +60,7 @@ func ingestFile(path string) ([]DayRow, map[string]int64, error) {
 			}
 			continue
 		}
-		bucket.add(clock, value, unit, false)
+		bucket.add(clock, value, unit, sourceID, false)
 		if err == io.EOF {
 			break
 		}
@@ -87,13 +87,13 @@ func readDayCurve(path string, offset int64, date string) (DayCurve, error) {
 			}
 			return DayCurve{}, err
 		}
-		rowDate, clock, typeID, unit, value, ok := parseMetricLine(line)
+		rowDate, clock, typeID, unit, value, sourceID, ok := parseMetricLine(line)
 		if ok {
 			if rowDate != date {
 				break
 			}
 			if bucket := day.bucket(typeID); bucket != nil {
-				bucket.add(clock, value, unit, true)
+				bucket.add(clock, value, unit, sourceID, true)
 			}
 		}
 		if err == io.EOF {
@@ -113,17 +113,17 @@ func readDayCurve(path string, offset int64, date string) (DayCurve, error) {
 	return curve, nil
 }
 
-func parseMetricLine(line []byte) (date, clock string, typeID int, unit string, value float64, ok bool) {
+func parseMetricLine(line []byte) (date, clock string, typeID int, unit string, value float64, sourceID int, ok bool) {
 	line = bytes.TrimRight(line, "\r\n")
 	if len(line) == 0 {
-		return "", "", 0, "", 0, false
+		return "", "", 0, "", 0, 0, false
 	}
 	reader := csv.NewReader(bytes.NewReader(line))
 	reader.ReuseRecord = false
 	reader.FieldsPerRecord = -1
 	rec, err := reader.Read()
 	if err != nil || len(rec) < 8 {
-		return "", "", 0, "", 0, false
+		return "", "", 0, "", 0, 0, false
 	}
 	if len(rec[0]) > 0 {
 		rec[0] = stripBOM(rec[0])
@@ -132,14 +132,18 @@ func parseMetricLine(line []byte) (date, clock string, typeID int, unit string, 
 	clock = strings.TrimSpace(rec[2])
 	typeID, err = strconv.Atoi(strings.TrimSpace(rec[3]))
 	if err != nil || date == "" {
-		return "", "", 0, "", 0, false
+		return "", "", 0, "", 0, 0, false
 	}
 	unit = strings.TrimSpace(rec[5])
 	value, err = strconv.ParseFloat(strings.TrimSpace(rec[6]), 64)
 	if err != nil {
-		return "", "", 0, "", 0, false
+		return "", "", 0, "", 0, 0, false
 	}
-	return date, clock, typeID, unit, value, true
+	// sourceId 是第 8 列；缺列或非法当 0（老文件没有这一列）
+	if sid, sidErr := strconv.Atoi(strings.TrimSpace(rec[7])); sidErr == nil {
+		sourceID = sid
+	}
+	return date, clock, typeID, unit, value, sourceID, true
 }
 
 func finishDays(accs map[string]*dayAcc) []DayRow {

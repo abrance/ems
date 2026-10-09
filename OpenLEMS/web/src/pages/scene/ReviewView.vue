@@ -52,15 +52,22 @@ const pairs = ref<PairedPoint[]>([])
 const loading = ref(false)
 const error = ref('')
 const sourceNote = ref('')
-const backtestMeta = ref<{ model: string; sampleDays: number; targetDates: string[]; skipped: string[]; timeMs: number } | null>(null)
+const backtestMeta = ref<{ model: string; sampleDays: number; targetDates: string[]; skipped: string[]; actualMissing: number; timeMs: number } | null>(null)
 const recordedMeta = ref<{ generatedDates: string[] } | null>(null)
+
+/** CSV 里的 sourceId：999 = 电查查预测占位（该时刻实际值还没出），9 = 广东电力交易中心实际值 */
+const PLACEHOLDER_SOURCE = 999
+/** 区间内被剔掉的占位点数（留痕那条腿按时间戳取实际值时统计） */
+const placeholderDropped = ref(0)
 
 /** 电价时段 → 峰平谷查表函数；拿不到配置时全部归「全天」 */
 const lookup = ref<(m: number) => Segment | null>(() => null)
 const segmentConfigured = ref(false)
 
-/** 数据最新日（gd_metric 的 latestDate）；拿不到就用今天 */
+/** 数据最新日：优先用**有实际值**的那天（latestDate 之后往往只有电查查预测占位） */
 const latestDataDate = ref<string | null>(null)
+/** CSV 最新日（可能只有预测占位），用来提示「实际值缺到哪天」 */
+const latestAnyDate = ref<string | null>(null)
 
 function applyPreset() {
   // 右端锚到「数据最新日」而不是今天：数据常滞后一个多月，
@@ -104,9 +111,12 @@ async function pairRecordedWithActual(points: RecordedForecastPoint[]): Promise<
     to: days[days.length - 1],
     kind: market.value === 'real' ? 'realtime' : 'dayAhead',
   })
+  // 电查查预测占位（999）不是实际值，拿它当基准比出来的是「两个模型差多少」→ 剔除
+  const real = series.points.filter((s) => s.sourceId !== PLACEHOLDER_SOURCE)
+  placeholderDropped.value = series.points.length - real.length
   // 实际值按 "YYYY-MM-DD HH:MM" 建索引；CSV 的 24:00 归次日 00:00，与目标时刻的生成口径一致
   const byKey = new Map<string, number>()
-  for (const s of series.points) {
+  for (const s of real) {
     const clock = s.time === '24:00' ? '00:00' : s.time
     const day = s.time === '24:00' ? nextDay(s.date) : s.date
     byKey.set(`${day} ${clock}`, s.value)
@@ -133,6 +143,7 @@ async function load() {
   sourceNote.value = ''
   backtestMeta.value = null
   recordedMeta.value = null
+  placeholderDropped.value = 0
   try {
     if (source.value === 'backtest') {
       // 回测按「目标日」抽样，区间用日期
@@ -147,6 +158,7 @@ async function load() {
         sampleDays: bt.sampleDays,
         targetDates: bt.targetDates,
         skipped: bt.skipped,
+        actualMissing: bt.actualMissing ?? 0,
         timeMs: bt.timeMs,
       }
       sourceNote.value =
@@ -268,8 +280,13 @@ useECharts(
 onMounted(async () => {
   // 先问一次数据最新到哪天，再定默认区间（拿不到就按今天，不影响可用性）
   try {
-    latestDataDate.value = (await fetchGdMetric({})).latestDate ?? null
+    const snap = await fetchGdMetric({})
+    latestAnyDate.value = snap.latestDate ?? null
+    // 区间右端锚到「有实际值的那天」：latestDate 之后常常只有电查查预测占位，
+    // 拿它当右端会得到一个整段算不出准确度的区间
+    latestDataDate.value = snap.latestRealDate || snap.latestDate || null
   } catch {
+    latestAnyDate.value = null
     latestDataDate.value = null
   }
   applyPreset()
@@ -347,6 +364,19 @@ onMounted(async () => {
         <strong>峰平谷时段未取到</strong>
         <span>　「管理 · 电价管理」里没有当前生效的时段配置，所有点都归入「全天」。设好时段后回来重看。</span>
       </div>
+
+      <div v-if="latestAnyDate && latestDataDate && latestDataDate < latestAnyDate" class="warn">
+        <strong>实际值只到 {{ latestDataDate }}</strong>
+        <span>
+          　CSV 里 {{ latestDataDate }} 之后（到 {{ latestAnyDate }}）只有<strong>电查查的预测占位</strong>，
+          不是实际出清价 —— 拿它当基准比出来的只是「两个模型差多少」。区间右端已锚到实际值最新那天。
+        </span>
+      </div>
+
+      <div v-if="placeholderDropped" class="warn">
+        <strong>剔除了 {{ placeholderDropped }} 个无实际值的点</strong>
+        <span>　这些时刻的实际值还没出（CSV 里是电查查预测占位），不计入下面的指标。</span>
+      </div>
     </PanelBox>
 
     <PanelBox
@@ -354,7 +384,7 @@ onMounted(async () => {
       :sub="`${pairs.length} 个对比点 · ${days.length} 天`"
       :span="12"
       :loading="loading"
-      :foot="backtestMeta ? `模型 ${backtestMeta.model} · 抽样间隔 ${backtestMeta.sampleDays} 天 · 参与回测 ${backtestMeta.targetDates.length} 天${backtestMeta.skipped.length ? ` · 跳过 ${backtestMeta.skipped.length} 天` : ''} · 推理 ${backtestMeta.timeMs.toFixed(0)}ms` : sourceNote || '数据来源：留痕 / 回测'"
+      :foot="backtestMeta ? `模型 ${backtestMeta.model} · 抽样间隔 ${backtestMeta.sampleDays} 天 · 参与回测 ${backtestMeta.targetDates.length} 天${backtestMeta.skipped.length ? ` · 跳过 ${backtestMeta.skipped.length} 天` : ''}${backtestMeta.actualMissing ? ` · ${backtestMeta.actualMissing} 点无实际值已跳过` : ''} · 推理 ${backtestMeta.timeMs.toFixed(0)}ms` : sourceNote || '数据来源：留痕 / 回测'"
     >
       <div class="kpis">
         <KpiCard
@@ -456,6 +486,12 @@ onMounted(async () => {
           当前{{ segmentConfigured ? '已取到' : '未取到（全部归入全天）' }}。
         </li>
         <li><strong>回测 ≠ 当时预测</strong>：回测用当前模型重跑历史，数字会随后续模型/数据变化；留痕才是当时真实发出的预测。</li>
+        <li>
+          <strong>实际值只认 sourceId=9</strong>（广东电力交易中心）。CSV 里 999 是<strong>电查查的预测占位</strong>，
+          出现在实际值还没出的时刻 —— 拿它当基准真值，算出来的是「两个模型谁准」，不是「预测准不准」。
+          回测只挑有 96 点实际值的日子，留痕对账逐点剔除占位。
+        </li>
+        <li><strong>配对按时间戳</strong>：预测窗口与实际值只有时刻相同才配对，配不上的点丢弃 —— 不按「当天第几个点」硬凑。</li>
       </ul>
     </PanelBox>
   </div>

@@ -30,9 +30,21 @@ const (
 	typeLoad     = 23
 )
 
+// sourceId 口径：同一个 (日期, 时间, typeId) 只留一行 —— 该时刻有实际值就写实际来源，
+// 没有就写 SourceForecastPlaceholder（电查查的预测顶上，免得曲线上有个洞）。
+// **占位行不是基准真值**：拿它当「实际值」去算准确度，算出来的是两个模型谁更准。
+const (
+	// SourceExchange 实际值来源（广东电力交易中心），日前/实时/负荷都是它。
+	SourceExchange = 9
+	// SourceForecastPlaceholder 占位来源（电查查预测）：实际值还没出。
+	SourceForecastPlaceholder = 999
+)
+
 type Sample struct {
 	Time  string  `json:"time"`
 	Value float64 `json:"value"`
+	// SourceID 见上面的 sourceId 口径，0 = 文件里没写这一列
+	SourceID int `json:"sourceId"`
 }
 
 type SeriesStat struct {
@@ -42,6 +54,8 @@ type SeriesStat struct {
 	Last  float64 `json:"last"`
 	Count int     `json:"count"`
 	Unit  string  `json:"unit"`
+	// SourceID 最后一条样本的来源：999 = 这天只有电查查预测占位（实际值还没出）
+	SourceID int `json:"sourceId"`
 }
 
 type DayRow struct {
@@ -60,11 +74,15 @@ type DayCurve struct {
 
 type Snapshot struct {
 	LatestDate string `json:"latestDate"`
-	From       string `json:"from"`
-	To         string `json:"to"`
-	Date       string `json:"date"`
-	Source     string `json:"source"`
-	UpdatedAt  string `json:"updatedAt"`
+	// LatestRealDate 最近一个**有实际值**（非电查查占位）的日期。
+	// 复盘/回测要用它当区间右端：CSV 常常是「最近几天只有预测占位」，
+	// 拿 latestDate 当右端会得到一个算不出准确度的区间。
+	LatestRealDate string `json:"latestRealDate"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	Date           string `json:"date"`
+	Source         string `json:"source"`
+	UpdatedAt      string `json:"updatedAt"`
 	// AvailableDays 为 CSV 内有数据的全部运行日（升序），供前端日历灰显无数据日期
 	AvailableDays []string  `json:"availableDays"`
 	Latest        *DayRow   `json:"latest"`
@@ -287,14 +305,15 @@ func (s *store) snapshot(from, to, date string) (*Snapshot, error) {
 		date = latest
 	}
 	out := &Snapshot{
-		LatestDate: latest,
-		From:       from,
-		To:         to,
-		Date:       date,
-		Source:     s.url,
-		UpdatedAt:  s.fetchedAt.In(shanghaiLocation()).Format(time.RFC3339),
-		Latest:     cloneDay(s.days[len(s.days)-1]),
-		Days:       make([]DayRow, 0),
+		LatestDate:     latest,
+		LatestRealDate: latestRealDate(s.days),
+		From:           from,
+		To:             to,
+		Date:           date,
+		Source:         s.url,
+		UpdatedAt:      s.fetchedAt.In(shanghaiLocation()).Format(time.RFC3339),
+		Latest:         cloneDay(s.days[len(s.days)-1]),
+		Days:           make([]DayRow, 0),
 	}
 	out.AvailableDays = make([]string, 0, len(s.days))
 	for i := range s.days {
@@ -316,6 +335,16 @@ func (s *store) snapshot(from, to, date string) (*Snapshot, error) {
 func cloneDay(row DayRow) *DayRow {
 	copied := row
 	return &copied
+}
+
+// latestRealDate 从后往前找最近一个「日前电价有实际值」的日期，找不到返回空串。
+func latestRealDate(days []DayRow) string {
+	for i := len(days) - 1; i >= 0; i-- {
+		if days[i].DayAhead.Count > 0 && days[i].DayAhead.SourceID != SourceForecastPlaceholder {
+			return days[i].Date
+		}
+	}
+	return ""
 }
 
 func clampRange(from, to, earliest, latest string) (string, string) {
@@ -541,6 +570,7 @@ type acc struct {
 	sum, max, min, last float64
 	count               int
 	unit                string
+	lastSource          int
 	samples             []Sample
 }
 
@@ -548,10 +578,11 @@ func newAcc() *acc {
 	return &acc{max: math.Inf(-1), min: math.Inf(1)}
 }
 
-func (a *acc) add(timeStr string, value float64, unit string, keepSample bool) {
+func (a *acc) add(timeStr string, value float64, unit string, sourceID int, keepSample bool) {
 	if a.count == 0 {
 		a.unit = unit
 	}
+	a.lastSource = sourceID
 	a.sum += value
 	a.last = value
 	if value > a.max {
@@ -562,7 +593,7 @@ func (a *acc) add(timeStr string, value float64, unit string, keepSample bool) {
 	}
 	a.count++
 	if keepSample {
-		a.samples = append(a.samples, Sample{Time: timeStr, Value: value})
+		a.samples = append(a.samples, Sample{Time: timeStr, Value: value, SourceID: sourceID})
 	}
 }
 
@@ -571,12 +602,13 @@ func (a *acc) stat() SeriesStat {
 		return SeriesStat{}
 	}
 	return SeriesStat{
-		Avg:   round2(a.sum / float64(a.count)),
-		Max:   round2(a.max),
-		Min:   round2(a.min),
-		Last:  round2(a.last),
-		Count: a.count,
-		Unit:  a.unit,
+		Avg:      round2(a.sum / float64(a.count)),
+		Max:      round2(a.max),
+		Min:      round2(a.min),
+		Last:     round2(a.last),
+		Count:    a.count,
+		Unit:     a.unit,
+		SourceID: a.lastSource,
 	}
 }
 
