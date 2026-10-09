@@ -413,11 +413,14 @@ func GetSupplyCurve(ctx context.Context, from, to string, kind SeriesKind, opts 
 		market = "real"
 	}
 
-	prices, err := GetSeries(ctx, from, to, priceKind)
+	// 用 GetRealSeries 而不是 GetSeries：反演拿的是「历史上每一对 (负荷, 出清价) 都是
+	// 供给曲线上的一个观测点」这个假设，而 999 是电查查的预测占位（实际值还没出）。
+	// 把预测当观测，反出来的曲线就不再有观测依据。
+	prices, err := GetRealSeries(ctx, from, to, priceKind)
 	if err != nil {
 		return nil, errors.Wrap(err, "读取出清价失败")
 	}
-	loads, err := GetSeries(ctx, from, to, KindLoad)
+	loads, err := GetRealSeries(ctx, from, to, KindLoad)
 	if err != nil {
 		return nil, errors.Wrap(err, "读取负荷失败")
 	}

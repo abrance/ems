@@ -12,12 +12,13 @@ func clockOf(i int) string {
 	return fmt.Sprintf("%02d:%02d", (m/60)%24, m%60)
 }
 
+// 夹具一律标成实际值来源：相似日只比对**实际值**（sourceId 0 视为未知来源，不参与）
 func curveWith(date string, price, load func(int) float64) DayCurve {
 	c := DayCurve{Date: date}
 	for i := 0; i < 96; i++ {
 		t := clockOf(i)
-		c.DayAhead = append(c.DayAhead, Sample{Time: t, Value: price(i)})
-		c.Load = append(c.Load, Sample{Time: t, Value: load(i)})
+		c.DayAhead = append(c.DayAhead, Sample{Time: t, Value: price(i), SourceID: SourceExchange})
+		c.Load = append(c.Load, Sample{Time: t, Value: load(i), SourceID: SourceExchange})
 	}
 	return c
 }

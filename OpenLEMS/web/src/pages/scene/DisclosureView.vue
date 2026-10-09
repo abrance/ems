@@ -4,7 +4,7 @@ import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { fetchGdMetric, type GdMetricSnapshot } from '@/api/gdmetric'
+import { fetchGdMetric, isRealSource, type GdMetricSnapshot } from '@/api/gdmetric'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 import { useAppStore } from '@/stores/app'
 
@@ -50,9 +50,7 @@ const latest = computed(() => snapshot.value?.latest ?? null)
 
 /** 这天只有电查查预测占位（999）→ 日前/实时两个数字不是实际值 */
 const placeholderDay = computed(
-  () =>
-    latest.value?.dayAhead?.sourceId === 999 ||
-    latest.value?.realtime?.sourceId === 999,
+  () => !isRealSource(latest.value?.dayAhead?.sourceId) || !isRealSource(latest.value?.realtime?.sourceId),
 )
 const priceHint = computed(() =>
   placeholderDay.value ? '电查查预测占位，实际值还没出' : '统一结算点',
@@ -116,8 +114,8 @@ useECharts(trendEl, (): EChartsOption => {
   </div>
 
   <div v-if="!loading && !error && placeholderDay" class="notice">
-    <strong>{{ snapshot?.date }} 的日前/实时价格是电查查预测占位</strong>
-    <span>　这天的实际出清价还没进 CSV，两个价格来自电查查的预测（sourceId 999），不能当实际值用。</span>
+    <strong>{{ snapshot?.date }} 的日前/实时价格不是实际出清价</strong>
+    <span>　这天的实际值还没进 CSV，价格是电查查的预测占位（sourceId 999），不能当实际值用。</span>
   </div>
 
   <div class="kpis">

@@ -112,11 +112,12 @@ func SimilarDays(ctx context.Context, date string, kind SeriesKind, opts Similar
 	date = strings.TrimSpace(date)
 	opts = opts.normalize()
 
-	// 不给日期就用最新可用运行日（与 /api/gd-metric 的默认行为一致），
-	// 免得前端为了拿一个默认值先多跑一趟快照。
+	// 不给日期就用最新**有实际值**的运行日（而不是最新运行日）：
+	// 最新那天往往只有电查查预测占位，拿它当目标日就是拿预测当历史观测。
 	if date == "" {
 		global.mu.RLock()
-		if len(global.days) > 0 {
+		date = latestRealDate(global.days, similarDayPoints)
+		if date == "" && len(global.days) > 0 {
 			date = global.days[len(global.days)-1].Date
 		}
 		global.mu.RUnlock()
@@ -131,6 +132,11 @@ func SimilarDays(ctx context.Context, date string, kind SeriesKind, opts Similar
 	}
 	if target == nil {
 		return nil, errors.Errorf("目标日 %s 没有 96 点曲线数据（可能不在 CSV 覆盖范围内）", date)
+	}
+	// 目标日必须真有实际值：只有电查查预测占位的那天，与历史比形态没有意义
+	if len(curveSeries(*target, kind)) < similarDayPoints {
+		return nil, errors.Errorf("目标日 %s 的%s实际值不足 96 点（电查查预测占位不算），换个有实际值的日期",
+			date, marketLabelOf(kind))
 	}
 
 	global.mu.RLock()
@@ -234,14 +240,24 @@ func rankSimilarDays(target DayCurve, candidates []DayCurve, kind SeriesKind, op
 }
 
 func curveSeries(c DayCurve, kind SeriesKind) []Sample {
+	var samples []Sample
 	switch kind {
 	case KindRealtime:
-		return c.Realtime
+		samples = c.Realtime
 	case KindLoad:
-		return c.Load
+		samples = c.Load
 	default:
-		return c.DayAhead
+		samples = c.DayAhead
 	}
+	// 只留实际值：相似日是拿历史**观测**做形态比对，
+	// 而 999 是电查查的预测占位（该时刻实际值还没出），把它当历史观测就是拿预测当事实。
+	out := make([]Sample, 0, len(samples))
+	for _, s := range samples {
+		if IsRealSource(s.SourceID) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func timesOf(samples []Sample) []string {

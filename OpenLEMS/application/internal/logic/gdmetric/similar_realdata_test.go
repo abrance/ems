@@ -48,12 +48,18 @@ func TestSimilarDaysRealData(t *testing.T) {
 	if _, err := SimilarDays(ctx, "2026-08-31", KindRealtime, SimilarOptions{TopN: 3, WLoad: 1}); err != nil {
 		t.Errorf("实时价 + 只看负荷失败: %v", err)
 	}
-	// 不给日期 = 最新可用运行日
+	// 不给日期 = 最新**有实际值且 96 点齐全**的运行日（最新运行日往往只有电查查预测占位）
+	snap, snapErr := GetSnapshot(ctx, "", "", "")
+	if snapErr != nil || snap == nil {
+		t.Fatalf("取快照失败: %v", snapErr)
+	}
 	latest, err := SimilarDays(ctx, "", KindDayAhead, SimilarOptions{TopN: 1})
 	if err != nil {
-		t.Errorf("不给日期应回落到最新运行日: %v", err)
+		t.Errorf("不给日期应回落到最新有实际值的运行日: %v", err)
 	} else if latest.TargetDate == "" {
-		t.Error("回落到最新运行日时 targetDate 不应为空")
+		t.Error("回落时 targetDate 不应为空")
+	} else if latest.TargetDate > snap.LatestRealDate {
+		t.Errorf("回落到了 %s，晚于最新实际值日 %s", latest.TargetDate, snap.LatestRealDate)
 	}
 }
 
