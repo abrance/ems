@@ -80,16 +80,17 @@ func (c *ControllerV1) GetPriceBacktest(ctx context.Context, req *v1.GetPriceBac
 		})
 	}
 	return &v1.GetPriceBacktestRes{
-		Market:      bt.Market,
-		Grain:       bt.Grain,
-		Unit:        bt.Unit,
-		Model:       bt.Model,
-		From:        bt.From,
-		To:          bt.To,
-		SampleDays:  bt.SampleDays,
-		TargetDates: bt.TargetDates,
-		Skipped:     bt.Skipped,
-		Points:      points,
-		TimeMs:      bt.TimeMs,
+		Market:        bt.Market,
+		Grain:         bt.Grain,
+		Unit:          bt.Unit,
+		Model:         bt.Model,
+		From:          bt.From,
+		To:            bt.To,
+		SampleDays:    bt.SampleDays,
+		TargetDates:   bt.TargetDates,
+		Skipped:       bt.Skipped,
+		Points:        points,
+		ActualMissing: bt.ActualMissing,
+		TimeMs:        bt.TimeMs,
 	}, nil
 }

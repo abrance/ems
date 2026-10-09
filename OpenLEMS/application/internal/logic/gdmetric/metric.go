@@ -90,7 +90,13 @@ type Snapshot struct {
 	Curve         *DayCurve `json:"curve"`
 }
 
+// cacheVersion 元数据缓存的结构版本。改了 DayRow/SeriesStat 的字段（比如加 sourceId）
+// 就必须加一：老缓存里的逐日统计缺新字段，读进来会算错（latestRealDate 曾经因此
+// 把只有电查查预测占位的那天当成「有实际值的那天」）。
+const cacheVersion = 2
+
 type cacheFile struct {
+	Version      int              `json:"version"`
 	URL          string           `json:"url"`
 	ETag         string           `json:"etag"`
 	LastModified string           `json:"lastModified"`
@@ -399,6 +405,12 @@ func (s *store) loadDisk() error {
 	if s.offsets == nil {
 		s.offsets = map[string]int64{}
 	}
+	// 结构版本不对：丢掉逐日统计与偏移（它们是会随结构变化的），但保留 etag/时间戳。
+	// 这样下一次 ensureFresh 会认为「需要重新解析」而直接从本地 CSV 重建（不重下 37MB）。
+	if file.Version != cacheVersion {
+		s.days = nil
+		s.offsets = map[string]int64{}
+	}
 	s.etag = file.ETag
 	s.lastModified = file.LastModified
 	s.url = firstNonEmpty(file.URL, s.url)
@@ -421,6 +433,7 @@ func (s *store) saveMeta() error {
 	}
 	s.mu.RLock()
 	file := cacheFile{
+		Version:      cacheVersion,
 		URL:          s.url,
 		ETag:         s.etag,
 		LastModified: s.lastModified,
