@@ -23,6 +23,14 @@ export interface EffectSummary {
   start: string
   end: string
   points: number
+  /** 实际配对窗口（毫秒时间戳，0=无数据）：效果按「关口 ∩ 储能」的时间戳交集算 */
+  firstTs?: number
+  lastTs?: number
+  /** 两条序列各自的覆盖范围（毫秒），用来解释窗口为什么比请求区间短 */
+  gridFrom?: number
+  gridTo?: number
+  essFrom?: number
+  essTo?: number
   algorithm: string
   gridDeviceId: string
   essDeviceIds: string[]

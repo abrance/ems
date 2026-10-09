@@ -33,6 +33,18 @@ type SSummary struct {
 	EssDeviceIds []string
 	DemandPrice  float64
 	Savings      s_effect.SSavings
+
+	// FirstTs/LastTs 实际参与计算的**配对窗口**（毫秒）。
+	//
+	// 与 Start/End 不是一回事：Start/End 是请求区间，而效果按「关口 ∩ 储能」的
+	// 时间戳交集算 —— 刚接入的设备历史很短时，窗口会明显小于请求区间。
+	// 页面上必须把实际窗口显示出来，否则「近 7 天省了 X 元」会被读成 7 天的数。
+	FirstTs int64
+	LastTs  int64
+
+	// 两条序列各自的覆盖范围（毫秒，0 = 没有数据）：用来解释窗口为什么短
+	GridFrom, GridTo int64
+	EssFrom, EssTo   int64
 }
 
 // policyConfig 从策略配置中提取效果测算所需字段
@@ -82,7 +94,9 @@ func Summary(ctx context.Context, start, end time.Time) (*SSummary, error) {
 		DemandWindowMin: demandWindowMin,
 	})
 
-	return &SSummary{
+	gridFrom, gridTo := seriesRange(grid)
+	essFrom, essTo := seriesRange(ess)
+	out := &SSummary{
 		Start:        start,
 		End:          end,
 		Points:       len(intervals),
@@ -91,7 +105,35 @@ func Summary(ctx context.Context, start, end time.Time) (*SSummary, error) {
 		EssDeviceIds: cfg.EssDeviceIds,
 		DemandPrice:  cfg.DemandPrice,
 		Savings:      savings,
-	}, nil
+		GridFrom:     gridFrom,
+		GridTo:       gridTo,
+		EssFrom:      essFrom,
+		EssTo:        essTo,
+	}
+	if n := len(intervals); n > 0 {
+		out.FirstTs = intervals[0].Timestamp
+		out.LastTs = intervals[n-1].Timestamp
+	}
+	return out, nil
+}
+
+// seriesRange 返回序列的最早/最晚时间戳（毫秒）；空序列返回 0, 0。
+func seriesRange(series s_effect.SSeries) (int64, int64) {
+	var from, to int64
+	first := true
+	for ts := range series {
+		if first {
+			from, to, first = ts, ts, false
+			continue
+		}
+		if ts < from {
+			from = ts
+		}
+		if ts > to {
+			to = ts
+		}
+	}
+	return from, to
 }
 
 // algorithmName 由策略配置推导当前生效的算法标识（与决策器 Name() 保持一致）。

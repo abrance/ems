@@ -337,6 +337,14 @@ const FAKE_SUMMARY = {
   gridDeviceId: 'grid_1', essDeviceIds: ['ess_1'], demandPrice: 40,
   chargeEnergy: 420.5, dischargeEnergy: 380.25, chargeCost: 168.2, dischargeRevenue: 402.4,
   arbitrageProfit: 234.2, actualMaxDemand: 118, baselineMaxDemand: 120, demandSaving: 80, totalSaving: 314.2,
+  // 实际配对窗口比请求区间短（关口设备历史自 10-01 起）：页面必须把这件事说出来，
+  // 否则「近 7 天省了 314 元」会被读成 7 天的数
+  firstTs: Date.parse('2026-10-01T00:00:00+08:00'),
+  lastTs: Date.parse('2026-10-06T12:00:00+08:00'),
+  gridFrom: Date.parse('2026-10-01T00:00:00+08:00'),
+  gridTo: Date.parse('2026-10-06T23:45:00+08:00'),
+  essFrom: Date.parse('2026-09-20T00:00:00+08:00'),
+  essTo: Date.parse('2026-10-06T23:45:00+08:00'),
 }
 
 const FAKE_LOAD = {
@@ -2406,6 +2414,11 @@ await clickTo('场景', '决策支持')
   check(bodyHas('234'), 'KPI 取到套利净收益')
   check(bodyHas('80'), 'KPI 取到需量节省')
   check(bodyHas('tou-rule'), '脚注显示生效算法')
+  // 实际配对窗口：效果按「关口 ∩ 储能」交集算，请求区间可能远大于它
+  check(bodyHas('实际对比窗口'), '显示实际配对窗口，不只给请求区间')
+  check(bodyHas('672 点'), '窗口旁给出参与计算的点数')
+  check(bodyHas('关口设备历史自'), '解释窗口为什么比请求区间短')
+  check(bodyHas('只代表这段窗口'), '说明金额只覆盖这段窗口')
 
   // 电价预测：日均 + 分位，并说明这里不是分时（分时在「长周期电价预测」页）
   check(bodyHas('日前电价预测'), '有电价预测面板')

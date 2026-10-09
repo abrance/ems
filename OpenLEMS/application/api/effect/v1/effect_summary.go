@@ -11,9 +11,16 @@ type GetEffectSummaryReq struct {
 
 // EffectSummary 效果汇总
 type EffectSummary struct {
-	Start        string   `json:"start" dc:"开始时间"`
-	End          string   `json:"end" dc:"结束时间"`
-	Points       int      `json:"points" dc:"参与计算的采样点数"`
+	Start  string `json:"start" dc:"开始时间（请求区间，不是实际配对窗口）"`
+	End    string `json:"end" dc:"结束时间（请求区间）"`
+	Points int    `json:"points" dc:"参与计算的采样点数（配对交集）"`
+	// 实际配对窗口：效果按「关口 ∩ 储能」的时间戳交集算，新接入设备历史短时窗口会远小于请求区间
+	FirstTs      int64    `json:"firstTs" dc:"实际配对窗口起点（毫秒时间戳），0=无数据"`
+	LastTs       int64    `json:"lastTs" dc:"实际配对窗口终点（毫秒时间戳），0=无数据"`
+	GridFrom     int64    `json:"gridFrom" dc:"关口序列覆盖起点（毫秒），0=无数据"`
+	GridTo       int64    `json:"gridTo" dc:"关口序列覆盖终点（毫秒）"`
+	EssFrom      int64    `json:"essFrom" dc:"储能序列覆盖起点（毫秒）"`
+	EssTo        int64    `json:"essTo" dc:"储能序列覆盖终点（毫秒）"`
 	Algorithm    string   `json:"algorithm" dc:"当前生效的算法标识"`
 	GridDeviceId string   `json:"gridDeviceId" dc:"关口设备ID"`
 	EssDeviceIds []string `json:"essDeviceIds" dc:"储能设备ID列表"`

@@ -127,6 +127,35 @@ function money(v: number | undefined): string {
   return v === undefined || v === null ? '—' : v.toFixed(0)
 }
 
+function fmtMs(ms: number): string {
+  return new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * 实际配对窗口。
+ *
+ * 效果是按「关口 ∩ 储能」的**时间戳交集**算的，而请求区间只是查询范围 —— 刚接入的设备
+ * 历史很短时，窗口会远小于请求区间（实测：请求「 09-08 ~ 10-08」，窗口只有 10-08 那天，
+ * 因为关口电表是 10-08 才接入的）。不把实际窗口显示出来，「近 7 天省了 X 元」会被读成 7 天的数。
+ */
+const effectWindow = computed(() => {
+  const s = summary.value
+  if (!s || !s.firstTs || !s.lastTs) return ''
+  return `${fmtMs(s.firstTs)} ~ ${fmtMs(s.lastTs)}`
+})
+
+/** 窗口为什么短：谁的历史更晚就从谁说起 */
+const windowShortReason = computed(() => {
+  const s = summary.value
+  if (!s || !s.firstTs) return ''
+  const reqStart = Date.parse((s.start || '').replace(' ', 'T'))
+  if (!Number.isFinite(reqStart)) return ''
+  const lag = (ms?: number) => (ms && ms - reqStart > 3600_000 ? ms : 0)
+  if (lag(s.gridFrom)) return `关口设备历史自 ${fmtMs(lag(s.gridFrom) as number)} 起`
+  if (lag(s.essFrom)) return `储能设备历史自 ${fmtMs(lag(s.essFrom) as number)} 起`
+  return ''
+})
+
 /* ---------- 历史相似日 ---------- */
 
 const similar = ref<SimilarDaysResult | null>(null)
@@ -370,6 +399,14 @@ watch(
           unit="kW"
           :hint="`无储能基线 ${money(summary?.baselineMaxDemand)} kW`"
         />
+      </div>
+      <div v-if="effectWindow" class="hint">
+        实际对比窗口 <strong>{{ effectWindow }}</strong>（{{ summary?.points }} 点）
+        <template v-if="windowShortReason">
+          —— {{ windowShortReason }}；效果按「关口 ∩ 储能」的时间戳交集配对，
+          窗口比请求区间（{{ summary?.start }} ~ {{ summary?.end }}）短是正常的，
+          上面的金额<strong>只代表这段窗口</strong>。
+        </template>
       </div>
     </PanelBox>
 
