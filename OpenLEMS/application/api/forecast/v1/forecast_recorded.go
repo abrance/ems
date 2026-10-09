@@ -62,5 +62,7 @@ type GetPriceBacktestRes struct {
 	TargetDates []string         `json:"targetDates" dc:"实际参与回测的目标日"`
 	Skipped     []string         `json:"skipped" dc:"因数据不足跳过的日期"`
 	Points      []*BacktestPoint `json:"points"`
-	TimeMs      float64          `json:"timeMs" dc:"推理总耗时（毫秒）"`
+	// ActualMissing 因该时刻没有实际值而丢弃的预测点数（按时间戳配对配不上的）
+	ActualMissing int     `json:"actualMissing"`
+	TimeMs        float64 `json:"timeMs" dc:"推理总耗时（毫秒）"`
 }

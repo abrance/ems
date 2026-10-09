@@ -1,8 +1,10 @@
 package gdmetric
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +110,50 @@ func TestSeriesCarriesSourceAndRealOnlyDropsPlaceholder(t *testing.T) {
 		if p.SourceID == SourceForecastPlaceholder || p.Date != "2026-10-01" {
 			t.Errorf("混进占位行: %+v", p)
 		}
+	}
+}
+
+// 元数据缓存带结构版本：老缓存（没有 sourceId 那些新字段）不能直接当数据用 ——
+// 2026-10-09 上线 v1.0.53 后就踩到了：老 meta 里的逐日统计缺 sourceId，
+// latestRealDate 把「只有电查查预测占位」的 10-06 当成了有实际值的那天。
+func TestLoadDiskDropsStaleCacheVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gd_metric.csv")
+	if err := os.WriteFile(path, []byte(sourceCSV), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	metaPath := metaPathFor(path)
+	// 老缓存：没有 version 字段，逐日统计也没有 sourceId
+	old := `{"url":"http://example.test/gd_metric.csv","etag":"\"abc\"",` +
+		`"lastModified":"Fri, 09 Oct 2026 04:01:15 GMT","fetchedAt":"2026-10-09T12:51:45+08:00",` +
+		`"days":[{"date":"2026-10-03","load":{"count":96},"dayAhead":{"count":96},"realtime":{"count":96}}],` +
+		`"offsets":{"2026-10-03":0}}`
+	if err := os.WriteFile(metaPath, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &store{url: "http://example.test/gd_metric.csv", cachePath: path, metaPath: metaPath,
+		maxSize: 1 << 20, curves: newCurveLRU(1 << 20)}
+	if err := s.loadDisk(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.days) != 0 || len(s.offsets) != 0 {
+		t.Fatalf("老版本的逐日统计应被丢掉: days=%d offsets=%d", len(s.days), len(s.offsets))
+	}
+	// etag / 时间戳要留着，否则会白白重下 37MB
+	if s.etag != `"abc"` || s.fetchedAt.IsZero() {
+		t.Fatalf("etag/fetchedAt 不该被清掉: etag=%q fetchedAt=%v", s.etag, s.fetchedAt)
+	}
+
+	// 重新解析后写回的是当前版本
+	if err := s.loadLocal(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"version":2`) {
+		t.Fatalf("写回的 meta 应带当前版本: %s", string(raw[:80]))
 	}
 }
