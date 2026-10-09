@@ -40,6 +40,14 @@ const (
 	SourceForecastPlaceholder = 999
 )
 
+// IsRealSource sourceId 是不是**实际值**来源。
+//
+// 0 = 文件里没写或写错（未知来源），**不算实际值**：宁可不认，
+// 也不要把来源不明的数当基准真值用 —— 「拿预测当实际」这类事故就是这么来的。
+func IsRealSource(sourceID int) bool {
+	return sourceID != 0 && sourceID != SourceForecastPlaceholder
+}
+
 type Sample struct {
 	Time  string  `json:"time"`
 	Value float64 `json:"value"`
@@ -312,7 +320,7 @@ func (s *store) snapshot(from, to, date string) (*Snapshot, error) {
 	}
 	out := &Snapshot{
 		LatestDate:     latest,
-		LatestRealDate: latestRealDate(s.days),
+		LatestRealDate: latestRealDate(s.days, 1),
 		From:           from,
 		To:             to,
 		Date:           date,
@@ -343,10 +351,15 @@ func cloneDay(row DayRow) *DayRow {
 	return &copied
 }
 
-// latestRealDate 从后往前找最近一个「日前电价有实际值」的日期，找不到返回空串。
-func latestRealDate(days []DayRow) string {
+// latestRealDate 从后往前找最近一个「日前电价有实际值且不少于 minPoints 点」的日期，
+// 找不到返回空串。minPoints=1 就是「有实际值就行」。
+//
+// 注意 SeriesStat.SourceID 是**当天最后一条样本**的来源：一个还在陆续出实际值的日子
+// （比如实时电价按小时陆续出）会被判成占位日而不算「实际值日」—— 这个保守判定是对的，
+// 复盘/回测本来也只认 96 点齐全的实际值日。
+func latestRealDate(days []DayRow, minPoints int) string {
 	for i := len(days) - 1; i >= 0; i-- {
-		if days[i].DayAhead.Count > 0 && days[i].DayAhead.SourceID != SourceForecastPlaceholder {
+		if days[i].DayAhead.Count >= minPoints && IsRealSource(days[i].DayAhead.SourceID) {
 			return days[i].Date
 		}
 	}

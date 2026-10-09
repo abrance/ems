@@ -181,7 +181,8 @@ async function loadSimilar() {
   similarLoading.value = true
   similarError.value = ''
   try {
-    // 不给日期就让后端用最新可用运行日（与 /api/gd-metric 的默认行为一致）
+    // 不给日期就让后端用最新**有实际值且 96 点齐全**的运行日
+    // （最新运行日往往只有电查查预测占位，不能当历史观测比对）
     const r = await fetchSimilarDays({ date: app.runDate || undefined, top: 8 })
     similar.value = r
     picked.value = []
@@ -432,7 +433,7 @@ watch(
       :sub="similar ? `目标日 ${similar.targetDate} · 候选 ${similar.candidates} 天` : ''"
       :span="4"
       :loading="similarLoading"
-      :foot="similar ? `${similar.method}｜${similar.formula}` : '数据来源：/api/gd-metric/similar-days'"
+      :foot="similar ? `${similar.method}｜${similar.formula}｜只统计实际值日（电查查预测占位不算）` : '数据来源：/api/gd-metric/similar-days'"
     >
       <div v-if="similarError" class="empty">{{ similarError }}</div>
       <template v-else-if="similar">

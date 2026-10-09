@@ -73,6 +73,16 @@ export interface MetricSeriesPoint {
   sourceId?: number
 }
 
+/**
+ * 这一条是不是**实际值**（与后端 gdmetric.IsRealSource 同一口径）。
+ *
+ * 999 是电查查预测占位（该时刻实际值还没出），0/缺省是来源不明 ——
+ * 两者都不能当基准真值用：拿预测当实际，比出来的就是「两个模型差多少」。
+ */
+export function isRealSource(sourceId?: number): boolean {
+  return sourceId !== undefined && sourceId !== 0 && sourceId !== 999
+}
+
 export interface MetricSeries {
   kind: string
   from: string

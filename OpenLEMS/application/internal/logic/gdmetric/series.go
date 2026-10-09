@@ -136,11 +136,11 @@ func GetRealSeries(ctx context.Context, from, to string, kind SeriesKind) ([]Tim
 	return realOnly(all), nil
 }
 
-// realOnly 剔除占位来源（999），只留实际值。
+// realOnly 剔除占位来源（999）与未知来源（0），只留实际值。
 func realOnly(all []TimedSample) []TimedSample {
 	out := make([]TimedSample, 0, len(all))
 	for _, s := range all {
-		if s.SourceID == SourceForecastPlaceholder {
+		if !IsRealSource(s.SourceID) {
 			continue
 		}
 		out = append(out, s)

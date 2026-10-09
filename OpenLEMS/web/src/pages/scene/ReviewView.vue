@@ -9,7 +9,7 @@ import {
   type BacktestPoint,
   type RecordedForecastPoint,
 } from '@/api/forecast'
-import { fetchGdMetric, fetchMetricSeries } from '@/api/gdmetric'
+import { fetchGdMetric, fetchMetricSeries, isRealSource } from '@/api/gdmetric'
 import { fetchCurrentPrice } from '@/api/price'
 import {
   buildSegmentLookup,
@@ -56,8 +56,7 @@ const backtestMeta = ref<{ model: string; sampleDays: number; targetDates: strin
 const recordedMeta = ref<{ generatedDates: string[] } | null>(null)
 
 /** CSV 里的 sourceId：999 = 电查查预测占位（该时刻实际值还没出），9 = 广东电力交易中心实际值 */
-const PLACEHOLDER_SOURCE = 999
-/** 区间内被剔掉的占位点数（留痕那条腿按时间戳取实际值时统计） */
+/** 区间内被剔掉的占位/来源不明点数（留痕那条腿按时间戳取实际值时统计） */
 const placeholderDropped = ref(0)
 
 /** 电价时段 → 峰平谷查表函数；拿不到配置时全部归「全天」 */
@@ -111,8 +110,8 @@ async function pairRecordedWithActual(points: RecordedForecastPoint[]): Promise<
     to: days[days.length - 1],
     kind: market.value === 'real' ? 'realtime' : 'dayAhead',
   })
-  // 电查查预测占位（999）不是实际值，拿它当基准比出来的是「两个模型差多少」→ 剔除
-  const real = series.points.filter((s) => s.sourceId !== PLACEHOLDER_SOURCE)
+  // 电查查预测占位（999）与来源不明（0）都不是实际值，拿它当基准比出来的是「两个模型差多少」→ 剔除
+  const real = series.points.filter((s) => isRealSource(s.sourceId))
   placeholderDropped.value = series.points.length - real.length
   // 实际值按 "YYYY-MM-DD HH:MM" 建索引；CSV 的 24:00 归次日 00:00，与目标时刻的生成口径一致
   const byKey = new Map<string, number>()

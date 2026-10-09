@@ -477,7 +477,7 @@ onMounted(() => {
       sub="横轴系统负荷 · 纵轴出清价 · 每点是一个历史观测"
       :span="12"
       :loading="loading"
-      foot="负荷是刚需，出清价是需求与供给栈的交点，所以每个 (负荷, 价格) 观测点本身就是聚合供给曲线上的一个点"
+      foot="负荷是刚需，出清价是需求与供给栈的交点，所以每个 (负荷, 价格) 观测点本身就是聚合供给曲线上的一个点｜只取实际值日（电查查预测占位不算）"
     >
       <div v-if="curve?.points.length" ref="curveEl" class="chart tall" />
       <div v-else-if="!loading" class="empty">

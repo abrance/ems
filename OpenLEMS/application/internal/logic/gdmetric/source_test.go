@@ -40,6 +40,7 @@ func TestParseMetricLineSourceID(t *testing.T) {
 }
 
 // 只有占位预测（999）的那天不是「有实际值的那天」——复盘/回测靠这个字段避开它。
+// minPoints 让调用方选「有实际值就行」（复盘区间右端，1）还是「96 点齐全」（相似日目标日）。
 func TestLatestRealDateSkipsPlaceholder(t *testing.T) {
 	days := []DayRow{
 		{Date: "2026-10-01", DayAhead: SeriesStat{Count: 96, SourceID: SourceExchange}},
@@ -47,15 +48,38 @@ func TestLatestRealDateSkipsPlaceholder(t *testing.T) {
 		{Date: "2026-10-03", DayAhead: SeriesStat{Count: 96, SourceID: SourceForecastPlaceholder}},
 		{Date: "2026-10-06", DayAhead: SeriesStat{Count: 96, SourceID: SourceForecastPlaceholder}},
 	}
-	if got := latestRealDate(days); got != "2026-10-02" {
-		t.Errorf("latestRealDate = %s, want 2026-10-02", got)
+	if got := latestRealDate(days, 1); got != "2026-10-02" {
+		t.Errorf("latestRealDate(min=1) = %s, want 2026-10-02", got)
 	}
-	if got := latestRealDate(nil); got != "" {
+	// 相似日要的是「96 点齐全的实际值日」：10-02 只有 92 点，不能用
+	if got := latestRealDate(days, 96); got != "2026-10-01" {
+		t.Errorf("latestRealDate(min=96) = %s, want 2026-10-01", got)
+	}
+	if got := latestRealDate(nil, 1); got != "" {
 		t.Errorf("无数据应返回空串, got %s", got)
 	}
 	only := []DayRow{{Date: "2026-10-06", DayAhead: SeriesStat{Count: 96, SourceID: SourceForecastPlaceholder}}}
-	if got := latestRealDate(only); got != "" {
+	if got := latestRealDate(only, 1); got != "" {
 		t.Errorf("全是占位应返回空串, got %s", got)
+	}
+	// 未知来源（0）同样不算实际值
+	unknown := []DayRow{{Date: "2026-10-06", DayAhead: SeriesStat{Count: 96, SourceID: 0}}}
+	if got := latestRealDate(unknown, 1); got != "" {
+		t.Errorf("未知来源应返回空串, got %s", got)
+	}
+}
+
+// 未知来源（sourceId 0 / 写错）不能当实际值：宁可不认，也不要拿来源不明的数当基准。
+func TestRealOnlyDropsUnknownSource(t *testing.T) {
+	all := []TimedSample{
+		{Date: "2026-10-01", Time: "00:15", Value: 100, SourceID: SourceExchange},
+		{Date: "2026-10-01", Time: "00:30", Value: 200, SourceID: 0},
+		{Date: "2026-10-01", Time: "00:45", Value: 300, SourceID: SourceForecastPlaceholder},
+		{Date: "2026-10-01", Time: "01:00", Value: 400, SourceID: 12},
+	}
+	real := realOnly(all)
+	if len(real) != 2 || real[0].Value != 100 || real[1].Value != 400 {
+		t.Fatalf("只应留 sourceId 9 与 12: %+v", real)
 	}
 }
 
