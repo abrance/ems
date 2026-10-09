@@ -44,6 +44,7 @@ type PriceForecast struct {
 	HistoryValues  []float64             `json:"historyValues" dc:"历史日均成交价"`
 	Forecast       []*PriceForecastPoint `json:"forecast" dc:"未来多日预测，按日升序"`
 	ContextPoints  int                   `json:"contextPoints" dc:"送入模型的点数"`
+	InputChannels  int                   `json:"inputChannels" dc:"送入模型的通道数：1=只用本市场历史；实时电价=3（实时价+日前价+负荷）"`
 	InputTruncated bool                  `json:"inputTruncated" dc:"历史是否被截断至模型上限"`
 	MissingDays    int                   `json:"missingDays" dc:"区间内无已确认数据的运行日数"`
 	From           string                `json:"from" dc:"历史起点运行日"`

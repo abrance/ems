@@ -53,6 +53,9 @@ type SPriceForecastIntraday struct {
 	Points         []TPriceForecastPoint
 	ContextPoints  int
 	InputTruncated bool
+	// InputChannels 送入模型的通道数：1 = 只用目标市场自身历史；
+	// 实时电价是 3（实时价 + 日前价 + 系统负荷，实测 MAE 96.4 → 89.5 元/MWh）。
+	InputChannels int
 	// CoveredDays 源数据里真实覆盖的自然日数。
 	// 不能用时间戳去数：CSV 的一天写作 00:15…24:00，最后一点落在次日 00:00，
 	// 按时间戳数会多算一天（MissingDays 因此可能算成负数）。
@@ -159,18 +162,39 @@ func loadPriceIntradayAsOf(
 		values = append(values, s.Value)
 	}
 
+	// 输入通道：第 0 个是目标序列（要预测的那个市场），其余是协变量。
+	// 只有实时电价加协变量 —— 日前预测实测无增益，见 buildPriceInputChannels。
+	times, channels, covDropped := buildPriceInputChannels(ctx, from, to, spec.Market, times, values, loc)
+	if len(channels[0]) < 96 {
+		return nil, errors.Errorf("15 分钟%s电价数据不足（%d 点，至少需要一天 96 点）",
+			marketLabel(spec.Market), len(channels[0]))
+	}
+	if covDropped > 0 {
+		c_log.Infof(ctx, "%s电价预测：因协变量缺值丢弃 %d 个点（保证各通道时刻对齐）",
+			marketLabel(spec.Market), covDropped)
+	}
+
 	// 截断到模型上下文上限（按尾部保留，最近的更重要）
 	truncated := false
-	if len(values) > maxContextPoints {
-		times = times[len(times)-maxContextPoints:]
-		values = values[len(values)-maxContextPoints:]
+	if n := len(channels[0]); n > maxContextPoints {
+		keep := n - maxContextPoints
+		times = times[keep:]
+		for i := range channels {
+			channels[i] = channels[i][keep:]
+		}
 		truncated = true
 	}
 
 	horizon := horizonDays * 96
 	client := s_forecast.NewClient(baseURL, forecastTimeout)
+	series0 := &s_forecast.SSeries{Id: spec.Market}
+	if len(channels) == 1 {
+		series0.Values = channels[0]
+	} else {
+		series0.Matrix = channels
+	}
 	resp, err := client.Forecast(ctx, &s_forecast.SForecastRequest{
-		Series:    []*s_forecast.SSeries{{Id: spec.Market, Values: values}},
+		Series:    []*s_forecast.SSeries{series0},
 		Horizon:   horizon,
 		Quantiles: quantiles,
 	})
@@ -204,14 +228,108 @@ func loadPriceIntradayAsOf(
 		From:           series[0].Date,
 		To:             series[len(series)-1].Date,
 		HistoryTimes:   times,
-		HistoryValues:  values,
+		HistoryValues:  channels[0],
 		Points:         points,
-		ContextPoints:  len(values),
+		ContextPoints:  len(channels[0]),
+		InputChannels:  len(channels),
 		InputTruncated: truncated,
 		CoveredDays:    len(daySet),
 		TimeMs:         resp.TimeMs,
 		GeneratedOn:    today.Format(priceDateLayout),
 	}, nil
+}
+
+// priceCovariateKinds 实时电价预测额外送的通道（除目标序列之外）。
+//
+// 实测（2026-09-08 ~ 10-01，24 天真实实际值，sourceId=9）MAE / 标幺：
+//
+//	单变量              96.4 / 0.191
+//	+ 系统负荷          94.7 / 0.186
+//	+ 负荷 + 日前电价    89.5 / 0.177  ← 采用
+//
+// 日前预测同样测过（+负荷 / +实时价 / +星期几 / +节假日标志 / 同星期几历史），
+// 全部持平或更差，所以日前保持单变量。
+// 注：目前只能送「历史区间内」的协变量；目标日的日前价其实提前一天就出了，
+// 要利用它需要服务端支持「未来协变量」，那是后续的事。
+var priceCovariateKinds = map[string][]gdmetric.SeriesKind{
+	"real": {gdmetric.KindDayAhead, gdmetric.KindLoad},
+}
+
+// buildPriceInputChannels 组多变量输入：第 0 个通道是目标序列（就是传进来的 times/values），
+// 后面按 priceCovariateKinds 补协变量。各通道按**时间戳**对齐：
+// 某个时刻只要有一个通道缺值，这个时刻就从所有通道里去掉（返回丢弃的点数）。
+//
+// 拿不到协变量（没数据 / 读取失败）就退回单变量：协变量是增益，不是必需，
+// 不能因为它把一个本来能出的预测挡住。
+func buildPriceInputChannels(
+	ctx context.Context, from, to, market string, times []time.Time, values []float64, loc *time.Location,
+) ([]time.Time, [][]float64, int) {
+	channels := [][]float64{values}
+	kinds := priceCovariateKinds[market]
+	if len(kinds) == 0 || len(times) == 0 {
+		return times, channels, 0
+	}
+
+	covariates := make([]map[string]float64, 0, len(kinds))
+	for _, kind := range kinds {
+		series, err := gdmetric.GetSeries(ctx, from, to, kind)
+		if err != nil {
+			c_log.Warningf(ctx, "读取%s协变量失败，退回单变量预测: %+v", kind, err)
+			return times, channels, 0
+		}
+		byTime := make(map[string]float64, len(series))
+		for _, s := range series {
+			ts, tsErr := parseSampleClock(s.Date, s.Time, loc)
+			if tsErr != nil {
+				continue
+			}
+			byTime[sampleKey(ts)] = s.Value
+		}
+		if len(byTime) == 0 {
+			c_log.Warningf(ctx, "%s协变量没有数据，退回单变量预测", kind)
+			return times, channels, 0
+		}
+		covariates = append(covariates, byTime)
+	}
+
+	keptTimes, matrix, dropped := alignChannels(times, values, covariates, loc)
+	if len(keptTimes) == 0 {
+		c_log.Warningf(ctx, "协变量与%s电价序列没有对齐的时刻，退回单变量预测", market)
+		return times, channels, 0
+	}
+	return keptTimes, matrix, dropped
+}
+
+// alignChannels 把目标序列与协变量按时间戳对齐成多变量矩阵。
+// 某个时刻只要有一个通道缺值，这个时刻就从所有通道里去掉（丢掉点数）——
+// 通道长度必须一致，服务端按二维数组收，错位了就是拿别的时刻的值当协变量。
+func alignChannels(
+	times []time.Time, values []float64, covariates []map[string]float64, loc *time.Location,
+) ([]time.Time, [][]float64, int) {
+	keptTimes := make([]time.Time, 0, len(times))
+	matrix := make([][]float64, 1+len(covariates))
+	for i := range matrix {
+		matrix[i] = make([]float64, 0, len(times))
+	}
+	for i, ts := range times {
+		key := sampleKey(ts)
+		ok := true
+		for _, byTime := range covariates {
+			if _, found := byTime[key]; !found {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		keptTimes = append(keptTimes, ts)
+		matrix[0] = append(matrix[0], values[i])
+		for j, byTime := range covariates {
+			matrix[j+1] = append(matrix[j+1], byTime[key])
+		}
+	}
+	return keptTimes, matrix, len(times) - len(keptTimes)
 }
 
 // parseSampleClock 把 CSV 的 (日期, "HH:MM") 组成时间点；"24:00" 归到次日 00:00。

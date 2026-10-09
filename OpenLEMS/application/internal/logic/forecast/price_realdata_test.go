@@ -133,3 +133,37 @@ func meanAbsErr(points []SPriceBacktestPoint) float64 {
 	}
 	return sum / float64(len(points))
 }
+
+// 实时电价走多变量输入（实时价 + 日前价 + 系统负荷），日前保持单变量。
+//
+// 依据：2026-09-08 ~ 10-01 共 24 天真实实际值（sourceId=9）离线对照，
+// 实时 MAE 96.4 → 89.5 元/MWh（标幺 0.191 → 0.177）；日前加同样通道持平或更差。
+// 这条用例同时验证「二维请求 + 二维响应取第一个通道」在真实服务上跑得通。
+// 需要本地有 gd_metric.csv 缓存与可达的预测服务；缺一就跳过。
+func TestLoadPriceIntradayChannels(t *testing.T) {
+	ctx := context.Background()
+	if !gdmetric.LocalDataReady() {
+		t.Skip("本地没有 gd_metric.csv 缓存，跳过")
+	}
+
+	real, err := LoadPriceIntraday(ctx, "real", 30, 1, nil)
+	if err != nil {
+		t.Fatalf("实时电价预测失败（多变量请求可能没被服务端接受）: %v", err)
+	}
+	if real.InputChannels != 3 {
+		t.Errorf("实时电价通道数 = %d, want 3（实时价 + 日前价 + 负荷）", real.InputChannels)
+	}
+	if len(real.Points) == 0 || real.ContextPoints == 0 {
+		t.Fatalf("实时预测结果为空: %+v", real)
+	}
+
+	ahead, err := LoadPriceIntraday(ctx, "ahead", 30, 1, nil)
+	if err != nil {
+		t.Fatalf("日前电价预测失败: %v", err)
+	}
+	if ahead.InputChannels != 1 {
+		t.Errorf("日前电价通道数 = %d, want 1（实测加协变量无增益）", ahead.InputChannels)
+	}
+	t.Logf("实时：%d 通道 / %d 点上下文 / %d 点预测，模型 %s；日前：%d 通道",
+		real.InputChannels, real.ContextPoints, len(real.Points), real.Model, ahead.InputChannels)
+}
