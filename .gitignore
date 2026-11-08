@@ -1,6 +1,7 @@
 # 本地凭证：绝不入库（电查查 token 等）
 creds.json
 .env
+.env.integration
 *.local.json
 
 # 抓取产物 / 数据快照：大文件，从数据源重新拉，不入库
