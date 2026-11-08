@@ -159,13 +159,16 @@ $EDITOR .env.integration                       # 填本机中间件地址
 
 | 时机 | 跑什么 | 要求 |
 |---|---|---|
-| PR / push | 现有 `go-ci`（vet + 单测 + 构建）、`web-ci`（typecheck + build + 冒烟 + 浏览器检查） | 必须绿，才允许合入 |
+| PR / push | `go-ci`（vet + 单测 + 构建）、`web-ci`（typecheck + build + 冒烟 + 浏览器检查）、`integration-test`（`test_plan` 中不依赖外部中间件的场景） | 必须绿，才允许合入 |
 | PR 涉及 DB / 接口 / 配置 / 部署 | 对应 `test_plan` 场景由提交者在本地按脚本跑通，PR 描述贴命令与结果 | 由 reviewer 核对 |
-| 每日夜间 | self-hosted runner 上跑全部 `integration` 场景 | 失败开 issue，不阻塞他人 PR |
+| 每日夜间 | 托管 runner 上跑全部 `integration` 场景（`.github/workflows/integration-test.yml`） | 失败开 issue，不阻塞他人 PR |
 | 发版前 | 全量集成场景 + 关键链路手工验收 | 必须通过 |
 
-PR 不默认跑集成测试：GitHub 托管 runner 没有本仓库依赖的中间件，强行跑只会得到假失败。
-新增中间件依赖时，同步更新 `.env.integration.example` 和夜间流水线。
+PR 上只跑「不依赖外部中间件」的场景（如 IT-PRICE-01 用 sqlite，与生产同款内嵌库），这样托管 runner 上不会出现假失败。
+需要真中间件的场景（MySQL/Redis/MQTT/Modbus）不进 PR 门禁，只在夜间或手动触发时跑：连接参数放仓库 secret
+（`TEST_DB_DRIVER` / `TEST_DB_DSN` / `TEST_DB_SCHEMA` / `TEST_REDIS_ADDR` / `TEST_MQTT_BROKER` / `TEST_MODBUS_TCP_ADDR`），
+流水线会自动把它们写进 `.env.integration`；secret 缺失时退回 sqlite。
+新增中间件依赖时，同步更新 `.env.integration.example` 和 `.github/workflows/integration-test.yml`。
 
 ---
 
