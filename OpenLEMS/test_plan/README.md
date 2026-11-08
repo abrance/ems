@@ -16,7 +16,7 @@ cp .env.integration.example .env.integration   # 首次，填本机中间件
 
 | ID | 场景 | 依赖 | 关联 | 状态 |
 |---|---|---|---|---|
-| IT-PRICE-01 | 电价同步 → 落库 → API 返回（含电价类型枚举互逆、分时区间） | MySQL/Postgres、外部电价接口桩 | `s_price`、`application` | 待编写 |
+| IT-PRICE-01 | 电价写入 → 落库 → 缓存 → 按时段取价（含电价类型枚举互逆） | 无（sqlite） | `s_price`、`s_db` | 已实现：`services/s_price/test_plan/` |
 | IT-DEVICE-01 | 设备采集 → 指标计算 → 页面所需数据结构 | DB、Modbus 从站 | `s_driver`、`gdmetric` | 待编写 |
 | IT-AUTH-01 | 会话登录 / 静态 token → 角色判定 → 受保护接口 | DB | `middleware_auth` | 待编写 |
 | IT-CONFIG-01 | `APP_PROFILE` + 环境变量优先级 → 生效配置 | 无 | `manifest` | 待编写 |

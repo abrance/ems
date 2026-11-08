@@ -1,0 +1,83 @@
+name: Integration (test_plan)
+
+# 集成场景默认在 PR 上跑：目前 IT-PRICE-01 只依赖 sqlite（与生产同款内嵌库），
+# 托管 runner 上不需要任何中间件或 secret。将来出现真依赖中间件的场景时，
+# 在 "生成 .env.integration" 一步接 secrets，并把该场景挪到夜间。
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 18 * * *" # 02:00 Asia/Shanghai
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: test_plan 集成场景
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: OpenLEMS
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: OpenLEMS/go.work
+          cache: true
+          cache-dependency-path: |
+            OpenLEMS/go.work.sum
+            OpenLEMS/**/go.sum
+
+      # 脚本会先构建 @cpp/hexlib；这里只预热模块缓存，避免首次跑脚本超时
+      - name: Download dependencies
+        run: go mod download all
+
+      - name: 生成 .env.integration
+        env:
+          IT_DB_DRIVER: ${{ secrets.TEST_DB_DRIVER }}
+          IT_DB_DSN: ${{ secrets.TEST_DB_DSN }}
+          IT_DB_SCHEMA: ${{ secrets.TEST_DB_SCHEMA }}
+          IT_REDIS_ADDR: ${{ secrets.TEST_REDIS_ADDR }}
+          IT_MQTT_BROKER: ${{ secrets.TEST_MQTT_BROKER }}
+          IT_MODBUS_TCP_ADDR: ${{ secrets.TEST_MODBUS_TCP_ADDR }}
+        run: |
+          set -euo pipefail
+          # 默认 sqlite（无中间件）；仓库里配了 TEST_DB_* secret 时自动改用真实库。
+          # secret 的值维护在本机 ~/.github.env，用 `gh secret set` 推上来，不进仓库。
+          {
+            echo 'TEST_ENV="ci"'
+            echo 'LOG_LEVEL="warn"'
+            echo "TEST_DB_DRIVER=\"${IT_DB_DRIVER:-sqlite}\""
+            echo "TEST_DB_DSN=\"${IT_DB_DSN:-sqlite::@file($GITHUB_WORKSPACE/OpenLEMS/out/it-ci.sqlite3)}\""
+            [ -n "${IT_DB_SCHEMA:-}" ] && echo "TEST_DB_SCHEMA=\"$IT_DB_SCHEMA\""
+            [ -n "${IT_REDIS_ADDR:-}" ] && echo "TEST_REDIS_ADDR=\"$IT_REDIS_ADDR\""
+            [ -n "${IT_MQTT_BROKER:-}" ] && echo "TEST_MQTT_BROKER=\"$IT_MQTT_BROKER\""
+            [ -n "${IT_MODBUS_TCP_ADDR:-}" ] && echo "TEST_MODBUS_TCP_ADDR=\"$IT_MODBUS_TCP_ADDR\""
+            echo 'TEST_TIMEOUT="10m"'
+            echo 'TEST_ARTIFACT_DIR="out/test-artifacts"'
+          } > .env.integration
+
+      - name: Run integration scenarios
+        run: ./script/test-integration.sh
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: OpenLEMS/out/test-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
