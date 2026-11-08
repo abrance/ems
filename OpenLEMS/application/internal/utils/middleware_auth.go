@@ -3,6 +3,7 @@ package utils
 import (
 	v1 "application/api/auth/v1"
 	"common/c_enum"
+	"crypto/subtle"
 	"os"
 	"strings"
 
@@ -15,6 +16,9 @@ import (
 // 对应的 localStorage 会话。仅用于内网调试/临时演示，用完必须撤销：
 // 该开关会让任何能访问服务的人都拿到同样的角色权限。
 const EnvAuthBypassRole = "AUTH_BYPASS_ROLE"
+
+// EnvAPIStaticToken 用于可信自动化请求的静态 API token。
+const EnvAPIStaticToken = "EMS_API_STATIC_TOKEN"
 
 // AuthBypassRole 返回归一化后的鉴权绕过角色：admin、user，或空字符串（未开启）。
 func AuthBypassRole() string {
@@ -47,6 +51,12 @@ func MiddlewareAuth(r *ghttp.Request) {
 	}
 
 	handler := r.GetServeHandler()
+
+	if matchesAPIStaticToken(r) {
+		r.SetCtxVar("userRole", string(c_enum.EUserRoleAdmin))
+		r.Middleware.Next()
+		return
+	}
 
 	// 支持通过 Authorization 头传递会话ID（Bearer <token> 或 直接 <token>）
 	if auth := r.GetHeader("Authorization"); auth != "" {
@@ -90,6 +100,31 @@ func MiddlewareAuth(r *ghttp.Request) {
 	r.SetCtxVar("userRole", role)
 
 	r.Middleware.Next()
+}
+
+func matchesAPIStaticToken(r *ghttp.Request) bool {
+	configuredToken := os.Getenv(EnvAPIStaticToken)
+	if configuredToken == "" {
+		return false
+	}
+
+	auth := strings.TrimSpace(r.GetHeader("Authorization"))
+	bearerToken := ""
+	if len(auth) >= len("Bearer ") && strings.EqualFold(auth[:len("Bearer ")], "Bearer ") {
+		bearerToken = strings.TrimSpace(auth[len("Bearer "):])
+	}
+	apiToken := strings.TrimSpace(r.GetHeader("X-API-Token"))
+
+	bearerMatches := constantTimeTokenMatch(configuredToken, bearerToken)
+	headerMatches := constantTimeTokenMatch(configuredToken, apiToken)
+	return bearerMatches || headerMatches
+}
+
+func constantTimeTokenMatch(expected, actual string) bool {
+	if len(expected) != len(actual) || actual == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) == 1
 }
 
 // requiredRole 返回接口要求的角色：未显式标注时按方法推断（GET=user，其它=admin）。
