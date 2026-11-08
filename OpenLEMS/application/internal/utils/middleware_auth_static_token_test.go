@@ -129,6 +129,61 @@ func TestMiddlewareAuthStaticTokenViaXAPIHeader(t *testing.T) {
 	}
 }
 
+func TestMiddlewareAuthStaticTokenDoesNotIssueSessionCookie(t *testing.T) {
+	t.Setenv(EnvAuthBypassRole, "")
+	t.Setenv(EnvAPIStaticToken, testAPIStaticToken)
+	url := startStaticTokenAuthServer(t)
+
+	authenticatedReq, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticatedReq.Header.Set("X-API-Token", testAPIStaticToken)
+	authenticatedResp, err := http.DefaultClient.Do(authenticatedReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticatedBody, err := io.ReadAll(authenticatedResp.Body)
+	_ = authenticatedResp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(authenticatedBody) != "admin" {
+		t.Fatalf("正确静态 token 应以 admin 身份放行，实际 body=%s", authenticatedBody)
+	}
+
+	cookies := authenticatedResp.Cookies()
+	if len(cookies) != 0 {
+		t.Fatalf("静态 token 命中时不应签发 session cookie，实际 cookies=%v", cookies)
+	}
+
+	anonymousReq, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cookie := range cookies {
+		anonymousReq.AddCookie(cookie)
+	}
+	anonymousResp, err := http.DefaultClient.Do(anonymousReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anonymousBody, err := io.ReadAll(anonymousResp.Body)
+	_ = anonymousResp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := struct {
+		Code int `json:"code"`
+	}{}
+	if err := json.Unmarshal(anonymousBody, &payload); err != nil {
+		t.Fatalf("匿名请求响应不是有效 JSON: %v; body=%s", err, anonymousBody)
+	}
+	if payload.Code != 401 {
+		t.Fatalf("未携带 token 的后续请求应仍返回 401，实际 code=%d body=%s", payload.Code, anonymousBody)
+	}
+}
+
 func TestMiddlewareAuthStaticTokenViaBearerHeader(t *testing.T) {
 	t.Setenv(EnvAuthBypassRole, "")
 	t.Setenv(EnvAPIStaticToken, testAPIStaticToken)
