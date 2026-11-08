@@ -52,21 +52,22 @@ func MiddlewareAuth(r *ghttp.Request) {
 
 	handler := r.GetServeHandler()
 
-	staticTokenAuthenticated := matchesAPIStaticToken(r)
-	if staticTokenAuthenticated {
-		r.Session.Set("role", string(c_enum.EUserRoleAdmin))
-	} else {
-		// 支持通过 Authorization 头传递会话ID（Bearer <token> 或 直接 <token>）
-		if auth := r.GetHeader("Authorization"); auth != "" {
-			token := auth
-			if strings.HasPrefix(strings.ToLower(token), "bearer ") {
-				token = strings.TrimSpace(token[7:])
-			}
-			token = strings.TrimSpace(token)
-			if token != "" {
-				// 直接设置 SessionId，支持通过 Authorization header 认证
-				r.Session.SetId(token)
-			}
+	if matchesAPIStaticToken(r) {
+		r.SetCtxVar("userRole", string(c_enum.EUserRoleAdmin))
+		r.Middleware.Next()
+		return
+	}
+
+	// 支持通过 Authorization 头传递会话ID（Bearer <token> 或 直接 <token>）
+	if auth := r.GetHeader("Authorization"); auth != "" {
+		token := auth
+		if strings.HasPrefix(strings.ToLower(token), "bearer ") {
+			token = strings.TrimSpace(token[7:])
+		}
+		token = strings.TrimSpace(token)
+		if token != "" {
+			// 直接设置 SessionId，支持通过 Authorization header 认证
+			r.Session.SetId(token)
 		}
 	}
 
@@ -78,9 +79,6 @@ func MiddlewareAuth(r *ghttp.Request) {
 
 	// 读取 Session 中的角色
 	role := r.Session.MustGet("role").String()
-	if staticTokenAuthenticated {
-		role = string(c_enum.EUserRoleAdmin)
-	}
 	if role == "" {
 		r.Response.WriteJson(ghttp.DefaultHandlerResponse{Code: 401, Message: "未登录或登录已过期"})
 		return

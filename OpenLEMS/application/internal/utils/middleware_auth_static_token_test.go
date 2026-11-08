@@ -30,8 +30,10 @@ func startStaticTokenAuthServer(t *testing.T) string {
 		group.Middleware(MiddlewareAuth)
 		group.ALL("/probe", func(r *ghttp.Request) {
 			role := r.GetCtxVar("userRole").String()
-			sessionRole := r.Session.MustGet("role").String()
-			r.Response.Write(role + ":" + sessionRole)
+			r.Response.Write(role)
+		})
+		group.ALL("/session-id", func(r *ghttp.Request) {
+			r.Response.Write(r.Session.MustId())
 		})
 	})
 	s.Start()
@@ -83,9 +85,16 @@ func TestMiddlewareAuthStaticTokenDisabledByDefault(t *testing.T) {
 	t.Setenv(EnvAPIStaticToken, "")
 	url := startStaticTokenAuthServer(t)
 
-	body, code := callStaticTokenProbe(t, http.MethodGet, url, nil)
-	if code != 401 {
-		t.Fatalf("未配置静态 token 时匿名请求期望 401，实际 code=%d body=%s", code, body)
+	for name, headers := range map[string]map[string]string{
+		"anonymous":                             nil,
+		"token header without configured token": {"X-API-Token": testAPIStaticToken},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, code := callStaticTokenProbe(t, http.MethodGet, url, headers)
+			if code != 401 {
+				t.Fatalf("未配置静态 token 时请求期望 401，实际 code=%d body=%s", code, body)
+			}
+		})
 	}
 }
 
@@ -94,14 +103,29 @@ func TestMiddlewareAuthStaticTokenViaXAPIHeader(t *testing.T) {
 	t.Setenv(EnvAPIStaticToken, testAPIStaticToken)
 	url := startStaticTokenAuthServer(t)
 
-	body, code := callStaticTokenProbe(t, http.MethodGet, url, map[string]string{
-		"X-API-Token": testAPIStaticToken,
-	})
-	if code != 0 || body != "admin:admin" {
-		t.Fatalf("正确 X-API-Token 应以 admin 身份放行，实际 code=%d body=%s", code, body)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(body, testAPIStaticToken) {
+	req.Header.Set("X-API-Token", testAPIStaticToken)
+	req.Header.Set("Authorization", "Bearer incorrect-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "admin" {
+		t.Fatalf("正确 X-API-Token 应以 admin 身份放行，实际 body=%s", body)
+	}
+	if strings.Contains(string(body), testAPIStaticToken) {
 		t.Fatalf("响应体不得包含静态 token: %s", body)
+	}
+	if len(resp.Cookies()) != 0 {
+		t.Fatalf("静态 token 命中时不应签发 session cookie，实际 cookies=%v", resp.Cookies())
 	}
 }
 
@@ -113,8 +137,27 @@ func TestMiddlewareAuthStaticTokenViaBearerHeader(t *testing.T) {
 	body, code := callStaticTokenProbe(t, http.MethodGet, url, map[string]string{
 		"Authorization": "Bearer " + testAPIStaticToken,
 	})
-	if code != 0 || body != "admin:admin" {
+	if code != 0 || body != "admin" {
 		t.Fatalf("正确 Bearer token 应以 admin 身份放行，实际 code=%d body=%s", code, body)
+	}
+
+	sessionIDURL := urlWithPath(url, "/api/session-id")
+	req, err := http.NewRequest(http.MethodGet, sessionIDURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testAPIStaticToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(sessionID) == testAPIStaticToken {
+		t.Fatal("Bearer 静态 token 不得被设置为 session ID")
 	}
 }
 
@@ -133,7 +176,7 @@ func TestMiddlewareAuthStaticTokenAllowsReadAndWriteMethodsAsAdmin(t *testing.T)
 			body, code := callStaticTokenProbe(t, method, url, map[string]string{
 				"X-API-Token": testAPIStaticToken,
 			})
-			if code != 0 || body != "admin:admin" {
+			if code != 0 || body != "admin" {
 				t.Fatalf("静态 token 的 %s 请求应以 admin 身份放行，实际 code=%d body=%s", method, code, body)
 			}
 		})
@@ -205,9 +248,13 @@ func TestMiddlewareAuthInvalidStaticTokenPreservesValidSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "user:user" {
-		t.Fatalf("错误静态 token 应继续使用有效会话，期望 user:user，实际 body=%s", body)
+	if string(body) != "user" {
+		t.Fatalf("错误静态 token 应继续使用有效会话，期望 user，实际 body=%s", body)
 	}
+}
+
+func urlWithPath(url, path string) string {
+	return strings.TrimSuffix(url, "/api/probe") + path
 }
 
 func TestMiddlewareAuthEmptyStaticTokenHeadersDoNotAuthenticate(t *testing.T) {
