@@ -19,8 +19,11 @@
 如需补充或排查测试，可执行：
 
 ```bash
-./script/test-workspace.sh
+./script/test-workspace.sh          # 单元测试（单测，零外部依赖）
+./script/test-integration.sh        # 集成测试（连 .env.integration 指定的中间件）
 ```
+
+测试分层与编写要求见 [docs/testing-standard.md](docs/testing-standard.md)。简单函数不写单测，典型业务场景写进 `test_plan/`；集成测试脚本只连接中间件，不负责启停。
 
 ## Pull Request
 
