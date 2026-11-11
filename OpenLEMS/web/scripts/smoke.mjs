@@ -656,9 +656,15 @@ const FAKE_SPOT_MARKET = {
   spreadPeak: 20,
   spreadValley: 20,
   spreadMean: 20,
+  // 形状照抄真实响应：后端只给日频算 missing，其余数据集是 Go nil 切片 → JSON null。
+  // 曾经这里全写成 []，于是「coverage[].missing 是 null」这条线上真实存在的形状没被测到，
+  // DisclosureView 的 coverageNote 一 .length 就抛错 → 整页白屏（P0）。
   coverage: [
     { dataset: 'day_ahead_trade', from: '2026-06-24', to: '2026-09-21', periods: 90, missing: [], lastDate: '2026-09-21' },
     { dataset: 'realtime_trade', from: '2026-06-24', to: '2026-09-21', periods: 88, missing: [], lastDate: '2026-09-20' },
+    { dataset: 'mid_long_term_month', from: '2026-08-01', to: '2026-09-01', periods: 2, missing: null, lastDate: '2026-09-01' },
+    { dataset: 'green_power_month', from: '2026-08-01', to: '2026-09-01', periods: 2, missing: null, lastDate: '2026-09-01' },
+    { dataset: 'hhi', from: '2024-01-01', to: '2025-01-01', periods: 2, missing: null, lastDate: '2025-01-01' },
   ],
   source: '广东电力交易中心 信息披露接口（pm.gd.csg.cn）直采，origin=pm-api',
   updatedAt: '2026-09-21',
@@ -1184,6 +1190,10 @@ await clickTo('场景', '信息披露')
   check(bodyHas('400.50'), 'KPI 显示日前加权均价（带两位小数）')
   check(bodyHas('2,320,000'), 'KPI 显示用电侧成交电量（千分位）')
   check(bodyHas('日前-实时价差'), 'KPI/图表出现「日前-实时价差」')
+
+  // 回归：coverage[].missing 为 null（非日频数据集）时，coverageNote 不能抛错。
+  // 抛出会让整个 DisclosureView 渲染崩掉，下面每条断言都会连带失败。
+  check(bodyHas('区间内无缺日'), 'coverage 条目 missing=null 时走「区间内无缺日」分支（不抛错）')
 
   // 关键：图表容器上记录着「本次画了多少个数据点」。
   // 图形是 canvas，DOM 里看不出画没画；这个属性让「接口有数据但图空白」可断言。

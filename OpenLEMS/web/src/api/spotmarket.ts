@@ -75,7 +75,8 @@ export function fetchSpotMarketBoard(
     daily: r?.daily ?? [],
     periodic: r?.periodic ?? [],
     aheadRealtimeSpread: r?.aheadRealtimeSpread ?? [],
-    coverage: r?.coverage ?? [],
+    // 逐条也要收口：后端只给日频算 missing，其余数据集是 nil 切片 → null
+    coverage: (r?.coverage ?? []).map((c) => ({ ...c, missing: c.missing ?? [] })),
   }))
 }
 
