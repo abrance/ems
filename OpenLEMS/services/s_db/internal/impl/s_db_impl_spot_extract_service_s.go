@@ -25,6 +25,8 @@ type sSpotExtractServiceImpl struct{}
 const (
 	spotOriginManual = "manual"
 	spotOriginPmAPI  = "pm-api"
+	// spotOriginVoid 已被官方直采值取代的旧值：保留可查，但**永远**不再参与确认/统计
+	spotOriginVoid = "void"
 )
 
 var spotOriginConfirmed = []string{spotOriginManual, spotOriginPmAPI}
@@ -253,6 +255,10 @@ func (s *sSpotExtractServiceImpl) ConfirmMetrics(ctx context.Context, reportDate
 			if isConfirmedOrigin(r.Origin) {
 				continue
 			}
+			// 作废行更不能被「确认」复活：它已经被官方值取代，复活等于把旧值又当权威值
+			if r.Origin == spotOriginVoid {
+				continue
+			}
 			rows = append(rows, r)
 		}
 		if len(rows) == 0 {
@@ -308,6 +314,10 @@ func (s *sSpotExtractServiceImpl) CountMetricsByReport(ctx context.Context) (map
 	}
 	out := make(map[string]s_db_basic.SpotMetricCounts, len(rows))
 	for _, r := range rows {
+		// 作废行既不算已确认也不算待复核：它不在任何复核队列里
+		if r.Origin == spotOriginVoid {
+			continue
+		}
 		c := out[r.ReportDate]
 		if isConfirmedOrigin(r.Origin) {
 			c.Confirmed += r.N
