@@ -7,8 +7,10 @@ package internal
 const (
 	// DefaultInsertPath 单机版/集群版通用的 prometheus 文本导入路径
 	DefaultInsertPath = "/insert/0/prometheus/api/v1/import/prometheus"
-	// DefaultSelectPath 集群版 vmselect 的查询前缀（其后接 /api/v1/query_range）
+	// DefaultSelectPath 集群版 vmselect 的查询前缀（其后接 DefaultExportPath）
 	DefaultSelectPath = "/select/0/prometheus"
+	// DefaultExportPath 取原始样本的导出接口：返回真实样本时间戳，没有 lookbehind
+	DefaultExportPath = "/api/v1/export"
 
 	// ParamInsertURL 覆盖写入地址（写读不在同一端口，通常必须给）
 	ParamInsertURL = "insert_url"

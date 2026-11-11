@@ -3,8 +3,10 @@ package internal
 import (
 	"common/c_base"
 	"common/c_chart"
+	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,17 +41,11 @@ func TestVMIntegration(t *testing.T) {
 		t.Fatalf("写入失败: %v", err)
 	}
 
-	// query_range 只按 start+k*step 的网格返回点（VM 的行为），所以网格要跨过刚写的时间戳
+	// export 不加 rollup，点时间戳是真实样本时间戳；不过 vminsert→vmstorage→vmselect
+	// 有可见性延迟（实测 1s 内），所以轮询等样本出现，而不是假设写完立刻能查到。
 	now := time.Now().UnixMilli()
 	start, end := now-5*60*1000, now+5*60*1000
-	chart, err := s.GetStorageData(c_base.StorageTypeSystem, "gdpm_spot",
-		[]string{field + `{market="dayahead",side="gen",kind="weighted_avg"}`}, &start, &end, 60000)
-	if err != nil {
-		t.Fatalf("写后回读失败: %v", err)
-	}
-	if len(chart.Series) != 1 || len(chart.Series[0].Data) == 0 {
-		t.Fatalf("写后回读没有数据: %+v", chart)
-	}
+	chart := pollChart(t, s, []string{field + `{market="dayahead",side="gen",kind="weighted_avg"}`}, start, end, 60000, 1)
 	if got := chart.Series[0].Data[len(chart.Series[0].Data)-1]; got != "123.456" {
 		t.Errorf("回读值 = %q, 期望 123.456", got)
 	}
@@ -73,6 +69,113 @@ func TestVMIntegration(t *testing.T) {
 	if got := valueAt(daily, 1, 1794240000000); got != "1540786.335" {
 		t.Errorf("2026-11-10 日前发电侧总成交电量 = %q, 期望 1540786.335", got)
 	}
+}
+
+// 回归（真打 VM）：两天有数据、中间那天空着，查中间那天必须返回空。
+// 旧读路径 query_range + step=86400 会把前一天的值冒充成当天，这条测试就是为了钉住它。
+func TestVMIntegrationGapDayStaysEmpty(t *testing.T) {
+	if os.Getenv("EMS_VM_IT") != "1" {
+		t.Skip("未设置 EMS_VM_IT=1，跳过 VictoriaMetrics 集成测试")
+	}
+	insertURL := os.Getenv("EMS_VM_INSERT_URL")
+	selectURL := os.Getenv("EMS_VM_SELECT_URL")
+	if insertURL == "" || selectURL == "" {
+		t.Fatal("需要 EMS_VM_INSERT_URL 与 EMS_VM_SELECT_URL")
+	}
+
+	// 用独立的探针指标名，不碰 gdpm_* 真实序列；不依赖 retention 窗口外的历史日期。
+	const probe = "gdpm_it_gap_probe_cny_mwh"
+	labels := map[string]string{"it": "gap", "src": "pm.gd.csg.cn"}
+	day := func(offsetDays int) int64 {
+		n := time.Now().UTC().AddDate(0, 0, offsetDays)
+		tm := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.FixedZone("CST", 8*3600))
+		return tm.UnixMilli()
+	}
+	// 前两天、今天各写一个样本，昨天故意空着
+	hasData, gap, dayBefore := day(-2), day(-1), day(-3)
+
+	// 写入需要指定时间戳，插件的 SaveSystemMetrics 用 now，所以直接用同一套 payload 格式写。
+	body := formatSamples([]sample{
+		{Name: probe, Labels: labels, Value: 111.5, TS: hasData},
+		{Name: probe, Labels: labels, Value: 222.5, TS: dayBefore},
+	})
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, insertURL, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("构造写入请求失败: %v", err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("写入返回 %d", resp.StatusCode)
+	}
+
+	s := NewVMStorage(t.Context(), &c_base.SStorageConfig{
+		Type:   "vm",
+		Params: map[string]string{ParamInsertURL: insertURL, ParamSelectURL: selectURL},
+	})
+	selector := probe + `{it="gap"}`
+
+	// 有数据的那天：能查回真值（轮询等可见性）
+	start, end := hasData, hasData+24*3600*1000-1
+	chart := pollChart(t, s, []string{selector}, start, end, 86400000, 1)
+	if got := valueAt(chart, 0, hasData); got != "111.5" {
+		t.Fatalf("%s 的值 = %q, 期望 111.5（点: %v）", time.UnixMilli(hasData), got, chart.XAxis.Data)
+	}
+
+	// 空着的那天：必须是空，不能是前一天的值（查两次，排除可见性抖动）
+	start, end = gap, gap+24*3600*1000-1
+	for i := 0; i < 2; i++ {
+		chart, err := s.GetStorageData(c_base.StorageTypeSystem, "gdpm_spot", []string{selector}, &start, &end, 86400000)
+		if err != nil {
+			t.Fatalf("查空日失败: %v", err)
+		}
+		if len(chart.XAxis.Data) != 0 {
+			t.Fatalf("空日返回了 %d 个点: %v（值 %v）", len(chart.XAxis.Data), chart.XAxis.Data, seriesData(chart))
+		}
+		for _, se := range chart.Series {
+			if len(se.Data) != 0 {
+				t.Fatalf("空日序列 %s 带回了值 %v（就是 lookbehind 把前一天冒充成当天）", se.Name, se.Data)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// pollChart 轮询取数直到拿到 want 个时间点（VM 写入有可见性延迟），超时才失败。
+func pollChart(t *testing.T, s c_base.IStorage, keys []string, start, end int64, step int, want int) *c_chart.ChartData {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	var last *c_chart.ChartData
+	for time.Now().Before(deadline) {
+		chart, err := s.GetStorageData(c_base.StorageTypeSystem, "gdpm_spot", keys, &start, &end, step)
+		if err != nil {
+			t.Fatalf("查询失败: %v", err)
+		}
+		last = chart
+		if len(chart.XAxis.Data) == want {
+			return chart
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if last == nil {
+		t.Fatalf("查询始终没有返回结果")
+	}
+	t.Fatalf("等了 15s 仍只有 %d 个时间点, 期望 %d: %v", len(last.XAxis.Data), want, last.XAxis.Data)
+	return last
+}
+
+// seriesData 把各序列的值摊平，只用于失败时的可读输出。
+func seriesData(chart *c_chart.ChartData) []string {
+	out := make([]string, 0, len(chart.Series))
+	for _, s := range chart.Series {
+		out = append(out, s.Data...)
+	}
+	return out
 }
 
 func mustMs(t *testing.T, s string) int64 {

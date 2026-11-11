@@ -64,10 +64,11 @@ python3 gdpm_import.py --from 2026-11-05 --to 2026-11-10
 
 ## 坑
 
-1. **`query_range` 只按 `start + k*step` 的网格返回点**。日频数据必须把 `start`
-   对齐到 00:00+08:00、`step` 给 86400s，否则取不到点。
-2. **instant query（`/api/v1/query`）有回看窗口**，查一天前的点会返回空 —— 校验历史点要用
-   `query_range` 把窗口卡在目标时间戳上（`gdpm_import.py --verify` 就是这么做的）。
+1. **`query_range` 有 lookbehind，别用它读日频**：没有 rollup 函数时，网格点 `ts` 的取值窗口
+   是 `[ts-step, ts]`，`step=86400` 时「当天没样本」会返回**前一天**的值（静默旧值）。
+   `--verify` 已改走 `/api/v1/export?match[]=...&start=..&end=..`，返回真实样本时间戳，
+   无数据就是空。ems 的 p_vm 插件读路径同理（见 `OpenLEMS/plugins/plug_storages/p_vm/README.md`）。
+2. **instant query（`/api/v1/query`）有 5 分钟回看窗口**，查一天前的点一定空。
 3. 源站只发布了部分日期（如 2026-11-10 实时表当天未发布）；`--from/--to` 区间里没数据的
    日期会跳过并在 stderr 说明。
 

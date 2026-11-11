@@ -23,7 +23,11 @@ import (
 // vmStorage 是 c_base.IStorage 在 VictoriaMetrics 上的实现。
 //
 // 写：vminsert 的 prometheus 文本导入接口（同一序列同一时间戳重复写是覆盖，天然幂等）。
-// 读：vmselect 的 /api/v1/query_range（集群版只支持 PromQL，不支持 InfluxQL）。
+// 读：vmselect 的 /api/v1/export（集群版只支持 PromQL，不支持 InfluxQL）。
+//
+// 读为什么不用 query_range：没有 rollup 函数时，网格点 ts 的取值窗口是 [ts-step, ts]，
+// 于是 step=1d 时「当天没有任何样本」的日期会被前一天的样本冒充（静默返回旧值），
+// 调用方拿不到「当日无数据」。export 返回真实样本时间戳，空就是空。
 type vmStorage struct {
 	ctx       context.Context
 	baseURL   string // vminsert 根地址，用于 /delete_series
@@ -273,7 +277,7 @@ func (v *vmStorage) GetStorageData(storageType c_base.StorageType, id string, po
 	data := make(map[int64]map[string]float64)
 	for _, k := range pointKey {
 		selector := buildSelector(storageType, id, k)
-		points, err := v.queryRange(selector, startMs, endMs, stepSec)
+		points, err := v.queryExport(selector, startMs, endMs, stepSec)
 		if err != nil {
 			return nil, errors.Wrapf(err, "查询 %s 失败", selector)
 		}
@@ -322,18 +326,21 @@ type point struct {
 	Value float64
 }
 
-// queryRange 打 vmselect 的 /api/v1/query_range，返回原始样本。
-func (v *vmStorage) queryRange(selector string, startMs, endMs int64, stepSec int) ([]point, error) {
+// queryExport 打 vmselect 的 /api/v1/export，返回区间内的真实样本（按 step 分桶降采样）。
+//
+// export 不做 lookbehind：某天没有样本就不返回点，因此「无数据 = 空」是可依赖的语义。
+// 代价是它返回原始样本，长区间点数可能远超 step 网格，所以在客户端按 step 分桶，
+// 每个桶保留桶内最新一个样本（值和时间戳都是真实的）。
+func (v *vmStorage) queryExport(selector string, startMs, endMs int64, stepSec int) ([]point, error) {
 	if v.selectURL == "" {
 		return nil, errors.New("VictoriaMetrics 查询地址为空")
 	}
 	q := url.Values{}
-	q.Set("query", selector)
+	q.Set("match[]", selector)
 	q.Set("start", strconv.FormatInt(startMs/1000, 10))
 	q.Set("end", strconv.FormatInt(endMs/1000, 10))
-	q.Set("step", strconv.Itoa(stepSec))
 
-	req, err := http.NewRequest(http.MethodGet, v.selectURL+"/api/v1/query_range?"+q.Encode(), nil)
+	req, err := http.NewRequest(http.MethodGet, v.selectURL+DefaultExportPath+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "构造查询请求失败")
 	}
@@ -342,72 +349,80 @@ func (v *vmStorage) queryRange(selector string, startMs, endMs int64, stepSec in
 		return nil, errors.Wrap(err, "查询 VictoriaMetrics 失败")
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, "读取查询响应失败")
-	}
 	if resp.StatusCode/100 != 2 {
-		return nil, errors.Errorf("查询返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, errors.Errorf("查询返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
-	return parseQueryRange(body)
+	points, err := parseExport(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	points = downsample(points, startMs, int64(stepSec)*1000)
+	if len(points) == 0 {
+		return nil, nil // 区间内确实没有样本：返回空，绝不用邻近日期的值顶上
+	}
+	return points, nil
 }
 
-type queryRangeResp struct {
-	Status string `json:"status"`
-	Error  string `json:"error"`
-	Data   struct {
-		ResultType string `json:"resultType"`
-		Result     []struct {
-			Values [][2]json.RawMessage `json:"values"`
-			Value  []json.RawMessage    `json:"value"`
-		} `json:"result"`
-	} `json:"data"`
+// exportSeries 是 export 的一行（一个序列的全部样本）。
+// 出错时 vmselect 会返回一行 {"status":"error","error":"…"}。
+type exportSeries struct {
+	Status     string            `json:"status"`
+	Error      string            `json:"error"`
+	Metric     map[string]string `json:"metric"`
+	Values     []float64         `json:"values"`
+	Timestamps []int64           `json:"timestamps"`
 }
 
-// parseQueryRange 解析 query_range 响应（matrix 为主，单点 vector 也兼容）。
-func parseQueryRange(body []byte) ([]point, error) {
-	var r queryRangeResp
-	if err := json.Unmarshal(body, &r); err != nil {
-		return nil, errors.Wrap(err, "解析查询响应失败")
-	}
-	if r.Status != "success" {
-		return nil, errors.Errorf("VictoriaMetrics 查询失败: %s", r.Error)
-	}
-	out := make([]point, 0, len(r.Data.Result))
-	appendSample := func(raw [2]json.RawMessage) error {
-		var sec float64
-		if err := json.Unmarshal(raw[0], &sec); err != nil {
-			return err
+// parseExport 逐行解析 export 的 NDJSON 响应（时间戳本来就是毫秒）。
+func parseExport(r io.Reader) ([]point, error) {
+	out := make([]point, 0, 64)
+	dec := json.NewDecoder(r)
+	for {
+		var s exportSeries
+		err := dec.Decode(&s)
+		if err == io.EOF {
+			break
 		}
-		var valStr string
-		if err := json.Unmarshal(raw[1], &valStr); err != nil {
-			return err
-		}
-		val, err := strconv.ParseFloat(valStr, 64)
 		if err != nil {
-			return err
+			return nil, errors.Wrap(err, "解析查询响应失败")
 		}
-		out = append(out, point{TS: int64(sec * 1000), Value: val})
-		return nil
-	}
-	for _, s := range r.Data.Result {
-		if len(s.Value) == 2 {
-			if err := appendSample([2]json.RawMessage{s.Value[0], s.Value[1]}); err != nil {
-				return nil, errors.Wrap(err, "解析查询样本失败")
-			}
-			continue
+		if s.Status == "error" || s.Error != "" {
+			return nil, errors.Errorf("VictoriaMetrics 查询失败: %s", s.Error)
 		}
-		for _, vals := range s.Values {
-			if len(vals) != 2 {
-				continue
-			}
-			if err := appendSample(vals); err != nil {
-				return nil, errors.Wrap(err, "解析查询样本失败")
-			}
+		if len(s.Values) != len(s.Timestamps) {
+			continue // 残缺行直接跳过，不做猜测补齐
+		}
+		for i, v := range s.Values {
+			out = append(out, point{TS: s.Timestamps[i], Value: v})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].TS < out[j].TS })
 	return out, nil
+}
+
+// downsample 按 [start, start+step) 分桶，每桶保留最新样本。
+// stepMs<=0 时原样返回；落在 start 之前的点丢弃（export 已裁过，这里做防御）。
+func downsample(points []point, startMs, stepMs int64) []point {
+	if stepMs <= 0 || len(points) == 0 {
+		return points
+	}
+	out := make([]point, 0, len(points))
+	var curBucket int64
+	haveBucket := false
+	for _, p := range points {
+		if p.TS < startMs {
+			continue
+		}
+		b := (p.TS - startMs) / stepMs
+		if haveBucket && b == curBucket {
+			out[len(out)-1] = p // 同桶取最新，时间戳保持真实值
+			continue
+		}
+		curBucket, haveBucket = b, true
+		out = append(out, p)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- 统计与清理

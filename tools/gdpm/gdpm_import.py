@@ -177,32 +177,46 @@ def post_lines(url, lines):
         return r.status
 
 
-def query_range(select_url, promql, ts):
-    """查某个时间点附近的值。
+def query_day(select_url, promql, date_str):
+    """用 export 精确取某一天的样本。
 
-    日频点是一天前甚至更早的数据，instant query 有 5 分钟回看限制会查不到，
-    所以用 query_range 把窗口卡在目标时间戳上。
+    不用 query_range：没有 rollup 函数时它每个网格点的取值窗口是 [ts-step, ts]，
+    step 一大就会把前一天的值冒充成当天（当天没数据也返回旧值）。export 返回真实
+    样本时间戳，没有样本就是空。
     """
+    day_start = day_ts_ms(date_str) // 1000
     q = urllib.parse.urlencode({
-        "query": promql,
-        "start": ts - 300,
-        "end": ts,
-        "step": 60,
+        "match[]": promql,
+        "start": day_start,
+        "end": day_start + 86400 - 1,
     })
-    with urllib.request.urlopen(f"{select_url}/api/v1/query_range?{q}", timeout=60) as r:
-        payload = json.loads(r.read().decode())
-    if payload.get("status") != "success":
-        raise RuntimeError(payload.get("error") or "query_range 失败")
-    for series in payload["data"]["result"]:
-        values = series.get("values") or []
-        if values:
-            return values[-1][1]
-    return None
+    with urllib.request.urlopen(f"{select_url}/api/v1/export?{q}", timeout=60) as r:
+        body = r.read().decode()
+    return parse_export_day(body, date_str)
+
+
+def parse_export_day(body, date_str):
+    """解析 export 的 NDJSON，只保留落在 date_str 当天的样本，返回最后一个值（没有则 None）。"""
+    day_start_ms = day_ts_ms(date_str)
+    last = None
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        if row.get("status") == "error" or row.get("error"):
+            raise RuntimeError(row.get("error") or "export 失败")
+        ts_list = row.get("timestamps") or []
+        vals = row.get("values") or []
+        for ts_ms, val in zip(ts_list, vals):
+            # 只认落在当天的样本，杜绝邻近日期的值混进来
+            if day_start_ms <= ts_ms <= day_start_ms + 86400 * 1000 - 1:
+                last = val
+    return last
 
 
 def verify_day(select_url, date_str, log=print):
     """回查某一天写的序列：打印每个序列的值（没有则打印空）。"""
-    ts = day_ts_ms(date_str) // 1000
     found = 0
     for metric, labels in (
         (PRICE_METRIC, {"market": "dayahead", "side": "gen", "kind": "weighted_avg"}),
@@ -211,13 +225,13 @@ def verify_day(select_url, date_str, log=print):
         (VOLUME_METRIC, {"market": "dayahead", "side": "load", "kind": "total"}),
     ):
         sel = ",".join(f'{k}="{v}"' for k, v in labels.items())
-        val = query_range(select_url, f"{metric}{{{sel}}}", ts)
+        val = query_day(select_url, f"{metric}{{{sel}}}", date_str)
         if val is not None:
             found += 1
         else:
             val = "（无）"
         log(f"  {metric}{{{sel}}} = {val}")
-    log(f"  {date_str}: {found} 条序列查到值（@ts={ts}）")
+    log(f"  {date_str}: {found} 条序列查到值（@ts={day_ts_ms(date_str) // 1000}）")
     return found
 
 

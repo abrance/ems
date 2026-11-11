@@ -4,6 +4,7 @@
 只跑纯函数，不联网。  python3 test_gdpm_import.py
 """
 
+import json
 import unittest
 
 import gdpm_import as gi
@@ -70,6 +71,36 @@ class TestRowsToSamples(unittest.TestCase):
         }])
         self.assertEqual(lines, [])
         self.assertEqual(len(skipped), 1)
+
+
+class VerifyExportTest(unittest.TestCase):
+    """--verify 的读路径：export 只认当天的真实样本，不能拿邻近日期的值顶上。"""
+
+    DAY = "2026-11-10"
+    DAY_MS = 1794240000000
+
+    def body(self, *samples):
+        rows = [{"metric": {"__name__": "gdpm_price_cny_mwh"},
+                 "values": [v for v, _ in samples],
+                 "timestamps": [t for _, t in samples]}]
+        return "\n".join(json.dumps(r) for r in rows) + "\n"
+
+    def test_returns_value_of_that_day(self):
+        body = self.body((334.569613, self.DAY_MS))
+        self.assertEqual(gi.parse_export_day(body, self.DAY), 334.569613)
+
+    def test_empty_body_means_no_data(self):
+        self.assertIsNone(gi.parse_export_day("", self.DAY))
+
+    def test_previous_day_value_not_used(self):
+        # 前一天的样本落在窗口外：必须当成「当天无数据」
+        body = self.body((350.564512, self.DAY_MS - 86400000))
+        self.assertIsNone(gi.parse_export_day(body, self.DAY))
+
+    def test_error_line_raises(self):
+        body = json.dumps({"status": "error", "error": "bad_data"}) + "\n"
+        with self.assertRaises(RuntimeError):
+            gi.parse_export_day(body, self.DAY)
 
 
 if __name__ == "__main__":
