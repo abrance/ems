@@ -2626,7 +2626,7 @@ await clickTo('场景', '历史信息')
 
   // 四条线：实际两条（日报日前/实时成交电价）+ 预测两条（留痕），同一日报域、日期对得上
   check(chartTitles.includes('日前-实时出清与预测价格'), '有四条线面板')
-  check(bodyHas('实际：日报已确认的日前/实时成交电价'), '写明实际线的来源与口径')
+  check(bodyHas('实际：官方直采（origin=pm-api）的日前/实时成交电价'), '写明实际线的来源与口径')
   check(bodyHas('留痕 2 个生成日'), '写明留痕有几个生成日')
   const pricePanel = [...doc.querySelectorAll('.panel')].find((p) =>
     (p.querySelector('.panel-title')?.textContent ?? '').includes('日前-实时出清与预测价格'),

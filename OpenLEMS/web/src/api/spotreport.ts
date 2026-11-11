@@ -6,7 +6,8 @@ import { api } from './client'
  * 这是 overlay（spot-overlay.js）能力的迁入点 —— 采集台、档案列表、结构化数据、
  * 复核与修订、重跑，都在这里。接口沿用现网，没有新增后端。
  *
- * 口径提醒：`origin === 'manual'` 才算已确认，其余（ocr/cv/空）都是未复核；
+ * 口径提醒：后端把 manual（人工确认）与 pm-api（官方直采）都算已确认（s_db isConfirmedOrigin）；
+ * 本文件的 isPending 仍只认 manual，跑在 pm-api 行上会当未复核显示。
  * 未复核数据不参与趋势聚合（见 /api/spot-report/trend）。
  */
 export interface SpotPage {

@@ -6,7 +6,7 @@ import "github.com/gogf/gf/v2/frame/g"
 //
 // grain 决定序列源，不只是步长：
 //
-//	day（默认）—— 日报已确认（origin=manual）的日均成交价，一天一个点
+//	day（默认）—— 官方直采（origin=pm-api）的日均成交价，一天一个点
 //	intraday    —— 电网日指标 CSV（gd_metric.csv）的 15 分钟电价，出未来 5 日 × 96 点
 type GetPriceForecastReq struct {
 	g.Meta       `path:"/forecast/price" method:"get" tags:"电价预测" summary:"现货电价预测（TimesFM）" role:"user"`

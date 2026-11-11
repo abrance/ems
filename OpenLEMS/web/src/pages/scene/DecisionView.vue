@@ -328,7 +328,7 @@ useECharts(priceEl, (): EChartsOption => {
       splitLine: { lineStyle: { color: '#eef0f3' } },
     },
     series: [
-      { name: '历史（已确认日均）', type: 'line', showSymbol: false, itemStyle: { color: CHART_COLORS.blue }, data: [...(f?.historyValues ?? []), ...histPadTail] },
+      { name: '历史（官方直采日均）', type: 'line', showSymbol: false, itemStyle: { color: CHART_COLORS.blue }, data: [...(f?.historyValues ?? []), ...histPadTail] },
       { name: '预测 10%', type: 'line', showSymbol: false, lineStyle: { type: 'dotted', width: 1 }, itemStyle: { color: CHART_COLORS.gray }, data: q('0.1') },
       { name: '预测 90%', type: 'line', showSymbol: false, lineStyle: { type: 'dotted', width: 1 }, itemStyle: { color: CHART_COLORS.gray }, data: q('0.9') },
       { name: '预测中位', type: 'line', showSymbol: true, lineStyle: { type: 'dashed' }, itemStyle: { color: CHART_COLORS.brand }, data: [...fcPadHead, ...(f?.forecast ?? []).map((p) => p.point)] },
@@ -422,7 +422,7 @@ watch(
       <template v-else>
         <div class="warn">
           本块出的是<strong>日均</strong>序列。要看 96 点分时预测，去「长周期电价预测」页的
-          「分时」视图 —— 那条序列走电网日指标 CSV，与这里的日报日均序列**不是同一份数据**。
+          「分时」视图 —— 那条序列走电网日指标 CSV，与这里的官方直采日均序列**不是同一份数据**。
         </div>
         <div ref="priceEl" class="chart" />
       </template>

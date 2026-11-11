@@ -23,7 +23,7 @@ const (
 
 // 预测粒度
 const (
-	ForecastGrainDay      = "day"      // 日均（日报已确认成交价）
+	ForecastGrainDay      = "day"      // 日均（官方直采成交价）
 	ForecastGrainIntraday = "intraday" // 96 点（电网日指标 CSV）
 )
 

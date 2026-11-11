@@ -76,7 +76,7 @@ export interface PriceBacktest {
 
 export interface PriceForecast {
   market: string
-  /** day=日均（日报已确认）/ intraday=96 点（电网日指标 CSV） */
+  /** day=日均（官方直采 pm-api）/ intraday=96 点（电网日指标 CSV） */
   grain: string
   /** 采样步长（分钟）：day=1440，intraday=15 */
   stepMinutes: number
@@ -128,7 +128,7 @@ function normalizeForecast(f: PriceForecast): PriceForecast {
 export function fetchPriceForecast(
   params: {
     market?: string
-    /** day=日均（日报）/ intraday=96 点（电网日指标 CSV） */
+    /** day=日均（官方直采 pm-api）/ intraday=96 点（电网日指标 CSV） */
     grain?: string
     historyDays?: number
     horizonDays?: number

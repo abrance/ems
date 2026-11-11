@@ -161,7 +161,7 @@ func recordForecastPoints(ctx context.Context, res *TPriceForecastResult) int {
 	}
 	source := "gd_metric.csv"
 	if res.Grain == s_db_model.ForecastGrainDay {
-		source = "日报已确认日均成交价"
+		source = "官方直采日均成交价"
 	}
 	rows := make([]*s_db_model.SPriceForecastModel, 0, len(res.Points))
 	for _, p := range res.Points {
