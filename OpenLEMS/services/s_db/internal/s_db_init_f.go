@@ -321,6 +321,30 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	// 官方 API 采集元数据：哪天采过、成功/失败、源站原始数值。
+	// 与 gd_spot_extract_run 分开：那边是 OCR 日报（ocr_model/page_count/ocr_ms），
+	// 这边是 pm.gd.csg.cn 接口抓取，混表会让两边的列永远一半是空。
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_pm_fetch_run (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_date VARCHAR(10) NOT NULL,
+			dataset VARCHAR(32) NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT '',
+			rows_written INTEGER NOT NULL DEFAULT 0,
+			source_url VARCHAR(255) NOT NULL DEFAULT '',
+			payload TEXT,
+			warnings TEXT,
+			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (target_date, dataset, extractor_version)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	// 电价预测留痕：复盘要回答「当时发的预测准不准」，所以必须落库。
 	// 唯一键 (generated_on, market, grain, target_time)：同一天对同一目标时刻只留一条。
 	_, err = g.DB().Exec(ctx, `

@@ -17,6 +17,8 @@ const (
 	SpotMetricAuditEdit      = "edit"                   // 人工修订
 	SpotMetricAuditOverwrite = "overwritten_by_extract" // 重跑解析覆盖了人工值
 	SpotMetricAuditConfirm   = "confirm"                // 人工确认了采样/OCR 预填值
+	// SpotMetricAuditDeprecate 该行被官方 API 直采值取代：保留可查，不再作为权威值。
+	SpotMetricAuditDeprecate = "deprecated_by_pm_api"
 )
 
 // SSpotMetricAuditModel 指标变更审计。人工修订与「被解析覆盖」都留痕，

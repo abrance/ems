@@ -31,8 +31,9 @@ const (
 
 	// defaultPriceHistoryDays 默认送入模型的历史天数
 	defaultPriceHistoryDays = 60
-	// defaultPriceHorizonDays 默认预测天数
-	defaultPriceHorizonDays = 5
+	// defaultPriceHorizonDays 默认预测天数。7 天：信息披露页展示的是「未来一周」，
+	// TimesFM 按天出点，7 × 1 = 7 ≤ max_horizon 512，远没到上限。
+	defaultPriceHorizonDays = 7
 	// maxPriceHorizonDays 上限：TimesFM max_horizon=512，按天算远够，卡 30 防止误传
 	maxPriceHorizonDays = 30
 	// minPricePoints 序列太短预测没意义，先卡一个下限
@@ -66,6 +67,25 @@ func ParseGrain(grain string) (string, error) {
 	default:
 		return "", errors.Errorf("不支持的粒度: %s（可用 day / intraday）", grain)
 	}
+}
+
+// 官方接口直采（origin=pm-api）的指标名：源站原名，与 OCR 日报的「平均电价」不同名。
+// 两条来源都要认，否则切到官方数据后预测链路会一条都取不到（历史事故：改名后序列变空，
+// 表现为「已确认的电价数据不足 7 天」，而不是报错）。
+const (
+	metricOfficialAhead = "发电侧日前加权平均电价"
+	metricOfficialReal  = "发电侧实时加权平均电价"
+)
+
+// priceMetricNames 一条序列可接受的指标名：OCR 日报口径 + 官方直采口径。
+func priceMetricNames(spec priceSpec) map[string]bool {
+	names := map[string]bool{priceMetric: true}
+	if spec.Market == "real" {
+		names[metricOfficialReal] = true
+	} else {
+		names[metricOfficialAhead] = true
+	}
+	return names
 }
 
 // priceSpec 一种市场对应的指标口径。
@@ -232,8 +252,9 @@ func resolvePriceSpec(market string) (priceSpec, error) {
 // 同一运行日的重复行按首选来源优先，其余回落；单位取第一条命中的行。
 func buildDailySeries(models []*s_db_model.SSpotMetricModel, spec priceSpec) (dates []string, values []float64, unit string) {
 	picked := map[string]*s_db_model.SSpotMetricModel{}
+	names := priceMetricNames(spec)
 	for _, m := range models {
-		if m == nil || m.Dataset != spec.Dataset || m.Scope != priceScope || m.Metric != priceMetric {
+		if m == nil || m.Dataset != spec.Dataset || m.Scope != priceScope || !names[m.Metric] {
 			continue
 		}
 		prev := picked[m.RunDate]

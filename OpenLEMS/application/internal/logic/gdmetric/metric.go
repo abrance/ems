@@ -3,6 +3,7 @@ package gdmetric
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -114,8 +115,10 @@ type cacheFile struct {
 }
 
 type store struct {
-	mu           sync.RWMutex
-	refreshMu    sync.Mutex
+	mu        sync.RWMutex
+	refreshMu sync.Mutex
+	// enabled 第三方 CSV 通道是否还去网上拉。false 时只读本地缓存，不再连第三方站点。
+	enabled      bool
 	url          string
 	cachePath    string
 	metaPath     string
@@ -142,11 +145,16 @@ func shanghaiLocation() *time.Location {
 	return loc
 }
 
-func loadConfig(ctx context.Context) (url, cachePath string, refresh time.Duration) {
+// loadConfig 读 gd_metric.* 配置。enabled 默认 true（行为与历史一致）；
+// 置 false 表示「第三方 CSV 通道停用」——不再向 file.xiaoyxq.top 拉取，
+// 只用本地已有缓存（96 点分时序列目前没有别的来源，本地数据仍然可用）。
+func loadConfig(ctx context.Context) (enabled bool, url, cachePath string, refresh time.Duration) {
+	enabled = true
 	url = defaultURL
 	cachePath = defaultCachePath
 	hours := defaultRefreshHrs
 	if g.Cfg() != nil {
+		enabled = g.Cfg().MustGet(ctx, "gd_metric.enabled", true).Bool()
 		if v := strings.TrimSpace(g.Cfg().MustGet(ctx, "gd_metric.url").String()); v != "" {
 			url = v
 		}
@@ -160,7 +168,10 @@ func loadConfig(ctx context.Context) (url, cachePath string, refresh time.Durati
 	if v := strings.TrimSpace(os.Getenv("GD_METRIC_URL")); v != "" {
 		url = v
 	}
-	return url, cachePath, time.Duration(hours) * time.Hour
+	if v := strings.TrimSpace(os.Getenv("GD_METRIC_ENABLED")); v != "" {
+		enabled = !strings.EqualFold(v, "false") && v != "0"
+	}
+	return enabled, url, cachePath, time.Duration(hours) * time.Hour
 }
 
 func loadMaxSize(ctx context.Context) int64 {
@@ -183,7 +194,8 @@ func metaPathFor(csvPath string) string {
 
 func initGlobal(ctx context.Context) {
 	globalOnce.Do(func() {
-		url, cachePath, refresh := loadConfig(ctx)
+		enabled, url, cachePath, refresh := loadConfig(ctx)
+		global.enabled = enabled
 		global.url = url
 		global.cachePath = cachePath
 		global.refreshAfter = refresh
@@ -228,6 +240,10 @@ func (s *store) ensureFresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	if !s.localCSVReady() {
+		// 停用后本地又没缓存：明确报「通道已停用」，不要静默返回空页面
+		if !s.enabled {
+			return errors.New("第三方电网指标通道已停用（gd_metric.enabled=false），且本地无缓存")
+		}
 		return s.refresh(ctx)
 	}
 	s.mu.RLock()
@@ -237,6 +253,10 @@ func (s *store) ensureFresh(ctx context.Context) error {
 		if err := s.loadLocal(ctx); err != nil {
 			return err
 		}
+	}
+	if !s.enabled {
+		// 停用：缓存过期也不去拉，直接用本地数据
+		return nil
 	}
 	s.mu.RLock()
 	stale := s.fetchedAt.IsZero() || time.Since(s.fetchedAt) > s.refreshAfter
@@ -248,6 +268,9 @@ func (s *store) ensureFresh(ctx context.Context) error {
 }
 
 func (s *store) refresh(ctx context.Context) error {
+	if !s.enabled {
+		return errors.New("第三方电网指标通道已停用（gd_metric.enabled=false）")
+	}
 	fetchCtx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, s.url, nil)

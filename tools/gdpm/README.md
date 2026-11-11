@@ -1,78 +1,172 @@
-# gdpm：广东电力交易指标（日频）-> VictoriaMetrics
+# gdpm：广东电力交易指标（官方 API -> ems 业务库）
 
-`gdpm_import.py` 把广东电力交易中心（`pm.gd.csg.cn`）**现货日前 / 实时**两张日频
-指标表写进 VictoriaMetrics，供 ems 的存储接口按日期查回。
+广东电力交易中心门户 `pm.gd.csg.cn` 的公开披露接口，无登录、无凭据、限速 0.7s。
 
-抓取部分直接 `import gd_pm_fetch`（同目录，来自抓取脚本原件，端点/索引/限速都不重写）：
-每天 2 次请求，无登录、无凭据。限速沿用 0.7s。
+**2026-11-11 起，官方 API 是广东电力市场数据的唯一权威源。** 原先两条数据源作废：
 
-## 指标命名
-
-指标名是**数值本身**，维度只进标签（不要把一个指标的中文名塞进 label，那是高基数）。
-
-| 指标名 | 含义 | 单位 |
+| 旧数据源 | 处置 | 说明 |
 | --- | --- | --- |
-| `gdpm_price_cny_mwh` | 电价 | 元/MWh |
-| `gdpm_volume_mwh` | 成交电量 | MWh |
+| OCR 日报（`gd_spot_metric` 里 `origin=manual` 的 804 行，2026-09-14~09-25） | **标记作废但保留**：`origin='void'`，逐条写 `gd_spot_metric_audit`（`operation=deprecated_by_pm_api`） | 可查、可追溯、不删行 |
+| 第三方 CSV（`gdmetric`，`https://file.xiaoyxq.top/gd_metric.csv`） | **已停更**：`gd_metric.enabled=false`，只读本地缓存、不再向第三方站点拉取 | 见文末「怎么恢复/停用 gdmetric」 |
 
-标签（全部低基数）：
+## 三段式
 
-| 标签 | 取值 |
+```
+① 抓取落文件   python3 gdpm_dataset.py            -> data/gdpm/*.csv
+② 入业务库     python3 gdpm_sqlite.py --db ... --apply
+③ 读路径       forecast/price.go、spotreport/trend.go（阶段 B：复用现有接口，只换源）
+```
+
+抓取复用 `gd_pm_fetch.py`（端点、索引、限速、树缓存都在那边，不重写）。
+`gd_pm_fetch.py --date` 仍可用于单日排查；`gdpm_import.py` 是历史上写 VictoriaMetrics 的
+脚本，**不再是权威路径**，保留仅作参考。
+
+## ① gdpm_dataset.py：抓成能直接打开的文件
+
+```
+python3 gdpm_dataset.py                 # 默认输出 ../../data/gdpm/
+python3 gdpm_dataset.py --only 现货      # 只拉名字含子串的模板（调试）
+```
+
+16 次请求拉完索引里所有指标模板（每表整表一次请求）。产物：
+
+| 文件 | 内容 |
 | --- | --- |
-| `market` | `dayahead`（日前） / `realtime`（实时） |
-| `side` | `gen`（发电侧） / `load`（用电侧） |
-| `kind` | `weighted_avg` / `declared_avg` / `max` / `min` / `total` |
-| `src` | `pm.gd.csg.cn` |
+| `raw/<templateUuid>.json` | 源站原始返回 + 字段定义（事后可追溯） |
+| `spot_day_ahead_<年>.csv` | 日前日频宽表，一天一行，**列名保持源站中文原样**，按年分文件 |
+| `spot_realtime_<年>.csv` | 实时日频宽表，同上 |
+| `metrics_<slug>.csv` | 月频/年频/静态模板（中长期、绿电、零售、HHI、Top-m、企业信息） |
 
-字段映射（源站字段 -> 指标 + 标签），规则在 `gdpm_import.py` 的 `series_of()`：
+月频/年频里进业务库的是这 8 个（`metrics_*.csv` 与 dataset 的对应写在 `gdpm_sqlite.py: PERIODIC`）：
 
-| 源字段 | 指标 | market | side | kind |
-| --- | --- | --- | --- | --- |
-| `generationSideDailyTotalVolume` | `gdpm_volume_mwh` | dayahead | gen | total |
-| `consumerSideDailyTotalVolume` | `gdpm_volume_mwh` | dayahead | load | total |
-| `generationSideDailyAvgPrice` | `gdpm_price_cny_mwh` | dayahead | gen | weighted_avg |
-| `generationSideDailyMaxPrice` | `gdpm_price_cny_mwh` | dayahead | gen | max |
-| `generationSideDailyMinPrice` | `gdpm_price_cny_mwh` | dayahead | gen | min |
-| `dailyDeclarationAvgPrice` | `gdpm_price_cny_mwh` | dayahead | gen | declared_avg |
-| `generationSideRealTimeTotalVolume` | `gdpm_volume_mwh` | realtime | gen | total |
-| `generationSideRealTimeAvgPrice` | `gdpm_price_cny_mwh` | realtime | gen | weighted_avg |
+| 文件 | dataset | 粒度 |
+| --- | --- | --- |
+| `metrics_mid_long_term_month.csv` | `mid_long_term_month` | 月 |
+| `metrics_mid_long_term_year.csv` | `mid_long_term_year` | 年 |
+| `metrics_green_power_month.csv` | `green_power_month` | 月（按交易序列拆行） |
+| `metrics_green_power_year.csv` | `green_power_year` | 年（按交易序列拆行） |
+| `metrics_green_power_retail.csv` | `green_power_retail` | 月 |
+| `metrics_energy_retail.csv` | `energy_retail` | 月（按交易类型拆行） |
+| `metrics_hhi.csv` | `hhi` | 年 |
+| `metrics_top_m.csv` | `top_m` | 月 |
 
-时间戳统一取**当日 00:00:00+08:00** 的毫秒值。实时表的行里会夹带日前字段
-（反之亦然），所以只写**本表声明过的字段**。
+`metrics_grid_company*.csv` / `metrics_exchange_*.csv` 是**工商登记信息**（企业全称、统一社会信用代码、
+股东持股），没有时间维度，不是时序指标，因此不入 `gd_spot_metric`；要展示时直接读 CSV。
+| `gdpm_long.csv` | 日频长表 `date,dataset,scope,metric,value,unit,source`，②的输入 |
 
-## 用法
+CSV 用 `utf-8-sig`，Excel 双击打开不乱码。
+
+**不抓**：`强制或自愿退出且公示生效后的市场经营主体名单`（售电公司 8.5k 行、电力用户
+78 万行）。它是主体名单不是指标，`gdpm_dataset.py` 里 `SKIP_NAME` / `MAX_ROWS` 明确跳过。
+
+## ② gdpm_sqlite.py：入 `gd_spot_metric`
+
+```
+python3 gdpm_sqlite.py --db /path/db.sqlite3 --report /tmp/report.json          # 只算不写
+python3 gdpm_sqlite.py --db /path/db.sqlite3 --report /tmp/report.json --apply
+```
+
+写库口径（与 OCR 日报既有约定一致，已用生产库核对）：
+
+| 项 | 规则 |
+| --- | --- |
+| `origin` | `pm-api`（新值） / `void`（作废的旧值） |
+| `source` | `gdpm-api` |
+| `extractor_version` | `gdpm-1` |
+| 日前 | `report_date = run_date = 数据日`（日报日 D 的日前出清落在 D） |
+| 实时 | `run_date = 数据日`，`report_date = 数据日 + 2`（T+2 发布） |
+| 电价 `unit` | `元/兆瓦时`（源站表头写 `元/MWh`，入库统一成中文单位） |
+| 电量 `unit` | `MWh` |
+| `dataset` | 日前 `day_ahead_trade` / 实时 `realtime_trade`；月频年频见上表 |
+| `scope` | 日频 `发电侧` / `用电侧`；绿电与零售用交易序列名 / 交易类型；中长期/HHI/Top-m 为空 |
+| 月频年频期次 | `run_date` 落**期初第一天**（`2026-10` → `2026-10-01`，`2025` → `2025-01-01`）。不能把 `2026-10` 原样写进 `run_date`：字符串比较下它小于 `2026-10-05`，月频行会漏进日频区间查询 |
+| `metric` | 源站中文指标名去掉单位括号，如 `发电侧日前加权平均电价` |
+| `conf` | 1.0（官方直采，非提取） |
+
+重跑幂等：`INSERT ... ON CONFLICT(report_date,run_date,dataset,scope,metric) DO UPDATE`，
+作废只对 `origin NOT IN ('pm-api','void')` 的行生效，所以第二次跑不会重复写审计。
+
+采集元数据落 `gd_pm_fetch_run`（`UNIQUE(target_date,dataset,extractor_version)`），
+`payload` 存当天源站数值，`status` 记 ok。
+
+### 与 OCR 旧值的关系
+
+只有这两个指标两边同义（实测差 < 0.01，OCR 只是四舍五入），写进报告的 `overlap_diff`：
+
+- OCR `day_ahead_trade/发电侧/平均电价` ↔ `发电侧日前加权平均电价`
+- OCR `realtime_trade/发电侧/平均电价` ↔ `发电侧实时加权平均电价`
+
+**同名不同义，不要当新值**（报告里单列 `overlap_notes`）：
+
+| OCR | 官方 | 差异 |
+| --- | --- | --- |
+| `最高电价` / `最低电价` | `发电侧日前加权最高/最低电价` | OCR 是市场限价维度（实测固定 -50 / 1800），官方是加权极值（实测 351 / 515） |
+| `day_ahead_decl/平均电价` | `日前申报均价` | 简单均价 vs 加权均价，OCR 系统性高 2%~4% |
+
+官方表**没有**「燃煤/燃气/新能源」分电源类型拆分，也没有节点电价、申报容量、地市档位。
+这些指标切换后不再有官方更新，历史 OCR 行保留为 `void` 供追溯。
+
+## ③ 读路径（已接）
+
+`ListMetricsByRunDateRange` 的 origin 过滤放开到 `manual + pm-api`（`void` 排除），
+`spotreport.IsConfirmed` 同步把 `pm-api` 算作可信值 —— 否则切源后历史复盘页会整片空白。
+
+| 消费方 | 取数 |
+| --- | --- |
+| `GET /api/spot-market/board`（信息披露页） | 日频全套 + 月频年频全套 + 环比/同比/峰谷价差/日前-实时价差，`internal/logic/spotmarket` |
+| `forecast/price.go`（日均电价预测，未来 7 天） | 同一份 `gd_spot_metric`，指标名同时认 `平均电价`（OCR）与源站原名 `发电侧日前加权平均电价`/`发电侧实时加权平均电价` |
+| `spotreport/trend.go`（历史复盘） | 同上，`origin in (manual, pm-api)` |
+| 信息披露页前端 | **只读** `/api/spot-market/board`，不再调用 `/api/gd-metric` |
+
+`/api/gd-metric*`（第三方 CSV）仍在，但只服务「96 点分时序列」相关的页面
+（复盘 / 策略反演 / 分时预测）；官方披露接口没有分时曲线，这条读路径暂时无法替代。
+
+## 每周更新（手动执行一次）
+
+用户每周手动跑一次，**没有定时任务**：
+
+```bash
+cd <repo> && python3 OpenLEMS/tools/gdpm/gdpm_dataset.py \
+  && python3 OpenLEMS/tools/gdpm/gdpm_sqlite.py --db <ems 的 out/db.sqlite3> --apply \
+     --report /tmp/gdpm-weekly.json
+```
+
+注意：
+
+- 抓取（`gdpm_dataset.py`）会整表重拉所有模板，约 16 次请求、几十秒；`--only 现货` 只拉日频。
+- 入库是**幂等**的：`ON CONFLICT ... DO UPDATE`，重复跑不会多出行、不会重复写审计。
+- 实时（`realtime_trade`）按 **T+2** 发布，所以库里实时序列天然比日前少两天，不是缺数据；
+  第二周再跑一次，上周的价格会补齐。
+- `--apply` 之前想先看会写什么：去掉 `--apply` 加 `--report`，就是 dry-run（只算不写）。
+- 生产库务必先拷副本验证（`kubectl cp` 出来跑 dry-run + apply），确认行数再动真库。
+
+## 怎么停用 / 恢复 gdmetric 第三方 CSV
+
+开关是配置 `gd_metric.enabled`（`application/manifest/config/config.yaml`，默认 `true`），
+代码在 `application/internal/logic/gdmetric/`：
+
+- `false`（当前值）：不向第三方站点发请求，只读本地 `out/gd_metric.csv` 缓存。
+  本地没缓存时接口直接报「通道已停用，且本地无缓存」，不会静默返回空图。
+- `true`：行为回到历史（每 `refresh_hours` 拉一次，ETag 协商）。
+- 也支持环境变量 `GD_METRIC_ENABLED=false` 覆盖，便于容器里临时切换。
+
+## 保留的旧路径：VictoriaMetrics
+
+`gdpm_import.py` 把日频指标写成 prometheus 行协议推给 vminsert（`p_vm` 插件）。
+它依赖服务端 30d retention，且绕过 ems 服务层，没有 unit/source/审计，**不是权威落点**。
+VM 里的 `gdpm_*` 若要留作镜像就双写，查询一律走 `gd_spot_metric`。
+
+## 测试
 
 ```bash
 cd tools/gdpm
+python3 -m unittest test_gdpm_import test_gdpm_sqlite -v
 
-# 看要写什么（不联网写库）
-python3 gdpm_import.py --date 2026-11-10 --dry-run
+# 官方数据驱动的 7 天电价预测（需要可达的 TimesFM 服务）
+cd ../../OpenLEMS/application
+GDPM_CSV=../../data/gdpm/gdpm_long.csv FORECAST_BASE_URL=http://<predictor> \
+  go test -run TestLoadPricePMApiForecastSevenDays -v ./internal/logic/forecast/
 
-# 写一天，写完用 vmselect 回查
-python3 gdpm_import.py --date 2026-11-10 \
-  --vm-insert-url http://127.0.0.1:8480/insert/0/prometheus/api/v1/import/prometheus \
-  --vm-select-url  http://127.0.0.1:8481/select/0/prometheus
-
-# 区间（幂等：同序列同时间戳重写是覆盖）
-python3 gdpm_import.py --from 2026-11-05 --to 2026-11-10
+# 看板（区间过滤 / void 排除 / 价差配对）—— 用临时 sqlite，CI 里也跑
+go test -v ./internal/logic/spotmarket/
 ```
-
-默认地址是 cloud3 的 ClusterIP（`10.43.183.106:8480` 写 / `10.43.96.62:8481` 查），
-在集群外跑时先 `kubectl -n victoria-metrics port-forward svc/...-vminsert 8480:8480`。
-
-单测（纯函数，不联网）：`python3 test_gdpm_import.py`
-
-## 坑
-
-1. **`query_range` 有 lookbehind，别用它读日频**：没有 rollup 函数时，网格点 `ts` 的取值窗口
-   是 `[ts-step, ts]`，`step=86400` 时「当天没样本」会返回**前一天**的值（静默旧值）。
-   `--verify` 已改走 `/api/v1/export?match[]=...&start=..&end=..`，返回真实样本时间戳，
-   无数据就是空。ems 的 p_vm 插件读路径同理（见 `OpenLEMS/plugins/plug_storages/p_vm/README.md`）。
-2. **instant query（`/api/v1/query`）有 5 分钟回看窗口**，查一天前的点一定空。
-3. 源站只发布了部分日期（如 2026-11-10 实时表当天未发布）；`--from/--to` 区间里没数据的
-   日期会跳过并在 stderr 说明。
-
-## 未做（有意）
-
-月频（中长期 / 绿电 / 零售 / Top-m）和年频（HHI）这次不进 VM：保留期还没定，
-先只做日频。代码里留了 TODO，等存储位置与 retention 定了再接。

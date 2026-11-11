@@ -8,6 +8,8 @@ creds.json
 /gd_metric.csv
 gd_metric_*.csv
 gd_spot_*.csv
+# tools/gdpm 的抓取产物（日频/月频 CSV + raw JSON）：从官方接口重拉的快照，不入库
+/data/gdpm/
 
 # Python
 __pycache__/

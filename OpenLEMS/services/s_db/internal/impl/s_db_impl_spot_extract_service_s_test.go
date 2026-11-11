@@ -32,3 +32,22 @@ func TestDropConfirmedIncoming(t *testing.T) {
 		t.Fatalf("没有已确认行时应全量保留，实际 %d 条", len(got))
 	}
 }
+
+// 官方接口直采（origin=pm-api）必须算权威值：否则趋势/预测接口在切换数据源后
+// 会一条也查不到（2026-11-11 把广东现货数据切到官方 API 时就是靠这条口径取数）。
+func TestSpotOriginConfirmedIncludesPmAPI(t *testing.T) {
+	set := map[string]bool{}
+	for _, o := range spotOriginConfirmed {
+		set[o] = true
+	}
+	for _, want := range []string{"manual", "pm-api"} {
+		if !set[want] {
+			t.Fatalf("origin %q 应算已确认", want)
+		}
+	}
+	for _, notWant := range []string{"ocr", "cv", "void", ""} {
+		if set[notWant] {
+			t.Fatalf("origin %q 不该算已确认", notWant)
+		}
+	}
+}

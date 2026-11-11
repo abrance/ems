@@ -1,0 +1,1103 @@
+[
+ {
+  "nodeCode": "c29512616fcf4438ae8e5526a9e96117",
+  "nodeName": "基本信息",
+  "path": "根节点 / 电网企业 / 电网企业 / 基本信息",
+  "depth": 3,
+  "configs": [
+   "block_5c2d08eca01842f3bd651891702ddc4f",
+   "block_cf3fc39945b3413b9dc4b8a1dfcff58f",
+   "block_35f79821929e466da13dee57c901a5eb"
+  ]
+ },
+ {
+  "nodeCode": "136083801ada408c9e6084e365ef8af1",
+  "nodeName": "政府定价信息",
+  "path": "根节点 / 电网企业 / 电网企业 / 政府定价信息",
+  "depth": 3,
+  "configs": [
+   "block_f5632a263e714eec9412bbb469a3b60d"
+  ]
+ },
+ {
+  "nodeCode": "d0626cb715574093ae4af69c5d06c4ab",
+  "nodeName": "代理购电信息",
+  "path": "根节点 / 电网企业 / 电网企业 / 代理购电信息",
+  "depth": 3,
+  "configs": [
+   "block_66c171cb5360421e8243879cc3d7a48d"
+  ]
+ },
+ {
+  "nodeCode": "fc90ce716635473a909243e3f75401ba",
+  "nodeName": "全社会以及分产业用电量信息",
+  "path": "根节点 / 电网企业 / 电网企业 / 全社会以及分产业用电量信息",
+  "depth": 3,
+  "configs": [
+   "block_6e9dd32109bf4f2fb0f62ec557b7cd50"
+  ]
+ },
+ {
+  "nodeCode": "41b65fd05a9c479ab7e7e91df13ba1a4",
+  "nodeName": "需求响应情况",
+  "path": "根节点 / 电网企业 / 电网企业 / 需求响应情况",
+  "depth": 3,
+  "configs": [
+   "block_308ed549e41f4f1088f8421692509a9f"
+  ]
+ },
+ {
+  "nodeCode": "fd1883b991d348e0bb37fe538b2bb206",
+  "nodeName": "市场经营主体电费违约总体情况",
+  "path": "根节点 / 电网企业 / 电网企业 / 市场经营主体电费违约总体情况",
+  "depth": 3,
+  "configs": [
+   "block_efb1e79ee1974c7395085fee13595ae0"
+  ]
+ },
+ {
+  "nodeCode": "a699e1cbbd194b059177fb5dedceb701",
+  "nodeName": "交易机构基本信息",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 交易机构基本信息",
+  "depth": 3,
+  "configs": [
+   "block_43f56368f4094208a98aa39274a3d474",
+   "block_150ecf6fb8d24bc287bc844c344e49f0"
+  ]
+ },
+ {
+  "nodeCode": "14b929753d7f44729bd879a702724929",
+  "nodeName": "电力市场公开适用的法律法规、政策文件",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 法律法规、政策文件、规则及细则 / 电力市场公开适用的法律法规、政策文件",
+  "depth": 4,
+  "configs": [
+   "block_08e293318b804d2385becdd6764ef49e"
+  ]
+ },
+ {
+  "nodeCode": "cbd63e7563fb4858970d19480de4da26",
+  "nodeName": "可公开的电力市场规则细则类信息",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 法律法规、政策文件、规则及细则 / 可公开的电力市场规则细则类信息",
+  "depth": 4,
+  "configs": [
+   "block_129e46ea90c14a608802b4bdc15c0a12"
+  ]
+ },
+ {
+  "nodeCode": "5633167d0d494e0badc12e227b6308d7",
+  "nodeName": "交易收费标准",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 法律法规、政策文件、规则及细则 / 交易收费标准",
+  "depth": 4,
+  "configs": [
+   "block_5a4fb360384f4937b17e1bf7ad5e430d"
+  ]
+ },
+ {
+  "nodeCode": "cf9dc0ec51d34275bce73e37ec22ffa5",
+  "nodeName": "市场经营主体注册流程",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 业务标准规范 / 市场经营主体注册流程",
+  "depth": 4,
+  "configs": [
+   "block_da0372b324c04777bcdfa793a36f1a22"
+  ]
+ },
+ {
+  "nodeCode": "474380b306e64c1a886228d9a565e381",
+  "nodeName": "电力市场服务指南",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 业务标准规范 / 电力市场服务指南",
+  "depth": 4,
+  "configs": [
+   "block_168439e1c1f94e9ab5bb7dd2d20ab3e6"
+  ]
+ },
+ {
+  "nodeCode": "e3eb51cfb6ad4efc804475a5de507477",
+  "nodeName": "争议解决流程",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 业务标准规范 / 争议解决流程",
+  "depth": 4,
+  "configs": [
+   "block_74ddc23b45b84e76975c3e24339fe6e8"
+  ]
+ },
+ {
+  "nodeCode": "49e5c71821cd4ee3a9f1e0f940a08a43",
+  "nodeName": "数据通讯格式规范",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 业务标准规范 / 数据通讯格式规范",
+  "depth": 4,
+  "configs": [
+   "block_ffa49b9ff621481881e6086597e8ce47"
+  ]
+ },
+ {
+  "nodeCode": "7eb925b58b594cc392c52c96034fe3e5",
+  "nodeName": "经政府同意的市场经营主体电力交易信用信息",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 信用信息 / 经政府同意的市场经营主体电力交易信用信息",
+  "depth": 4,
+  "configs": [
+   "block_8695256d104f4d779978eb8225b5344c"
+  ]
+ },
+ {
+  "nodeCode": "e12c1f54bf0d433db21ee3a540d4b8e0",
+  "nodeName": "售电公司违约情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 信用信息 / 售电公司违约情况",
+  "depth": 4,
+  "configs": [
+   "block_75b0af2f1bf4491d9cb296f96b57fdcd"
+  ]
+ },
+ {
+  "nodeCode": "55113826f24644a685c6bd40a028cc36",
+  "nodeName": "截至上一年底各类市场经营主体注册情况，上一年度交易结算总量、均价情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 截至上一年底各类市场经营主体注册情况，上一年度交易结算总量、均价情况",
+  "depth": 4,
+  "configs": [
+   "block_f7e6b0b76b5f4c22889007c166019e44"
+  ]
+ },
+ {
+  "nodeCode": "935f3c939f3d487a8b87e04b9a644834",
+  "nodeName": "现货市场总体运行情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 现货市场总体运行情况",
+  "depth": 4,
+  "configs": [
+   "block_c721742e72f5495a913b591dd5fe8082",
+   "block_adc9bda8fb264c81bb52e7ef1006bdc9"
+  ]
+ },
+ {
+  "nodeCode": "541b11c3738d4feaa4a06118db67d886",
+  "nodeName": "年度批发电能量交易成交均价及电量等总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 年度批发电能量交易成交均价及电量等总体情况",
+  "depth": 4,
+  "configs": [
+   "block_c2d023991c88427982a6f7b21638474c",
+   "block_54a6d2f3106d49eda15a602d55ab487d"
+  ]
+ },
+ {
+  "nodeCode": "de68fe2aabf845c6b8f7759ba776c3fd",
+  "nodeName": "月度批发电能量交易成交均价及电量等总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 月度批发电能量交易成交均价及电量等总体情况",
+  "depth": 4,
+  "configs": [
+   "block_bb4fd370b0f74db592cdd23506b954af",
+   "block_d8e3f6d5b4f04a2799d89dde3c918c9c"
+  ]
+ },
+ {
+  "nodeCode": "4142ff66185e4cdd826149072313bc71",
+  "nodeName": "绿电批发交易成交均价及电量等总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 绿电批发交易成交均价及电量等总体情况",
+  "depth": 4,
+  "configs": [
+   "block_d8e3f6d5b4f04a2799d89dde3c918c9c"
+  ]
+ },
+ {
+  "nodeCode": "cbd7fa65a3804357b3c05dbf57c354dd",
+  "nodeName": "电能量、绿电零售交易成交均价及电量等总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 电能量、绿电零售交易成交均价及电量等总体情况",
+  "depth": 4,
+  "configs": [
+   "block_67e8c4e0f48c452194d1fd82a74a15e7",
+   "block_2a1fe97b1e9b4eec8606ea3f8232735e"
+  ]
+ },
+ {
+  "nodeCode": "6778974af067487abadc7099ac596419",
+  "nodeName": "退市市场经营主体名单-售电公司",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 退市市场经营主体名单 / 退市市场经营主体名单-售电公司",
+  "depth": 4,
+  "configs": [
+   "block_80ead2c4a1d44a6cb9ae6f1098988bb9"
+  ]
+ },
+ {
+  "nodeCode": "b9f0bebbd1c74169a0ca3ed2418786e6",
+  "nodeName": "退市市场经营主体名单-电力用户",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 退市市场经营主体名单 / 退市市场经营主体名单-电力用户",
+  "depth": 4,
+  "configs": [
+   "block_9e05447ea6784c60aadb5e4b1e62bfce"
+  ]
+ },
+ {
+  "nodeCode": "04186b0d8d3244f3abdbc42520568dc5",
+  "nodeName": "HHI指标",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 市场结构情况 / HHI指标",
+  "depth": 4,
+  "configs": [
+   "block_7d53d1f149e04039b2ecaa65cebb4c7a"
+  ]
+ },
+ {
+  "nodeCode": "970ad0be8f7c4c7eba2db0e651c944da",
+  "nodeName": "Top-m指标",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 市场结构情况 / Top-m指标",
+  "depth": 4,
+  "configs": [
+   "block_8a7d62872e824abe874d9fdc60ef2bc1"
+  ]
+ },
+ {
+  "nodeCode": "30be48fd5c57418987d11cf420ad51f7",
+  "nodeName": "市场暂停、中止、重新启动等情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 市场暂停、中止、重新启动等情况",
+  "depth": 3,
+  "configs": [
+   "block_98ced47d3e224f35973fb2d3e7cf63ef"
+  ]
+ },
+ {
+  "nodeCode": "800428f94fdc4320bfbbed7e801da027",
+  "nodeName": "市场信息披露报告",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 市场信息披露报告",
+  "depth": 3,
+  "configs": [
+   "block_66c080f5688b4795a7390202131bae50"
+  ]
+ },
+ {
+  "nodeCode": "00b3cdefa94845dd8801d13f32e73ef3",
+  "nodeName": "经国家能源局派出机构或者地方政府电力管理部门认定的违规行为通报情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 违规行为通报及市场干预情况 / 经国家能源局派出机构或者地方政府电力管理部门认定的违规行为通报情况",
+  "depth": 4,
+  "configs": [
+   "block_1ab54bf892b842dfbf8715c9eb7d411f"
+  ]
+ },
+ {
+  "nodeCode": "3008a439e8974d5fa9cc5f697683be58",
+  "nodeName": "经国家能源局派出机构或者地方政府电力管理部门认定的市场干预情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 违规行为通报及市场干预情况 / 经国家能源局派出机构或者地方政府电力管理部门认定的市场干预情况",
+  "depth": 4,
+  "configs": [
+   "block_3cad93e53d5b4a54bd7b7ff00c7a1721"
+  ]
+ },
+ {
+  "nodeCode": "b8bbcaad18bf490b91d2472d8b26b8e4",
+  "nodeName": "交易机构经审计的收支总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 交易机构经审计的收支总体情况",
+  "depth": 3,
+  "configs": [
+   "block_15f910f747b04f5294e1a305d525bd2e"
+  ]
+ },
+ {
+  "nodeCode": "4eb3b39f25114af1850bb2b1b05a05d9",
+  "nodeName": "交易日历",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 交易日历",
+  "depth": 3,
+  "configs": [
+   "block_9852001e0fec4ec4931742531faa8c35",
+   "block_7444b0736db24105bc547a3b53528750"
+  ]
+ },
+ {
+  "nodeCode": "c5ad7507807a4c6b80b6748cb073bab7",
+  "nodeName": "交易公告",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 交易公告",
+  "depth": 3,
+  "configs": [
+   "block_e1337f8f98e7472ebd6bbae532d615c3"
+  ]
+ },
+ {
+  "nodeCode": "7572debf8efd49d8a8e35b04fa11cc82",
+  "nodeName": "中长期交易主体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 中长期交易申报及成交情况 / 中长期交易主体情况",
+  "depth": 4,
+  "configs": [
+   "block_9b2bedaa00ba40b383e36b8ba3c03f31"
+  ]
+ },
+ {
+  "nodeCode": "a54e58c6f7e742759118868bb38f0fb4",
+  "nodeName": "分电源类型的中长期交易成交情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 中长期交易申报及成交情况 / 分电源类型的中长期交易成交情况",
+  "depth": 4,
+  "configs": [
+   "block_7a93f960678444ffbb8acc26796008f4"
+  ]
+ },
+ {
+  "nodeCode": "fd4c0bb4490643569e7f2e9929a30c4e",
+  "nodeName": "中长期多月双边和多月连续集中交易情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 中长期交易申报及成交情况 / 中长期多月双边和多月连续集中交易情况",
+  "depth": 4,
+  "configs": [
+   "block_7d51eea065f946a4a3d5f74d7b78223b"
+  ]
+ },
+ {
+  "nodeCode": "24f88264298543d09356286f06b9631e",
+  "nodeName": "绿电交易参与主体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 绿电交易申报及成交情况 / 绿电交易参与主体情况",
+  "depth": 4,
+  "configs": [
+   "block_019105ee0c0b4154a0414341bfaafd40"
+  ]
+ },
+ {
+  "nodeCode": "6e2d695037b14015ad11be96c7fe589c",
+  "nodeName": "分电源类型的绿电交易成交情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 绿电交易申报及成交情况 / 分电源类型的绿电交易成交情况",
+  "depth": 4,
+  "configs": [
+   "block_db5debdc303f4273b2e314d16cc37da5"
+  ]
+ },
+ {
+  "nodeCode": "6747929c682a4cd8812fad312294c712",
+  "nodeName": "所有电源类型加总的绿电交易情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 绿电交易申报及成交情况 / 所有电源类型加总的绿电交易情况",
+  "depth": 4,
+  "configs": [
+   "block_bfe2779885544a97b0ed006bb730d2f6"
+  ]
+ },
+ {
+  "nodeCode": "48938d469a6c4423a8ad5c296944c443",
+  "nodeName": "省间交易计划",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 省间交易计划",
+  "depth": 3,
+  "configs": [
+   "block_9d87ab6e23d7480db07b8961bb67de58"
+  ]
+ },
+ {
+  "nodeCode": "db8d9bbf88a949b098ca9762c3a2eded",
+  "nodeName": "结算总体情况及分类构成情况（日）",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 结算情况 / 结算总体情况及分类构成情况（日）",
+  "depth": 4,
+  "configs": [
+   "block_70b189f330a04fa9980ad4bd627afc92"
+  ]
+ },
+ {
+  "nodeCode": "64f51b14f1f24830b15d1ad3b6987380",
+  "nodeName": "结算总体情况及分类构成情况（月）",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 结算情况 / 结算总体情况及分类构成情况（月）",
+  "depth": 4,
+  "configs": [
+   "block_f954316a31d34af687213706e7fb688f"
+  ]
+ },
+ {
+  "nodeCode": "c339079305934548b2ed2bee0d78e3de",
+  "nodeName": "绿电交易结算情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 结算情况 / 绿电交易结算情况",
+  "depth": 4,
+  "configs": [
+   "block_8bd4ed94e03b483bb5bcc36e8e74f511"
+  ]
+ },
+ {
+  "nodeCode": "434f710103e6454a96e7f853f49b6451",
+  "nodeName": "省间交易结算情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 结算情况 / 省间交易结算情况",
+  "depth": 4,
+  "configs": [
+   "block_da5d9705796c4278a4224f1cd6ec704c"
+  ]
+ },
+ {
+  "nodeCode": "3b5c014143d64fc8b67f6685408e9ea1",
+  "nodeName": "不平衡资金构成、分摊和分享情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 结算情况 / 不平衡资金构成、分摊和分享情况",
+  "depth": 4,
+  "configs": [
+   "block_35bcd96a39c44b0084426de5b09f8933"
+  ]
+ },
+ {
+  "nodeCode": "69aca81b1d174c95b311f3e4b42325e6",
+  "nodeName": "偏差考核情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 结算情况 / 偏差考核情况",
+  "depth": 4,
+  "configs": [
+   "block_4be815a7e6be47148ef7d50dcde546a8"
+  ]
+ },
+ {
+  "nodeCode": "f2e5d580a4a94ff5a88d36464732ff50",
+  "nodeName": "售电公司结算总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 售电公司结算总体情况",
+  "depth": 3,
+  "configs": [
+   "block_b12a7b565c274887bbe8af09388a2ae9"
+  ]
+ },
+ {
+  "nodeCode": "ff702beef0f147b5acbb051416c6bc1a",
+  "nodeName": "各售电公司结合资产总额确定的售电规模限额",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 售电公司履约保障凭证情况 / 各售电公司结合资产总额确定的售电规模限额",
+  "depth": 4,
+  "configs": [
+   "block_58fd2edb99e04ec084f045991bd41234"
+  ]
+ },
+ {
+  "nodeCode": "baaae8f442a64fdc9ac2dc63be6e1c7c",
+  "nodeName": "各售电公司履约担保缴纳、执行情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 售电公司履约保障凭证情况 / 各售电公司履约担保缴纳、执行情况",
+  "depth": 4,
+  "configs": [
+   "block_007b7d91041b45cabbaff580f993a830"
+  ]
+ },
+ {
+  "nodeCode": "baf45f15c00b4a628c64f874ad1b2e06",
+  "nodeName": "交易总体情况",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 交易总体情况",
+  "depth": 3,
+  "configs": [
+   "block_60903128c495412380ada7595af1c0a0",
+   "block_cc4625bb9fc14c9ead9be998121abe71",
+   "block_d8e3f6d5b4f04a2799d89dde3c918c9c",
+   "block_54a6d2f3106d49eda15a602d55ab487d",
+   "block_c2d023991c88427982a6f7b21638474c",
+   "block_9d14c1f98ebc4cdf882331495c63a6c9"
+  ]
+ },
+ {
+  "nodeCode": "e551be3c3fa84c3693ef3f6eaaca8c5d",
+  "nodeName": "到期未取得电力业务许可证的市场经营主体名单",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 到期未取得电力业务许可证的市场经营主体名单",
+  "depth": 3,
+  "configs": [
+   "block_0d1531eb786249ffb4d5c2c1498ebcbd"
+  ]
+ },
+ {
+  "nodeCode": "1e26d71b2d1b4d8cb9f51753c9a56649",
+  "nodeName": "市场干预情况原始日志",
+  "path": "根节点 / 市场运营机构 / 电力交易机构 / 市场干预情况原始日志",
+  "depth": 3,
+  "configs": [
+   "block_a1553263baf9440f80a9649f8d8aa25a"
+  ]
+ },
+ {
+  "nodeCode": "7ff6c2aa0e884322b780e0c1b9cc486c",
+  "nodeName": "负荷预测方法和流程",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 业务标准规范 / 负荷预测方法和流程",
+  "depth": 4,
+  "configs": [
+   "block_6c16d8fcf9094a8cadf6bcb2c0f38a34"
+  ]
+ },
+ {
+  "nodeCode": "2a0fa7c147604596b161edd3a3c33337",
+  "nodeName": "辅助服务需求计算方法",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 业务标准规范 / 辅助服务需求计算方法",
+  "depth": 4,
+  "configs": [
+   "block_318b0506e98144ea99eca9c86d2adf2f"
+  ]
+ },
+ {
+  "nodeCode": "a0f2554d6b3f44e7a1c3446758777268",
+  "nodeName": "电网安全校核规范",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 业务标准规范 / 电网安全校核规范",
+  "depth": 4,
+  "configs": [
+   "block_039b69bc0d514c53a5c31ee6f91f3145"
+  ]
+ },
+ {
+  "nodeCode": "aed9ae8e391242c8b96c0f4826de5645",
+  "nodeName": "电力现货市场第三方校验报告",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 电力现货市场第三方校验报告",
+  "depth": 3,
+  "configs": [
+   "block_df8acf6b6b3349e582d6c407cec0c753"
+  ]
+ },
+ {
+  "nodeCode": "a358a516000f4e76b035ec5aa8243f0e",
+  "nodeName": "电网主要网络通道示意图",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 电网主要网络通道示意图",
+  "depth": 3,
+  "configs": [
+   "block_c300d5a405144c3e8ac7fcf53c40e76b"
+  ]
+ },
+ {
+  "nodeCode": "3620cfd34aab4eba9ad42c22bf25f102",
+  "nodeName": "发输变电设备投产、退役计划（年）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 发输变电设备投产、退役计划（年）",
+  "depth": 4,
+  "configs": [
+   "block_579b771fdaa74764accbe19d71c97930"
+  ]
+ },
+ {
+  "nodeCode": "38680ee0a77a4414bad78fdb7dd60a36",
+  "nodeName": "发输变电设备投产、退役计划（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 发输变电设备投产、退役计划（月）",
+  "depth": 4,
+  "configs": [
+   "block_322442d3a1ea406bb0df54822b135110"
+  ]
+ },
+ {
+  "nodeCode": "967c75eaeddc4b64a65e089db7ee3b1b",
+  "nodeName": "发输变电设备检修计划（年）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 发输变电设备检修计划（年）",
+  "depth": 4,
+  "configs": [
+   "block_c32b8b16dd314ea0a8be9205716ad195"
+  ]
+ },
+ {
+  "nodeCode": "4aac6ac4eacb4736a1a8f6bd97ca465f",
+  "nodeName": "发输变电设备检修计划（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 发输变电设备检修计划（月）",
+  "depth": 4,
+  "configs": [
+   "block_918c6d9bfe73449593d9e4c7a769205e"
+  ]
+ },
+ {
+  "nodeCode": "81ebb788c1794774853aaef3aef175a3",
+  "nodeName": "发输变电设备检修计划（日）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 发输变电设备检修计划（日）",
+  "depth": 4,
+  "configs": [
+   "block_14377c3469cd471a9026eddfd320611b"
+  ]
+ },
+ {
+  "nodeCode": "20613377af9b4207bbdf0c1596290762",
+  "nodeName": "省间联络线输电可用容量（年）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 省间联络线输电可用容量（年）",
+  "depth": 4,
+  "configs": [
+   "block_4ffbc81535534f40a34ce02397023a2a"
+  ]
+ },
+ {
+  "nodeCode": "0ae9d9a4273945c99f7a7e11bb6c4522",
+  "nodeName": "省间联络线输电可用容量（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 省间联络线输电可用容量（月）",
+  "depth": 4,
+  "configs": [
+   "block_574f319920d74764916e8574ab8d1ded"
+  ]
+ },
+ {
+  "nodeCode": "3b09fadd44554dffbf809c7026e3f236",
+  "nodeName": "省间联络线输电可用容量（周）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 省间联络线输电可用容量（周）",
+  "depth": 4,
+  "configs": [
+   "block_7561ff5d4d894c07a3d40dc891509329"
+  ]
+ },
+ {
+  "nodeCode": "4b7609fee7774052983567db4dcc00ec",
+  "nodeName": "省内关键输电断面可用容量（年）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 省内关键输电断面可用容量（年）",
+  "depth": 4,
+  "configs": [
+   "block_f619a57eba4b49f38f810cba129af304"
+  ]
+ },
+ {
+  "nodeCode": "8749dee46711452c8f92f448e30e9a6a",
+  "nodeName": "省内关键输电断面可用容量（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 省内关键输电断面可用容量（月）",
+  "depth": 4,
+  "configs": [
+   "block_886cadad4de2455aacc0cbc4a06c5ba8"
+  ]
+ },
+ {
+  "nodeCode": "58d0bb8e81984f9b95a76e27f4ffe66c",
+  "nodeName": "省内关键输电断面可用容量（周）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 省内关键输电断面可用容量（周）",
+  "depth": 4,
+  "configs": [
+   "block_48fbd014a63240538573194c0dfe0a4b"
+  ]
+ },
+ {
+  "nodeCode": "26f69d78c3b84eaf97f49196eea5526a",
+  "nodeName": "必开必停机组名单及总容量",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 必开必停机组名单及总容量",
+  "depth": 4,
+  "configs": [
+   "block_86484bf722e34e728b688b8122d730ff",
+   "block_a0e8f1d17f874fe5853d05f972a42a6d"
+  ]
+ },
+ {
+  "nodeCode": "3a4b9460cd53491c9509ddb5bfe89fc4",
+  "nodeName": "开停机不满最小约束时间机组名单",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 约束信息 / 开停机不满最小约束时间机组名单",
+  "depth": 4,
+  "configs": [
+   "block_ee9e67721cc942e8aaa250ed9728bbfe"
+  ]
+ },
+ {
+  "nodeCode": "c0c27170fccb40a88bff2a121013353d",
+  "nodeName": "市场出清模块算法及运行参数",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 参数信息 / 市场出清模块算法及运行参数",
+  "depth": 4,
+  "configs": [
+   "block_9c4a8e525a3e419d820a956ea4e5ff72"
+  ]
+ },
+ {
+  "nodeCode": "97955b4551ff48e99efe32e3d23a5d64",
+  "nodeName": "价格限值",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 参数信息 / 价格限值",
+  "depth": 4,
+  "configs": [
+   "block_4461f48b885d43f4917a3a2b7a112113"
+  ]
+ },
+ {
+  "nodeCode": "3c9f9a45c70c4d6ab035c9f3b7581ecd",
+  "nodeName": "约束松弛惩罚因子",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 参数信息 / 约束松弛惩罚因子",
+  "depth": 4,
+  "configs": [
+   "block_5cd55f4d838547079d38633f351427a8"
+  ]
+ },
+ {
+  "nodeCode": "208cc2a9a4a9425482f47db3e8357b0b",
+  "nodeName": "发电机组装机及发电总体情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 发电机组装机及发电总体情况",
+  "depth": 3,
+  "configs": [
+   "block_b66cf1d870bd4be3bd56242d566d5904"
+  ]
+ },
+ {
+  "nodeCode": "c67d8a415b21485a99effc917101aa9a",
+  "nodeName": "年度供需实际情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 年度供需实际情况",
+  "depth": 3,
+  "configs": [
+   "block_8aa76630b23648bb8ed294df9624ad52"
+  ]
+ },
+ {
+  "nodeCode": "13c20137edf34642987bf201fb8ad5a8",
+  "nodeName": "年度电力电量供需预测",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 年度电力电量供需预测",
+  "depth": 3,
+  "configs": [
+   "block_4333c770663a4693ab3ac451214a4e47"
+  ]
+ },
+ {
+  "nodeCode": "7db2cedd27b244c1b5c76b06df773d8c",
+  "nodeName": "系统负荷预测（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 系统负荷预测（月）",
+  "depth": 4,
+  "configs": [
+   "block_3028e8b6312340bb8628e976322a6c51"
+  ]
+ },
+ {
+  "nodeCode": "99d3baa3a0814ce2a62952661a1bca0d",
+  "nodeName": "系统负荷预测（周）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 系统负荷预测（周）",
+  "depth": 4,
+  "configs": [
+   "block_335799bfcf0547358518dd82d8e14839"
+  ]
+ },
+ {
+  "nodeCode": "b59b100a90ed404d82b158c36ee0523b",
+  "nodeName": "系统负荷预测（日）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 系统负荷预测（日）",
+  "depth": 4,
+  "configs": [
+   "block_c1e0cda300de4ab59b7e33be11e1f1b2"
+  ]
+ },
+ {
+  "nodeCode": "5e1fad37f4e1497496430c634877e517",
+  "nodeName": "电力电量供需平衡预测（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 电力电量供需平衡预测（月）",
+  "depth": 4,
+  "configs": [
+   "block_f12343b672414d45a0a4ec5fca4f187d"
+  ]
+ },
+ {
+  "nodeCode": "9b7f90ae6242473a8114f4300e962b74",
+  "nodeName": "电力电量供需平衡预测（日）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 电力电量供需平衡预测（日）",
+  "depth": 4,
+  "configs": [
+   "block_752ede2801b64b698f815593a707dbe6"
+  ]
+ },
+ {
+  "nodeCode": "21ed14757f48444b804770a0ea595a73",
+  "nodeName": "各电网电力平衡预测",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 各电网电力平衡预测",
+  "depth": 4,
+  "configs": [
+   "block_c3727507368a446c835c2aa8f1c53a4c"
+  ]
+ },
+ {
+  "nodeCode": "d3f15a260869424096788a7cf6b97a4d",
+  "nodeName": "省间联络线输电曲线预测",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 省间联络线输电曲线预测",
+  "depth": 4,
+  "configs": [
+   "block_960a2a5723eb436da78479de216e01aa"
+  ]
+ },
+ {
+  "nodeCode": "ec18dd385a5c4051a86e15c89c6947df",
+  "nodeName": "发电总出力预测",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 发电总出力预测",
+  "depth": 4,
+  "configs": [
+   "block_0be06e4dd2ef4ceeb04c46b2ae2b56d8"
+  ]
+ },
+ {
+  "nodeCode": "d31ff38af78a44eb9e601acaba3ce473",
+  "nodeName": "非市场机组总出力预测",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 非市场机组总出力预测",
+  "depth": 4,
+  "configs": [
+   "block_1087453c842f4feebcae882b4e5ac4c5"
+  ]
+ },
+ {
+  "nodeCode": "8571fda124d343779e011e9a514ce91c",
+  "nodeName": "新能源总出力预测（周）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 新能源总出力预测（周）",
+  "depth": 4,
+  "configs": [
+   "block_44fa52055d814d15bdc5d8e28193da22"
+  ]
+ },
+ {
+  "nodeCode": "0905001670474ec183e647a5b47dc8eb",
+  "nodeName": "新能源总出力预测（日）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 新能源总出力预测（日）",
+  "depth": 4,
+  "configs": [
+   "block_84333b9c12c94066bf86b1f8df287af3"
+  ]
+ },
+ {
+  "nodeCode": "5f8af1dfa5cc4e64b62c9407b7205ec3",
+  "nodeName": "水电（含抽蓄）总出力预测（周）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 水电（含抽蓄）总出力预测（周）",
+  "depth": 4,
+  "configs": [
+   "block_ad9978e7c9414d43aefa717de4e7a19c"
+  ]
+ },
+ {
+  "nodeCode": "db7a0708a9794fad80045171994821c3",
+  "nodeName": "水电（含抽蓄）总出力预测（日）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 预测信息 / 水电（含抽蓄）总出力预测（日）",
+  "depth": 4,
+  "configs": [
+   "block_7d46d222316a41e5ba06920dc8f84ecd"
+  ]
+ },
+ {
+  "nodeCode": "d655bc1eedb5424592d2a875ed599042",
+  "nodeName": "各类辅助服务需求总量",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 辅助服务需求信息 / 各类辅助服务需求总量",
+  "depth": 4,
+  "configs": [
+   "block_34a0203cfe60464a80d3eb2f81a968fe"
+  ]
+ },
+ {
+  "nodeCode": "0bed41abcaaf4ced9a35e3b86abf7fb6",
+  "nodeName": "具备参与辅助服务市场的机组台数及容量、用户及售电公司个数",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 辅助服务需求信息 / 具备参与辅助服务市场的机组台数及容量、用户及售电公司个数",
+  "depth": 4,
+  "configs": [
+   "block_fe9b013a64e048a480f327456cea8187"
+  ]
+ },
+ {
+  "nodeCode": "e2ad3e9ab756442b8033fab7a229c72b",
+  "nodeName": "现货市场申报，出清信息",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 现货市场申报、出清信息 / 现货市场申报，出清信息",
+  "depth": 4,
+  "configs": [
+   "block_2a75ec0099d74878a3ad454bb7205d37",
+   "block_aed1723b26a24270a90d4cc402e07d12",
+   "block_21639d4b9f1d49298de87ee7acd1528b",
+   "block_5181977258fa42d5a4ad73e7adf3b5c8",
+   "block_8a007894ef5b455a93a2ce5759872fc2",
+   "block_07895fc467dd4598b353b2730d566e53"
+  ]
+ },
+ {
+  "nodeCode": "79411bd76a9a4f5e8e6df4325699f9d4",
+  "nodeName": "交易时间单元所有节点的节点边际电价",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 现货市场申报、出清信息 / 交易时间单元所有节点的节点边际电价",
+  "depth": 4,
+  "configs": [
+   "block_38fc0fc8282f40f8b0f3bae8a08d4334",
+   "block_195466160f9f4b888d8da111de4ad409"
+  ]
+ },
+ {
+  "nodeCode": "8bd8ec3ae86f4373aa21c5cf1af1f577",
+  "nodeName": "各节点边际电价的电能量、阻塞各分量价格",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 现货市场申报、出清信息 / 各节点边际电价的电能量、阻塞各分量价格",
+  "depth": 4,
+  "configs": [
+   "block_26efa322fea44af2839d17f1c35482a9",
+   "block_7e49ff3461ab40b3a8b49283f8bf7178"
+  ]
+ },
+ {
+  "nodeCode": "95f9639c804d4061ac7ae68ae5932605",
+  "nodeName": "辅助服务市场申报、出清信息",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 辅助服务市场申报、出清信息",
+  "depth": 3,
+  "configs": [
+   "block_a80eab4cc3df41649ec770eff926a568"
+  ]
+ },
+ {
+  "nodeCode": "bcc25842253d43e98a24e752cc2bf133",
+  "nodeName": "日前、实时市场各时段出清的断面约束及阻塞情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 日前、实时市场各时段出清的断面约束及阻塞情况",
+  "depth": 3,
+  "configs": [
+   "block_a44390be3397459f9ebf71074e5057a0"
+  ]
+ },
+ {
+  "nodeCode": "99fb3819cabb4c1ebd8e2eb2bc8b06fe",
+  "nodeName": "机组状态",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 机组状态",
+  "depth": 4,
+  "configs": [
+   "block_da0dd5f1bbd741ef99914ffd309a3ee2"
+  ]
+ },
+ {
+  "nodeCode": "ebd72a0da48c4ce3b8e67feec5e3b78d",
+  "nodeName": "发电总出力",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 发电总出力",
+  "depth": 4,
+  "configs": [
+   "block_04ec00a437ed4166bdfa8f3cf9fcc8a1"
+  ]
+ },
+ {
+  "nodeCode": "3bf6aa98582a4e3894ce880eaa145e46",
+  "nodeName": "非市场机组总出力",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 非市场机组总出力",
+  "depth": 4,
+  "configs": [
+   "block_8b4754fcd0f649d28d0115c489d5d4f4"
+  ]
+ },
+ {
+  "nodeCode": "a9315037e0894817ba0788ec73e1e492",
+  "nodeName": "新能源总出力",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 新能源总出力",
+  "depth": 4,
+  "configs": [
+   "block_70afa54dbd16404b8c0e04c4f738c73e"
+  ]
+ },
+ {
+  "nodeCode": "84392718fa6d4a7c9714c60f29378d4c",
+  "nodeName": "水电（含抽蓄）总出力",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 水电（含抽蓄）总出力",
+  "depth": 4,
+  "configs": [
+   "block_31b00b412da2448eaef119e050ad2926"
+  ]
+ },
+ {
+  "nodeCode": "cf4e3727a33147c0bc264f6b9c23550e",
+  "nodeName": "实际负荷",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 实际负荷",
+  "depth": 4,
+  "configs": [
+   "block_f2d972410b2744b7ac9eb793014b85a7"
+  ]
+ },
+ {
+  "nodeCode": "b70192f297bd44e49ddb43deaf382c20",
+  "nodeName": "系统备用信息",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 系统备用信息",
+  "depth": 4,
+  "configs": [
+   "block_030968c2d688452081560404938e4057"
+  ]
+ },
+ {
+  "nodeCode": "f9ad9c32209141f4bb49dd43a6491175",
+  "nodeName": "重要通道实际输电情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 重要通道实际输电情况",
+  "depth": 4,
+  "configs": [
+   "block_50a3b0b5cbe04c799d24bf2616f3555a"
+  ]
+ },
+ {
+  "nodeCode": "4b23375cfe5c497b87c0c0d4c86d9ad7",
+  "nodeName": "实际运行输电断面约束情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 实际运行输电断面约束情况",
+  "depth": 4,
+  "configs": [
+   "block_0f341e9c3e804b8d8a50d289388b1a13"
+  ]
+ },
+ {
+  "nodeCode": "5af815da69094a7d930a367d4a4abf1b",
+  "nodeName": "省间联络线输电情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 省间联络线输电情况",
+  "depth": 4,
+  "configs": [
+   "block_8c7c949485d1486b9972ce2e7a493b9a"
+  ]
+ },
+ {
+  "nodeCode": "301c6f196eec44c99970ff514b60699b",
+  "nodeName": "重要线路与变压器平均潮流",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 重要线路与变压器平均潮流",
+  "depth": 4,
+  "configs": [
+   "block_bfaa79e659c740e496ea49bbcfddc084"
+  ]
+ },
+ {
+  "nodeCode": "23d80d4f866a48bda1ad65a079f15afc",
+  "nodeName": "发输变电设备投产、退役、检修、改造等计划执行情况（月）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 发输变电设备投产、退役、检修、改造等计划执行情况（月）",
+  "depth": 4,
+  "configs": [
+   "block_478d0490118c4702957103d1574b332e"
+  ]
+ },
+ {
+  "nodeCode": "21c5a761ee1b4cdcbfac5035a7ababb7",
+  "nodeName": "发输变电设备投产、退役、检修、改造等计划执行情况（日）",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 发输变电设备投产、退役、检修、改造等计划执行情况（日）",
+  "depth": 4,
+  "configs": [
+   "block_3f328f18f79d42bebd7f0500c862bd53"
+  ]
+ },
+ {
+  "nodeCode": "f3453e2a965b4f1f85e1d025034e3066",
+  "nodeName": "重要线路实际停运情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 重要线路实际停运情况",
+  "depth": 4,
+  "configs": [
+   "block_cf35a61a63554d4a88149558d4c4c191"
+  ]
+ },
+ {
+  "nodeCode": "2844489c2bfd435d951b3e839eaee77c",
+  "nodeName": "发电机组非停情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 发电机组非停情况",
+  "depth": 4,
+  "configs": [
+   "block_a8fe374a98994e98b580f4fcfea8f4df"
+  ]
+ },
+ {
+  "nodeCode": "15f6bc19a8624742b7cd4c12a4717025",
+  "nodeName": "电网负荷总体情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 运行信息 / 电网负荷总体情况",
+  "depth": 4,
+  "configs": [
+   "block_2cd79a7f0a8944689db4be4ed7160cf0"
+  ]
+ },
+ {
+  "nodeCode": "42973fc2164c45a884bfc48db735421e",
+  "nodeName": "电力并网运行管理考核和返还明细",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 电力并网运行管理考核和返还明细",
+  "depth": 3,
+  "configs": [
+   "block_a4c1a75d9981486d900baad42b52d5b0"
+  ]
+ },
+ {
+  "nodeCode": "a8fca3e0f5d64f489507c7b3566832b0",
+  "nodeName": "电力辅助服务考核、补偿和分摊明细",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 电力辅助服务考核、补偿和分摊明细",
+  "depth": 3,
+  "configs": [
+   "block_e40764c0bad84157a020929d82cf000b"
+  ]
+ },
+ {
+  "nodeCode": "1a7d979ede58402c8c02be9873b8a791",
+  "nodeName": "发电机组转商情况",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 发电机组转商情况",
+  "depth": 3,
+  "configs": [
+   "block_4623bd584c6848cbb82a1cf09b14c44f"
+  ]
+ },
+ {
+  "nodeCode": "91d4c33aa5d940bd8fa6d3791ec872cf",
+  "nodeName": "市场干预情况原始日志",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 市场干预情况原始日志",
+  "depth": 3,
+  "configs": [
+   "block_2259e7ff0957409295a73a3ae6071c0c"
+  ]
+ },
+ {
+  "nodeCode": "47e86f9ba953401684810004534d7dd3",
+  "nodeName": "220千伏及以上电源送出工程建设投产、退出和检修计划",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 输变电设备建设、投产、退出和检修等情况 / 220千伏及以上电源送出工程建设投产、退出和检修计划",
+  "depth": 4,
+  "configs": [
+   "block_6207067afe2c410eae8923ec19f24dfb"
+  ]
+ },
+ {
+  "nodeCode": "5fa8bc7cba3e41d1bf1be04b9baddb99",
+  "nodeName": "220kV及以上输变电设备年度建设投产规模",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 输变电设备建设、投产、退出和检修等情况 / 220kV及以上输变电设备年度建设投产规模",
+  "depth": 4,
+  "configs": [
+   "block_685551bf11464115a4dd838984cc9756"
+  ]
+ },
+ {
+  "nodeCode": "2bd032f8bd6148d7b6e78c3ac6c76483",
+  "nodeName": "省间联络线工程建设投产计划",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 输变电设备建设、投产、退出和检修等情况 / 省间联络线工程建设投产计划",
+  "depth": 4,
+  "configs": [
+   "block_573350aca5c246738a219e6c971ef0bf"
+  ]
+ },
+ {
+  "nodeCode": "7f7b67fd2da04bfa9a098dad0aa866b3",
+  "nodeName": "现货环境下调度指标自评价",
+  "path": "根节点 / 市场运营机构 / 电力调度机构 / 现货环境下调度指标自评价",
+  "depth": 3,
+  "configs": [
+   "block_703ca326d56c46ee9d799e43f9c83a2e"
+  ]
+ }
+]

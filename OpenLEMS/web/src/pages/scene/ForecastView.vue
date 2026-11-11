@@ -11,8 +11,8 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  *
  * 两个视图的**序列源不同**，不是同一份数据的两种画法：
  *
- *   平均（grain=day）     —— 日报已确认（origin=manual）的日均成交价，一天一个点，
- *                            出「未来多日日均价 + 分位带」。
+ *   平均（grain=day）     —— 官方直采（origin=pm-api）的日均成交价，一天一个点，
+ *                            出「未来 7 天日均价 + 分位带」。
  *   分时（grain=intraday）—— 电网日指标 CSV（gd_metric.csv）的 15 分钟电价，
  *                            送 30 天 × 96 点历史，出未来 5 日 × 96 点。
  *
@@ -20,7 +20,8 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  * 这一页原先写「分时待数据源、要等图4 纳入提取」是判断错了 —— 后端 `grain=intraday`
  * 早就实现了，缺的只是这个视图。
  *
- * 上限 5 日：96 × 5 = 480 ≤ TimesFM max_horizon 512。
+ * 日均视图默认出**未来 7 天**（滚动一周，信息披露页与预测页对同一口径）。
+ * 分时上限 5 日：96 × 5 = 480 ≤ TimesFM max_horizon 512。
  *
  * TimesFM 是 CPU 推理（后端缓存 5 分钟），所以区分「查询」（走缓存）与
  * 「刷新预测」（forceRefresh 穿透），不让人每次切页都在打模型。
@@ -38,13 +39,13 @@ const INTRA_MAX_DAYS = 5
 
 const market = ref('ahead')
 const view = ref<'day' | 'intraday'>('day')
-const horizonDays = ref(5)
+const horizonDays = ref(7)
 const data = ref<PriceForecast | null>(null)
 const loading = ref(false)
 const error = ref('')
 
 const isIntraday = computed(() => view.value === 'intraday')
-const horizons = computed(() => (isIntraday.value ? [1, 2, 3, 4, 5] : [5, 10, 15]))
+const horizons = computed(() => (isIntraday.value ? [1, 2, 3, 4, 5] : [7, 14, 21]))
 
 async function load(force = false) {
   loading.value = true
@@ -442,15 +443,15 @@ onMounted(() => load(false))
       </PanelBox>
 
       <PanelBox
-        title="未来多日日均价预测"
-        sub="历史（已确认）+ 预测中位 + 10%/90% 分位"
+        title="未来 7 天日均价预测（滚动）"
+        sub="历史（官方直采 pm-api）+ 预测中位 + 10%/90% 分位"
         :span="12"
         :loading="loading"
         foot="虚线为预测；分位带越宽说明模型越不确定"
       >
         <div v-if="dayRows.length" ref="dayChartEl" class="chart" />
         <div v-else-if="!loading" class="empty">
-          没有预测结果。需要日报里有足够的历史日均成交价（至少 7 天已确认）。
+          没有预测结果。需要库里有足够的历史日均成交价（官方直采，至少 7 天）。
         </div>
       </PanelBox>
 

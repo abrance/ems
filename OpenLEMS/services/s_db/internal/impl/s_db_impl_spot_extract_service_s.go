@@ -15,9 +15,25 @@ import (
 
 type sSpotExtractServiceImpl struct{}
 
-// spotOriginManual 已确认（人工确认或修订过）的 origin 值。
-// 口径：origin=manual 才算已确认，ocr/cv 以及老库空串都是未复核。
-const spotOriginManual = "manual"
+// spotOriginManual 人工确认/修订过的 origin 值。
+// 口径：origin 在 spotOriginConfirmed 内才算「有权威值」——
+//
+//	manual  = 人工确认或修订过；
+//	pm-api  = 广东电力交易中心官方接口直采（2026-11-11 起唯一权威源，取代 OCR）。
+//
+// ocr/cv/void 以及老库空串都是未复核或已作废。
+const (
+	spotOriginManual = "manual"
+	spotOriginPmAPI  = "pm-api"
+)
+
+var spotOriginConfirmed = []string{spotOriginManual, spotOriginPmAPI}
+
+// isConfirmedOrigin 该 origin 是否已是可信值（无需再复核）。与 application 侧
+// spotreport.IsConfirmed 同一口径；两边都能"确认"数据，口径必须一致。
+func isConfirmedOrigin(origin string) bool {
+	return origin == spotOriginManual || origin == spotOriginPmAPI
+}
 
 var (
 	spotExtractServiceInstance s_db_basic.ISpotExtractService
@@ -51,7 +67,7 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 		var confirmed []*s_db_model.SSpotMetricModel
 		if err := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 			Where(s_db_model.FieldSpotMetricReportDate, reportDate).
-			Where(s_db_model.FieldSpotMetricOrigin, "manual").
+			WhereIn(s_db_model.FieldSpotMetricOrigin, spotOriginConfirmed).
 			Scan(&confirmed); err != nil {
 			return err
 		}
@@ -65,7 +81,7 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 					"report_date": m.ReportDate, "run_date": m.RunDate, "dataset": m.Dataset,
 					"scope": m.Scope, "metric": m.Metric, "old_value": m.Value,
 					"new_value":  newValue,
-					"old_origin": "manual", "operation": s_db_model.SpotMetricAuditOverwrite,
+					"old_origin": m.Origin, "operation": s_db_model.SpotMetricAuditOverwrite,
 					"operator": "extract", "created_at": now,
 				}
 				if _, err := tx.Model(s_db_model.TableSpotMetricAudit).Ctx(ctx).Data(row).Insert(); err != nil {
@@ -232,7 +248,9 @@ func (s *sSpotExtractServiceImpl) ConfirmMetrics(ctx context.Context, reportDate
 		}
 		rows := make([]*s_db_model.SSpotMetricModel, 0, len(all))
 		for _, r := range all {
-			if r.Origin == "manual" {
+			// 已确认（manual）与官方直采（pm-api）都不该被「确认」改写成 manual：
+			// 后者一旦被翻成 manual 就丢了来源标记，再也分不出哪条是官方直采
+			if isConfirmedOrigin(r.Origin) {
 				continue
 			}
 			rows = append(rows, r)
@@ -291,7 +309,7 @@ func (s *sSpotExtractServiceImpl) CountMetricsByReport(ctx context.Context) (map
 	out := make(map[string]s_db_basic.SpotMetricCounts, len(rows))
 	for _, r := range rows {
 		c := out[r.ReportDate]
-		if r.Origin == "manual" {
+		if isConfirmedOrigin(r.Origin) {
 			c.Confirmed += r.N
 		} else {
 			c.Pending += r.N
@@ -350,7 +368,7 @@ func (s *sSpotExtractServiceImpl) ListMetricsByRunDateRange(ctx context.Context,
 	err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 		WhereGTE(s_db_model.FieldSpotMetricRunDate, from).
 		WhereLTE(s_db_model.FieldSpotMetricRunDate, to).
-		Where(s_db_model.FieldSpotMetricOrigin, spotOriginManual).
+		WhereIn(s_db_model.FieldSpotMetricOrigin, spotOriginConfirmed).
 		OrderAsc(s_db_model.FieldSpotMetricRunDate).
 		OrderAsc(s_db_model.FieldSpotMetricDataset).
 		OrderAsc(s_db_model.FieldSpotMetricScope).
@@ -367,7 +385,8 @@ func (s *sSpotExtractServiceImpl) CountUnconfirmedByRunDateRange(ctx context.Con
 		WhereLTE(s_db_model.FieldSpotMetricRunDate, to).
 		// 老库可能有 origin 为 NULL 的行：SQL 里 NULL <> 'manual' 是 NULL（不算命中），
 		// 会漏统计，所以显式带上 IS NULL（与 ConfirmMetrics 的内存判定口径一致）
-		Where("("+s_db_model.FieldSpotMetricOrigin+" IS NULL OR "+s_db_model.FieldSpotMetricOrigin+" <> ?)", spotOriginManual).
+		Where(s_db_model.FieldSpotMetricOrigin+" IS NULL OR "+s_db_model.FieldSpotMetricOrigin+" NOT IN (?,?)",
+			spotOriginManual, spotOriginPmAPI).
 		Count()
 	if err != nil {
 		return 0, errors.Wrap(err, "统计未复核现货指标失败")

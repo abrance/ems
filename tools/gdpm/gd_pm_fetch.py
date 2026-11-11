@@ -285,6 +285,25 @@ def render(results, date):
         print()
 
 
+# ---------------------------------------------------------------- fetch whole table
+
+def fetch_template(entry, budget, page_size=500):
+    """整表拉取：一表一次请求（超过 page_size 才翻页），返回全部行。"""
+    rows, page = [], 1
+    while True:
+        data = post("/api/disclosure/nav/market/excelData/page", {
+            "templateUuid": entry["templateUuid"],
+            "pageNum": page,
+            "pageSize": page_size,
+        }, budget)
+        chunk = (data.get("data") if isinstance(data, dict) else data) or []
+        rows.extend(chunk)
+        pages = data.get("pages") if isinstance(data, dict) else 1
+        if not chunk or not pages or page >= int(pages):
+            return rows
+        page += 1
+
+
 # ---------------------------------------------------------------- fetch by month
 
 def month_capable(entry):
