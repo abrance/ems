@@ -146,8 +146,9 @@ func TestVMIntegrationGapDayStaysEmpty(t *testing.T) {
 	}
 }
 
-// pollChart 轮询取数直到拿到 want 个时间点（VM 写入有可见性延迟），超时才失败。
-func pollChart(t *testing.T, s c_base.IStorage, keys []string, start, end int64, step int, want int) *c_chart.ChartData {
+// pollChart 轮询取数直到拿到至少 min 个时间点（VM 写入有可见性延迟），超时才失败。
+// 用「至少」而不是「等于」：同一探针序列会被重跑写到不同时间戳，窗口内点数会累积。
+func pollChart(t *testing.T, s c_base.IStorage, keys []string, start, end int64, step int, min int) *c_chart.ChartData {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	var last *c_chart.ChartData
@@ -157,7 +158,7 @@ func pollChart(t *testing.T, s c_base.IStorage, keys []string, start, end int64,
 			t.Fatalf("查询失败: %v", err)
 		}
 		last = chart
-		if len(chart.XAxis.Data) == want {
+		if len(chart.XAxis.Data) >= min {
 			return chart
 		}
 		time.Sleep(300 * time.Millisecond)
@@ -165,7 +166,7 @@ func pollChart(t *testing.T, s c_base.IStorage, keys []string, start, end int64,
 	if last == nil {
 		t.Fatalf("查询始终没有返回结果")
 	}
-	t.Fatalf("等了 15s 仍只有 %d 个时间点, 期望 %d: %v", len(last.XAxis.Data), want, last.XAxis.Data)
+	t.Fatalf("等了 15s 仍只有 %d 个时间点, 期望至少 %d: %v", len(last.XAxis.Data), min, last.XAxis.Data)
 	return last
 }
 
