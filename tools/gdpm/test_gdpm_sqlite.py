@@ -130,6 +130,26 @@ class ImportTest(unittest.TestCase):
             w.writerow(["年份", "月份", "TOP1", "TOP4"])
             w.writerow(["2025", "12", "26.5758273646145%", "54.4430293709741%"])
 
+    def test_green_power_blank_name_falls_back_to_serial(self):
+        """2024 绿电行序列名称为空：scope 必须回落序列编号，否则同键覆盖丢交易。"""
+        with open(os.path.join(self.dir, "metrics_green_power_year.csv"),
+                  "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["序列编号", "序列名称", "年份", "成交电量（MWh）",
+                        "电能量成交均价（元/MWh）", "绿色环境价值成交均价（元/MWh）"])
+            w.writerow(["22000", "", "2024", "30199.0", "", "8.691943"])
+            w.writerow(["21952", "", "2024", "62505.98", "464.6235", "8.941141"])
+            w.writerow(["1088", "2025年度绿电双边协商交易（2024-12-11）", "2025",
+                        "3499387.0", "385.842796", "5.977884"])
+        records = [r for r in imp.load_periodic(self.dir)[0] if r[1] == "green_power_year"]
+        scopes = {s for _d, _ds, s, _m, _v, _u in records if s}
+        # 有名称用名称（页面按名称分组），没名称用编号
+        self.assertEqual(scopes, {"22000", "21952", "2025年度绿电双边协商交易（2024-12-11）"})
+        # 关键：三行交易的 (期次, dataset, scope, metric) 必须互不相同
+        keys = [(d, ds, s, m) for d, ds, s, m, _v, _u in records]
+        self.assertEqual(len(keys), len(set(keys)))
+
+
     def test_periodic_dates_and_units(self):
         self.write_periodic()
         records, loaded, skipped = imp.load_periodic(self.dir)
