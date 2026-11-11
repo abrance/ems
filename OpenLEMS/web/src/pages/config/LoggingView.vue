@@ -181,10 +181,11 @@ onMounted(load)
           automation / remote 六个类型，做不到「只关某个协议的 DEBUG」。
         </li>
         <li>
-          <strong>日志保留天数没有生效</strong>：后端有 <code>LogRetentionDays</code> 设置，
-          但**没有任何代码读它**去清理旧日志 —— 「存储管理」里那个「日志保留（天）」输入框目前不会删任何东西。
+          <strong>日志保留天数会同时管数据库和磁盘</strong>：除了清掉库里的旧日志行，
+          数据保留任务还会按这个天数删除 <code>out/logs/app</code> 下超期的 <code>.log</code> 文件（正在写的那个不删）。
+          结果在「存储管理 → 保留策略」里能看到“文件数/释放空间”。
         </li>
-        <li><strong>没有日志滚动策略的界面</strong>：文件大小/份数来自配置（5MB × 100 份），运行时不可改。</li>
+        <li><strong>没有日志滚动策略的界面</strong>：文件大小/份数来自配置（5MB × 20 份），运行时不可改；份数上限对当前命名不生效，真正保底的是上面的按天清理。</li>
       </ul>
     </PanelBox>
   </div>

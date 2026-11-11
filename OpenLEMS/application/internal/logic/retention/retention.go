@@ -8,6 +8,8 @@ package retention
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/shockerli/cvt"
 )
 
@@ -38,8 +41,11 @@ type SResult struct {
 	SystemBefore   time.Time
 	LogBefore      time.Time
 	LogRowsDeleted int
-	TimeMs         int64
-	Err            string
+	// 磁盘上 out/logs/app/*.log 的清理结果（数据库日志行之外的那部分）
+	LogFilesDeleted int
+	LogBytesFreed   int64
+	TimeMs          int64
+	Err             string
 }
 
 var (
@@ -128,17 +134,105 @@ func RunOnce(ctx context.Context) *SResult {
 		res.LogRowsDeleted = deleted
 	}
 
+	// 数据库里的日志行清掉了，磁盘上的 rotate 文件还得单独清：GF 自带的
+	// rotateBackupLimit 只认 `.\d{20}.log` 这类名字，本项目的命名位数不对，
+	// backup 数组恒为空，一个都不删（线上 117 个 5MB 文件时仍是如此）。
+	// 这里用同一个 LogBefore 兜底，LogRetentionDays 才真的生效。
+	logDir := strings.TrimSpace(g.Cfg().MustGet(ctx, "logger.path").String())
+	logFilePattern := g.Cfg().MustGet(ctx, "logger.file", "{Ymd}.log").String()
+	files, freed, notes := CleanLogFiles(logDir, logFilePattern, res.LogBefore)
+	res.LogFilesDeleted, res.LogBytesFreed = files, freed
+	if len(notes) > 0 {
+		if res.Err != "" {
+			res.Err += "; "
+		}
+		res.Err += strings.Join(notes, "; ")
+	}
+
 	res.TimeMs = time.Since(start).Milliseconds()
 	setLast(res)
 
 	if res.Err != "" {
-		c_log.BizWarningf(ctx, "数据保留清理部分失败 - 设备保留 %d 天/系统 %d 天/日志 %d 天，错误: %s",
-			res.DeviceDays, res.SystemDays, res.LogDays, res.Err)
+		c_log.BizWarningf(ctx, "数据保留清理部分失败 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志删除 %d 行/文件 %d 个（释放 %d 字节），错误: %s",
+			res.DeviceDays, res.SystemDays, res.LogDays, res.LogRowsDeleted, res.LogFilesDeleted, res.LogBytesFreed, res.Err)
 	} else {
-		c_log.BizInfof(ctx, "数据保留清理完成 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志删除 %d 行，耗时 %dms",
-			res.DeviceDays, res.SystemDays, res.LogDays, res.LogRowsDeleted, res.TimeMs)
+		c_log.BizInfof(ctx, "数据保留清理完成 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志删除 %d 行/文件 %d 个（释放 %d 字节），耗时 %dms",
+			res.DeviceDays, res.SystemDays, res.LogDays, res.LogRowsDeleted, res.LogFilesDeleted, res.LogBytesFreed, res.TimeMs)
 	}
 	return res
+}
+
+// CleanLogFiles 删除 dir 下 mtime 早于 before 的滚动日志文件，返回删除个数、释放字节数与非致命说明。
+//
+// 三条安全边界：
+//   - 只认「8 位日期开头 + .log 结尾」的文件（{Ymd}.log 的产物），不碰 .csv / db.sqlite3* / ptdb；
+//   - 永远跳过最新的那个文件 —— 它是当前正在写的，删了会丢日志；
+//   - 目录缺失/不可读只返回说明，不算失败（容器首启、日志改到别处都可能出现）。
+func CleanLogFiles(dir, filePattern string, before time.Time) (files int, bytesFreed int64, notes []string) {
+	if dir == "" {
+		return 0, 0, []string{"未配置 logger.path，跳过日志文件清理"}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0, []string{"日志目录 " + dir + " 不可读，跳过日志文件清理: " + err.Error()}
+	}
+
+	type logFile struct {
+		name string
+		size int64
+	}
+	var candidates []logFile
+	newest := ""
+	var newestMod time.Time
+	for _, e := range entries {
+		if e.IsDir() || !isAppLogFileName(e.Name(), filePattern) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if newest == "" || info.ModTime().After(newestMod) {
+			newest, newestMod = e.Name(), info.ModTime()
+		}
+		if info.ModTime().Before(before) {
+			candidates = append(candidates, logFile{name: e.Name(), size: info.Size()})
+		}
+	}
+
+	for _, f := range candidates {
+		if f.name == newest {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, f.name)); err != nil {
+			notes = append(notes, "删除日志文件 "+f.name+" 失败: "+err.Error())
+			continue
+		}
+		files++
+		bytesFreed += f.size
+	}
+	return files, bytesFreed, notes
+}
+
+// isAppLogFileName 判断是否是本项目 `{Ymd}.log` 产生的滚动日志。
+// 命名形如 20261111.20261111162721.123456.123.log，所以按「8 位数字日期 + .log」认，
+// 比按前缀字符串匹配稳（{Ymd} 在模板开头时没有字面前缀可用）。
+func isAppLogFileName(name, filePattern string) bool {
+	if !strings.HasSuffix(name, ".log") {
+		return false
+	}
+	if !strings.HasPrefix(strings.TrimSpace(filePattern), "{Ymd}") {
+		return true
+	}
+	if len(name) < 8+len(".log") {
+		return false
+	}
+	for _, c := range name[:8] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Start 启动定时清理。首次延迟一会儿再跑，避免与启动过程抢 I/O；之后按 interval 周期跑。
