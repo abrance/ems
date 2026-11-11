@@ -2135,10 +2135,11 @@ console.log('\n== 日志级别页 ==')
   const dbgCall = requests.filter((r) => r.url.includes('/api/setting/update')).pop()
   check(dbgCall?.body?.value === 'true', '开关写入 true', JSON.stringify(dbgCall?.body))
 
-  // 限制清单：必须写出「三个条件」「保留天数没生效」这类实话
+  // 限制清单：必须写出「三个条件」「保留天数管库+盘」这类实话
   check(bodyHas('两个条件') || bodyHas('都要满足'), '写明级别与调试开关是两个条件')
   check(bodyHas('逐设备的'), '写明设备侧还有第三道条件')
-  check(bodyHas('没有任何代码读它'), '写明日志保留天数没有生效')
+  check(bodyHas('同时管数据库和磁盘'), '写明日志保留天数会同时清库里行和磁盘文件')
+  check(!bodyHas('没有任何代码读它'), '不再谎称日志保留天数不生效')
 
   // 普通用户会话：只读（写设置需要 admin，否则每个控件都会吃 403）
   check(!bodyHas('本页**只读**') && !bodyHas('本页只读'), '管理员会话下不显示只读提示')
