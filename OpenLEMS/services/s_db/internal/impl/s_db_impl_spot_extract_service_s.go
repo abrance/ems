@@ -51,7 +51,7 @@ func GetSpotExtractService() s_db_basic.ISpotExtractService {
 
 // ReplaceMetrics 全量替换：同一日报重复提取时不会留下旧指标。
 //
-// 复核状态优先：已确认（origin=manual）行默认**不参与替换**——保留原值与原状态，
+// 复核状态优先：已确认（origin 为 manual / pm-api）行默认**不参与替换**——保留原值与原状态，
 // 本次解析重新提取到同键的值直接丢弃（结果计入 Preserved）。只有 force=true 才
 // 「以 OCR 为准」覆盖它们，覆盖前逐条写审计。
 //
@@ -230,7 +230,7 @@ func (s *sSpotExtractServiceImpl) UpdateMetricValue(ctx context.Context, key s_d
 	return model, nil
 }
 
-// ConfirmMetrics 批量确认：把该日报所有未确认项（origin != manual，即 ocr 提取值与 cv 预填值）
+// ConfirmMetrics 批量确认：把该日报所有未确认项（既非 manual 也非 pm-api，即 ocr 提取值与 cv 预填值）
 // 一并标记为已确认（origin=manual）并逐条写审计。dataset 为空表示全部数据集。
 //
 // 为什么不再只认 cv：复核状态的语义是「整天解析结果经人确认」（origin=manual 即已确认），

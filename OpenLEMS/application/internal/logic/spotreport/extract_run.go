@@ -23,7 +23,7 @@ import (
 // 手动触发（信息管理 → 解析数据）；采集接口本身不依赖 OCR，因此 OCR 服务不可用时
 // 只是解析失败，不影响日报图片档案。
 //
-// force=false（默认）：已确认（origin=manual）行原样保留，不被本次解析覆盖；
+// force=false（默认）：已确认（origin 为 manual / pm-api）行原样保留，不被本次解析覆盖；
 // force=true：以 OCR 为准覆盖已确认值（覆盖前写审计，逐条回到 Warnings 里）。
 func ExtractReport(ctx context.Context, reportDate string, force bool) (*v1.ExtractSpotReportRes, error) {
 	model, err := s_db.GetSpotReportService().GetByDate(ctx, reportDate)

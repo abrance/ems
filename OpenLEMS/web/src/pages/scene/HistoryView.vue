@@ -281,7 +281,7 @@ useECharts(
 )
 
 const priceFoot = computed(() => {
-  const parts = [`实际：日报已确认的日前/实时成交电价（发电侧·平均电价），区间 ${priceRange.value || '—'}`]
+  const parts = [`实际：官方直采（origin=pm-api）的日前/实时成交电价（发电侧·平均电价），区间 ${priceRange.value || '—'}`]
   parts.push(
     recordedDays.value.length
       ? `预测：留痕 ${recordedDays.value.length} 个生成日（${recordedDays.value[0]} 起）`
@@ -404,7 +404,7 @@ onMounted(async () => {
       :sub="BUCKET_DATASETS.has(dataset) ? '档位计数（分类值，不是价格）' : `${new Set(points.map((p) => p.scope)).size} 个对象`"
       :span="12"
       :loading="loading"
-      :foot="`数据来源：日报已确认指标 · 按运行日分桶（${trend?.grain || 'day'}）`"
+      :foot="`数据来源：官方直采指标（origin=pm-api） · 按运行日分桶（${trend?.grain || 'day'}）`"
     >
       <TrendChart v-if="points.length" :points="points" />
       <div v-else class="empty">该数据集在当前区间没有已确认数据</div>

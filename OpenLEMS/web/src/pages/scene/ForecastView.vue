@@ -131,7 +131,7 @@ useECharts(
       },
       series: [
         {
-          name: '历史（已确认日均）',
+          name: '历史（官方直采日均）',
           type: 'line',
           showSymbol: false,
           lineStyle: { width: 2 },
@@ -388,7 +388,7 @@ onMounted(() => load(false))
       <div v-if="!isIntraday" class="warn">
         <strong>平均视图</strong>
         <span>
-          　序列源：日报<strong>已确认</strong>（origin=manual）的日均成交价，一天一个点。
+          　序列源：广东电力交易中心信息披露接口<strong>官方直采</strong>（origin=pm-api）的日均成交价，一天一个点。
           要看 15 分钟曲线请切「分时」。
         </span>
       </div>

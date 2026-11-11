@@ -189,7 +189,7 @@ type IPriceForecastService interface {
 // ISpotExtractService 现货日报结构化提取结果
 type ISpotExtractService interface {
 	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）。
-	// 已确认（origin=manual）行默认原样保留、不被重跑覆盖（force=false，Preserved 计数）；
+	// 已确认（origin 为 manual / pm-api）行默认原样保留、不被重跑覆盖（force=false，Preserved 计数）；
 	// force=true 时才「以 OCR 为准」覆盖它们，覆盖前逐条写审计并返回 Overwritten。
 	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel, force bool) (*SpotMetricReplaceResult, error)
 	// UpdateMetricValue 人工修订单个指标值（origin 置为 manual，并写审计）
@@ -205,7 +205,7 @@ type ISpotExtractService interface {
 	ListMetrics(ctx context.Context, reportDate string) ([]*s_db_model.SSpotMetricModel, error)
 	// ListMetricsByRunDate 按运行日查询指标（跨日报聚合，供趋势/交叉校验用）
 	ListMetricsByRunDate(ctx context.Context, runDate string) ([]*s_db_model.SSpotMetricModel, error)
-	// ListMetricsByRunDateRange 按运行日区间查询**已确认**（origin=manual）指标，供趋势聚合用。
+	// ListMetricsByRunDateRange 按运行日区间查询**已确认**（origin 为 manual / pm-api）指标，供趋势聚合用。
 	// 口径是「只看已确认」，未复核行在 SQL 里就剔除，不把几万行明细搬到应用层再过滤。
 	// 注意：同一运行日的同一指标可能有多份日报产出（表1(二) 与滞后的 表2(一)），
 	// 去重与取哪一路由调用方（logic.BuildTrend）决定。

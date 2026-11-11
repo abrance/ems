@@ -17,11 +17,12 @@ import (
 )
 
 // 电价预测：复用同一套 TimesFM 服务（s_forecast），只是序列源从「设备功率点位」
-// 换成「日报已确认的日均成交价」。
+// 换成「官方直采的日均成交价」。
 //
 // 口径（与 logic/spotreport 提取器一致，改动前先看这里）：
 //  1. 时间轴用 run_date（运行日），一天一个点。
-//  2. 只看已确认（origin=manual）：未复核行在 ListMetricsByRunDateRange 的 SQL 里就剔除了。
+//  2. 只看已确认（origin ∈ {manual, pm-api}）：未复核行在 ListMetricsByRunDateRange 的 SQL 里就剔除了。
+//     2026-11-11 起广东官方接口直采（pm-api）是唯一权威源，manual 仅剩历史人工确认值。
 //  3. 同一运行日可能有多份日报产出：日前成交优先取 表1(二)（当日报告口径），
 //     缺失时才回落到 表2(一)（滞后 T-2 复核值）；实时成交取 表2(二)。
 //  4. 96 点分时曲线日报未提取，本期输出日均价（对应前端「长周期电价预测-平均」）。
@@ -46,7 +47,7 @@ const (
 //
 // Grain 决定序列源，不只是步长：
 //
-//	day（默认）—— 日报已确认成交价，一天一个点，出未来多日日均
+//	day（默认）—— 官方直采成交价，一天一个点，出未来多日日均
 //	intraday    —— 电网日指标 CSV 的 15 分钟电价，出未来 5 日 × 96 点
 type PriceRequest struct {
 	Market       string
@@ -98,7 +99,7 @@ type priceSpec struct {
 // priceSeriesSource 历史指标读取函数，便于测试替换。
 type priceSeriesSource func(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error)
 
-// spotMetricSource 默认实现：读日报已确认的指标明细。
+// spotMetricSource 默认实现：读已确认（manual / pm-api）的指标明细。
 func spotMetricSource(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error) {
 	return s_db.GetSpotExtractService().ListMetricsByRunDateRange(ctx, from, to)
 }
@@ -124,7 +125,7 @@ type SPriceForecast struct {
 	TimeMs            float64
 }
 
-// LoadPrice 读取日报已确认的日均成交价并调用 TimesFM 预测未来多日。
+// LoadPrice 读取官方直采的日均成交价并调用 TimesFM 预测未来多日。
 // 结果按请求参数缓存 forecastCacheDuration。
 func LoadPrice(ctx context.Context, req PriceRequest) (*SPriceForecast, error) {
 	spec, err := resolvePriceSpec(req.Market)
