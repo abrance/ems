@@ -78,6 +78,11 @@ function keyOf(m: SpotMetric): string {
   return `${m.runDate}|${m.dataset}|${m.scope}|${m.metric}`
 }
 
+/** 审计时间：后端已统一成 Asia/Shanghai 的 RFC3339，这里只换成本地可读格式，不再做时区换算 */
+function fmtAuditTime(s: string): string {
+  return s ? s.slice(0, 19).replace('T', ' ') : '—'
+}
+
 function showToast(tone: 'green' | 'red', text: string) {
   toast.value = { tone, text }
   window.clearTimeout(toastTimer)
@@ -460,7 +465,7 @@ onBeforeUnmount(() => {
         </thead>
         <tbody>
           <tr v-for="(a, i) in audit" :key="i">
-            <td>{{ a.createdAt }}</td>
+            <td>{{ fmtAuditTime(a.createdAt) }}</td>
             <td>{{ a.runDate }}</td>
             <td>{{ DATASET_LABELS[a.dataset] ?? a.dataset }}</td>
             <td>{{ a.scope }} / {{ a.metric }}</td>

@@ -336,6 +336,9 @@ func (s *sSpotExtractServiceImpl) ListMetricAudit(ctx context.Context, reportDat
 	}
 	var list []*s_db_model.SSpotMetricAuditModel
 	err := g.Model(s_db_model.TableSpotMetricAudit).Ctx(ctx).
+		// 多取一列 created_at 的原始文本：区分「带时区」与导入脚本写的「无时区本地时间」
+		// （COALESCE 只是为了老库里可能存在的 NULL 行不报扫描错误）
+		Fields(s_db_model.TableSpotMetricAudit+".*", "COALESCE(CAST(created_at AS TEXT),'') AS created_at_text").
 		Where(s_db_model.FieldSpotMetricAuditReport, reportDate).
 		OrderDesc("id").
 		Limit(limit).

@@ -202,13 +202,29 @@ async function loadPriceCompare() {
     ])
     priceRange.value = daily.from && daily.to ? `${daily.from} ~ ${daily.to}` : ''
 
-    /** 只看「发电侧 · 平均电价」，与留痕的口径一致（别把燃煤/市场加权混进来） */
+    /**
+     * 只看「发电侧」口径（别把燃煤/市场加权混进来），但**不能按 metric 全等匹配**：
+     * 库里同一含义有两种写法 —— 老 OCR 日报叫「平均电价」，官方直采用源站原名
+     * 「发电侧日前/实时加权平均电价」。后端原样返回库里的 metric，全等比较曾让这块图永远是空的。
+     * 所以按关键词兼容，多个命中时优先更具体的「加权平均电价」。
+     */
+    const AVG_PRICE_KEYWORDS = ['加权平均电价', '平均电价']
+    const avgPriceRank = (metric: string): number => {
+      const i = AVG_PRICE_KEYWORDS.findIndex((k) => metric.includes(k))
+      return i < 0 ? Number.POSITIVE_INFINITY : i
+    }
     const priceOf = (dataset: string): Map<string, number> => {
-      const map = new Map<string, number>()
+      const best = new Map<string, { rank: number; value: number }>()
       for (const p of daily.points ?? []) {
-        if (p.dataset === dataset && p.metric === '平均电价' && p.scope === '发电侧') map.set(p.bucket, p.avg)
+        if (p.dataset !== dataset) continue
+        // 发电侧口径：老写法放在 scope，官方写法把口径写进了 metric 名
+        if (p.scope !== '发电侧' && !p.metric.startsWith('发电侧')) continue
+        const rank = avgPriceRank(p.metric)
+        if (!Number.isFinite(rank)) continue
+        const cur = best.get(p.bucket)
+        if (!cur || rank < cur.rank) best.set(p.bucket, { rank, value: p.avg })
       }
-      return map
+      return new Map([...best].map(([bucket, v]) => [bucket, v.value]))
     }
     const aheadActual = priceOf('day_ahead_trade')
     const realActual = priceOf('realtime_trade')
@@ -281,7 +297,7 @@ useECharts(
 )
 
 const priceFoot = computed(() => {
-  const parts = [`实际：官方直采（origin=pm-api）的日前/实时成交电价（发电侧·平均电价），区间 ${priceRange.value || '—'}`]
+  const parts = [`实际：官方直采（origin=pm-api）的日前/实时成交电价（发电侧·加权平均电价），区间 ${priceRange.value || '—'}`]
   parts.push(
     recordedDays.value.length
       ? `预测：留痕 ${recordedDays.value.length} 个生成日（${recordedDays.value[0]} 起）`
