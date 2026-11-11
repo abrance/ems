@@ -17,10 +17,13 @@ func TestReviewState(t *testing.T) {
 		expected bool
 	}{
 		{OriginManual, true},
+		{OriginPmAPI, true},
+		{OriginVoid, false}, // 作废：不可信
 		{OriginOCR, false},
 		{OriginCV, false},
 		{"", false}, // 老库没有 origin 列的行
 		{"Manual", false},
+		{"pm-api ", false},
 	}
 	for _, c := range cases {
 		if got := IsConfirmed(c.origin); got != c.expected {
@@ -35,6 +38,16 @@ func TestReviewState(t *testing.T) {
 	pending, confirmed := CountReview(metrics)
 	if pending != 3 || confirmed != 2 {
 		t.Fatalf("CountReview = (%d, %d)，期望 (3, 2)", pending, confirmed)
+	}
+
+	// 官方直采算已确讠；作废行两边都不计（老版会把 void 算进 pending）
+	metrics = []*s_db_model.SSpotMetricModel{
+		{Origin: OriginPmAPI}, {Origin: OriginPmAPI}, {Origin: OriginPmAPI},
+		{Origin: OriginVoid}, {Origin: OriginVoid},
+	}
+	pending, confirmed = CountReview(metrics)
+	if pending != 0 || confirmed != 3 {
+		t.Fatalf("CountReview(pm-api+void) = (%d, %d)，期望 (0, 3)", pending, confirmed)
 	}
 
 	pending, confirmed = CountReview(nil)

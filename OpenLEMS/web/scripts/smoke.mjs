@@ -2761,6 +2761,15 @@ await clickTo('管理', '采集管理')
   check(bodyHas('380 →') || bodyHas('380'), '审计显示旧值 → 新值')
 }
 
+console.log('\n== 复核口径（前端与后端同口径，只能有一处）==')
+{
+  const { isPending, isConfirmedOrigin } = await vite.ssrLoadModule(resolve(root, 'src/api/spotreport.ts'))
+  check(isPending({ origin: 'pm-api' }) === false, '官方直采（pm-api）不算未复核', String(isPending({ origin: 'pm-api' })))
+  check(isPending({ origin: 'void' }) === false, '作废行（void）不进未复核统计', String(isPending({ origin: 'void' })))
+  check(isPending({ origin: 'manual' }) === false && isPending({ origin: 'ocr' }) === true, 'manual 已确认 / ocr 仍待复核')
+  check(isConfirmedOrigin('manual') && isConfirmedOrigin('pm-api') && !isConfirmedOrigin('void'), '已确认集合 = manual ∪ pm-api（void 不算可信值）')
+}
+
 console.log('\n== 电价管理页 ==')
 await clickTo('管理', '电价管理')
 {

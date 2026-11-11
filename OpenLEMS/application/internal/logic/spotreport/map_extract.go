@@ -36,6 +36,8 @@ const (
 	// OriginPmAPI 官方接口直采（广东电力交易中心披露接口），2026-11-11 起为唯一权威源。
 	// 它不需要人工复核，但不是人工确认的，所以单独一个值，别和 manual 混。
 	OriginPmAPI = "pm-api"
+	// OriginVoid 已被官方直采取代的 OCR 旧值：保留可查，但永远不再参与展示/确认/统计
+	OriginVoid = "void"
 )
 
 var (

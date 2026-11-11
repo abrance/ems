@@ -350,6 +350,9 @@ func (s *sSpotExtractServiceImpl) ListMetrics(ctx context.Context, reportDate st
 	var list []*s_db_model.SSpotMetricModel
 	err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 		Where(s_db_model.FieldSpotMetricReportDate, reportDate).
+		// 作废行（被 pm-api 取代的 OCR 旧值）保留在库里可审计，但不再进任何页面/统计。
+		// 老库可能有 origin 为 NULL 的行，NULL <> 'void' 是 NULL，会误删这些行，所以显式带 IS NULL。
+		Where(s_db_model.FieldSpotMetricOrigin+" IS NULL OR "+s_db_model.FieldSpotMetricOrigin+" <> ?", spotOriginVoid).
 		OrderAsc(s_db_model.FieldSpotMetricRunDate).
 		OrderAsc(s_db_model.FieldSpotMetricDataset).
 		OrderAsc(s_db_model.FieldSpotMetricScope).
@@ -393,6 +396,8 @@ func (s *sSpotExtractServiceImpl) CountUnconfirmedByRunDateRange(ctx context.Con
 	count, err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 		WhereGTE(s_db_model.FieldSpotMetricRunDate, from).
 		WhereLTE(s_db_model.FieldSpotMetricRunDate, to).
+		// 作废行既不算已确认也不算待复核：它在库里可查，但不在任何复核队列里
+		Where(s_db_model.FieldSpotMetricOrigin+" IS NULL OR "+s_db_model.FieldSpotMetricOrigin+" <> ?", spotOriginVoid).
 		// 老库可能有 origin 为 NULL 的行：SQL 里 NULL <> 'manual' 是 NULL（不算命中），
 		// 会漏统计，所以显式带上 IS NULL（与 ConfirmMetrics 的内存判定口径一致）
 		Where(s_db_model.FieldSpotMetricOrigin+" IS NULL OR "+s_db_model.FieldSpotMetricOrigin+" NOT IN (?,?)",
