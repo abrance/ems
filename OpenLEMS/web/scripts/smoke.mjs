@@ -298,8 +298,9 @@ const FAKE_CLEARING_METRICS = [
 const FAKE_EXTRACT = { status: 'ok', ocrModel: 'pp-ocr', pageCount: 4, ocrMs: 3200, warnings: ['表2 与历史值有 1 处不一致'], updatedAt: '2026-09-21 22:12', extractorVersion: 'tpl-1' }
 
 const FAKE_AUDIT = [
-  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', oldValue: 380, newValue: 400.5, operation: 'edit', operator: 'admin', createdAt: '2026-09-21 22:20' },
-  { runDate: '2026-09-19', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', oldValue: 300, newValue: 305, operation: 'overwritten_by_extract', operator: '', createdAt: '2026-09-21 22:12' },
+  // createdAt 是后端统一成 Asia/Shanghai 的 RFC3339：页面只做格式化，不得再换算一次时区
+  { runDate: '2026-09-21', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', oldValue: 380, newValue: 400.5, operation: 'edit', operator: 'admin', createdAt: '2026-11-11T16:27:21+08:00' },
+  { runDate: '2026-09-19', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', oldValue: 300, newValue: 305, operation: 'overwritten_by_extract', operator: '', createdAt: '2026-11-11T16:27:21+08:00' },
 ]
 
 const FAKE_BATCH = { id: 'job1', status: 'done', total: 3, done: 3, succeeded: 3, failed: 0, overwritten: 1, current: '', skippedConfirmed: ['2026-09-21'], errors: [], startedAt: '2026-09-21 22:30', finishedAt: '2026-09-21 22:31' }
@@ -314,11 +315,15 @@ const FAKE_TREND_POINTS = [
 ]
 
 // 四条线面板专用：按运行日（grain=day）的日报数据，日前 + 实时两条实际价
+// 2026-09-24/25 用官方 pm-api 的源站原名（库里现在的真实写法），2026-09-26 用老 OCR 写法，
+// 两种写法都必须能画出来（曾经按 '平均电价' 全等匹配，官方数据一条都进不了图）。
 const FAKE_TREND_DAILY = [
-  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 402.6, max: 480, min: 320, sum: 0, days: 1, unit: '元/MWh', value: 0 },
-  { bucket: '2026-09-25', from: '2026-09-25', to: '2026-09-25', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 398.4, max: 470, min: 310, sum: 0, days: 1, unit: '元/MWh', value: 0 },
-  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 381.2, max: 460, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
-  { bucket: '2026-09-25', from: '2026-09-25', to: '2026-09-25', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 374.5, max: 450, min: 290, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'day_ahead_trade', scope: '发电侧', metric: '发电侧日前加权平均电价', avg: 402.6, max: 480, min: 320, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-25', from: '2026-09-25', to: '2026-09-25', dataset: 'day_ahead_trade', scope: '发电侧', metric: '发电侧日前加权平均电价', avg: 398.4, max: 470, min: 310, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'realtime_trade', scope: '发电侧', metric: '发电侧实时加权平均电价', avg: 381.2, max: 460, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-25', from: '2026-09-25', to: '2026-09-25', dataset: 'realtime_trade', scope: '发电侧', metric: '发电侧实时加权平均电价', avg: 374.5, max: 450, min: 290, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-26', from: '2026-09-26', to: '2026-09-26', dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 405.1, max: 470, min: 330, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+  { bucket: '2026-09-26', from: '2026-09-26', to: '2026-09-26', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 377.3, max: 440, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
   // 燃煤分档：四条线只取「发电侧」，不该把这条画进去
   { bucket: '2026-09-24', from: '2026-09-24', to: '2026-09-24', dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', avg: 412.9, max: 470, min: 350, sum: 0, days: 1, unit: '元/MWh', value: 0 },
 ]
@@ -2638,7 +2643,9 @@ await clickTo('场景', '历史信息')
     (p.querySelector('.panel-title')?.textContent ?? '').includes('日前-实时出清与预测价格'),
   )
   const pricePoints = Number(pricePanel?.querySelector('.chart')?.dataset.chartPoints ?? 0)
-  check(pricePoints === 8, `4 条线 × 2 个运行日 = 8 个点（实际 ${pricePoints}）`)
+  check(pricePoints === 12, `4 条线 × 3 个运行日 = 12 个点（实际 ${pricePoints}）`)
+  // 官方直采的 metric 名是「发电侧日前/实时加权平均电价」，老 OCR 写「平均电价」；两种都得能画出来
+  check(!(pricePanel?.textContent ?? '').includes('本区间没有已确认的日前/实时成交电价'), '官方口径（发电侧日前加权平均电价）能画出曲线，不是空态')
   check(
     requests.some((r) => r.url.includes('/api/spot-report/trend') && r.url.includes('grain=day')),
     '本块固定按运行日取数（不跟上面的粒度）',
@@ -2765,6 +2772,9 @@ await clickTo('管理', '采集管理')
   await waitFor(() => bodyHas('指标变更审计'))
   check(bodyHas('人工修订') && bodyHas('重跑覆盖'), '审计区分人工修订与重跑覆盖')
   check(bodyHas('380 →') || bodyHas('380'), '审计显示旧值 → 新值')
+  // 审计时间：后端给 Asia/Shanghai 的 RFC3339，页面只格式化，不得再换算（曾把 16:27 显示成次日 00:27）
+  check(bodyHas('2026-11-11 16:27:21'), '审计时间按北京时间原样显示')
+  check(!bodyHas('2026-11-12'), '审计时间不再多出 8 小时（不出现次日 00:27）')
 }
 
 console.log('\n== 复核口径（前端与后端同口径，只能有一处）==')

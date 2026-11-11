@@ -328,7 +328,10 @@ def plan(conn, records):
 
 
 def apply(conn, records, api, ocr, log=print):
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 时间带时区偏移写入（如 2026-11-11 16:27:21.123456+08:00）。不带偏移的本地时间会被
+    # Go 侧按 UTC 解析，页面上就多 8 小时（历史行由读侧兜底，见 application/internal/logic/
+    # spotreport/extract_run.go 的 auditCreatedAt）。
+    now = dt.datetime.now().astimezone().isoformat(sep=" ")
     conn.execute(DDL_METRIC)
     conn.execute(DDL_FETCH_RUN)
 

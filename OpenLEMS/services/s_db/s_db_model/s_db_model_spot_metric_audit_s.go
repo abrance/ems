@@ -37,4 +37,9 @@ type SSpotMetricAuditModel struct {
 	Operation  string      `json:"operation" orm:"operation"`
 	Operator   string      `json:"operator" orm:"operator"`
 	CreatedAt  *gtime.Time `json:"createdAt" orm:"created_at,created_at"`
+	// CreatedAtText created_at 的原始文本（查审计时用 CAST 另取一列）。
+	// 库里有两种写法：ORM 与老 OCR 流水写的是带偏移的 "+00:00"，pm-api 导入脚本写的是
+	// 不带时区的本地墙钟（"2026-11-11 16:27:21"，Asia/Shanghai）。后者会被 sqlite 驱动按
+	// UTC 解析，再换算成北京时间就多 8 小时；只有原始文本能区分这两种，故一并读出来。
+	CreatedAtText string `json:"-" orm:"created_at_text"`
 }

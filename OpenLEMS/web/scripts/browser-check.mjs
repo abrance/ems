@@ -238,17 +238,17 @@ const FIXTURES = {
   },
   '/api/auth/current': { role: 'admin' },
   // 形状要与真实响应一致（dataset/scope/metric/avg）：
-  // 四条线面板按 dataset=day_ahead_trade|realtime_trade + scope=发电侧 取数，
-  // 用旧那种 { series:[...] } 的假形状，TrendChart 也画不出东西，检查等于白做。
+  // 四条线面板按 dataset=day_ahead_trade|realtime_trade + 发电侧口径取数，metric 用库里真实的
+  // 官方写法「发电侧日前/实时加权平均电价」（曾按 '平均电价' 全等匹配 → 面板永远空态）。
   '/api/spot-report/trend': {
     from: '2026-08-25',
     to: '2026-08-31',
     grain: 'day',
     excludedPending: 0,
     points: DAYS.flatMap((d) => [
-      { bucket: d, from: d, to: d, dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', avg: 380, max: 460, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+      { bucket: d, from: d, to: d, dataset: 'day_ahead_trade', scope: '发电侧', metric: '发电侧日前加权平均电价', avg: 380, max: 460, min: 300, sum: 0, days: 1, unit: '元/MWh', value: 0 },
       { bucket: d, from: d, to: d, dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', avg: 392, max: 470, min: 320, sum: 0, days: 1, unit: '元/MWh', value: 0 },
-      { bucket: d, from: d, to: d, dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', avg: 365, max: 450, min: 280, sum: 0, days: 1, unit: '元/MWh', value: 0 },
+      { bucket: d, from: d, to: d, dataset: 'realtime_trade', scope: '发电侧', metric: '发电侧实时加权平均电价', avg: 365, max: 450, min: 280, sum: 0, days: 1, unit: '元/MWh', value: 0 },
     ]),
   },
 }
@@ -406,7 +406,8 @@ const PAGES = [
   { name: '场景 · 信息披露', path: '/scene/disclosure', min: 2 },
   // 决策支持现在有三张图：电价预测、负荷预测、相似日情况分析（目标日 + 叠加日）
   { name: '场景 · 决策支持', path: '/scene/decision', min: 3 },
-  { name: '场景 · 历史信息', path: '/scene/history', min: 2 },
+  // 三张图：日前成交电价、实时成交电价、四条线面板（官方口径能画出实际两条线才会是 3）
+  { name: '场景 · 历史信息', path: '/scene/history', min: 3 },
   { name: '场景 · 长周期电价预测', path: '/scene/forecast', min: 1 },
   {
     // 「分时」视图是 480 个点（96×5）的连续曲线 + 分位带：happy-dom 没有 canvas，

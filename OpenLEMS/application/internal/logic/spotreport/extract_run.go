@@ -8,6 +8,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"strings"
 	"time"
 
 	v1 "application/api/spotreport/v1"
@@ -254,17 +255,41 @@ func ListMetricAudit(ctx context.Context, reportDate string, limit int) (*v1.Get
 	}
 	list := make([]*v1.SpotMetricAudit, 0, len(models))
 	for _, m := range models {
-		created := ""
-		if m.CreatedAt != nil {
-			created = m.CreatedAt.Time.In(shanghaiLocation()).Format(time.RFC3339)
-		}
 		list = append(list, &v1.SpotMetricAudit{
 			RunDate: m.RunDate, Dataset: m.Dataset, Scope: m.Scope, Metric: m.Metric,
 			OldValue: m.OldValue, NewValue: m.NewValue, Operation: m.Operation,
-			Operator: m.Operator, CreatedAt: created,
+			Operator: m.Operator, CreatedAt: auditCreatedAt(m),
 		})
 	}
 	return &v1.GetSpotReportAuditRes{List: list}, nil
+}
+
+// auditCreatedAt 把审计时间统一成 Asia/Shanghai 的 RFC3339。
+//
+// 库里的 created_at 有两种写法：ORM 与老 OCR 流水写带偏移的 "2026-09-22 12:33:42+00:00"，
+// pm-api 导入脚本（tools/gdpm）写不带时区的本地墙钟 "2026-11-11 16:27:21"（Asia/Shanghai）。
+// sqlite 驱动把无偏移的时间当 UTC，再 .In(上海) 就多 8 小时（页面曾把 16:27 显示成次日 00:27）。
+// 因此：有偏移的按自身偏移换算；无偏移的把数字当上海时间，不再二次换算。
+// 只改显示口径，不动库里已有留痕。
+func auditCreatedAt(m *s_db_model.SSpotMetricAuditModel) string {
+	if raw := strings.TrimSpace(m.CreatedAtText); raw != "" && !hasZoneOffset(raw) {
+		if t, err := time.ParseInLocation("2006-01-02 15:04:05", raw, shanghaiLocation()); err == nil {
+			return t.Format(time.RFC3339)
+		}
+	}
+	if m.CreatedAt == nil {
+		return ""
+	}
+	return m.CreatedAt.Time.In(shanghaiLocation()).Format(time.RFC3339)
+}
+
+// hasZoneOffset 判断时间文本是否自带时区（日期部分自带两个 '-'，故只看第 10 位之后）。
+func hasZoneOffset(s string) bool {
+	rest := s
+	if len(rest) > 10 {
+		rest = rest[10:]
+	}
+	return strings.ContainsAny(rest, "+-Zz")
 }
 
 // OverwriteWarningPrefix 「重跑覆盖人工修订」告警前缀：生产与批量任务计数共用，
