@@ -27,8 +27,13 @@ func IsConfirmed(origin string) bool {
 }
 
 // CountReview 统计未复核/已确认条数
+//
+// void（已作废）两边都不计：它既不待复核也不可信，只留在库里备查。
 func CountReview(metrics []*s_db_model.SSpotMetricModel) (pending, confirmed int) {
 	for _, m := range metrics {
+		if m.Origin == OriginVoid {
+			continue
+		}
 		if IsConfirmed(m.Origin) {
 			confirmed++
 		} else {

@@ -7,7 +7,8 @@ import { api } from './client'
  * 复核与修订、重跑，都在这里。接口沿用现网，没有新增后端。
  *
  * 口径提醒：后端把 manual（人工确认）与 pm-api（官方直采）都算已确认（s_db isConfirmedOrigin）；
- * 本文件的 isPending 仍只认 manual，跑在 pm-api 行上会当未复核显示。
+ * 本文件的 isConfirmedOrigin 与它同口径，isPending = 取反，页面里只能引用这两处。
+ * void（被 pm-api 取代的 OCR 旧值）两边都不返回、也不统计，既不算已确认也不算未复核。
  * 未复核数据不参与趋势聚合（见 /api/spot-report/trend）。
  */
 export interface SpotPage {
@@ -95,9 +96,14 @@ export const DATASET_LABELS: Record<string, string> = {
   node_price_valley: '低谷节点电价档位',
 }
 
-/** 未复核判定只留这一处，别在页面里各写一遍 */
+/** 已确认判定只留这一处，与后端 spotreport.IsConfirmed / s_db isConfirmedOrigin 同口径 */
+export function isConfirmedOrigin(origin: string): boolean {
+  return origin === 'manual' || origin === 'pm-api'
+}
+
+/** 未复核判定只留这一处，别在页面里各写一遍。void 已作废，不属任何队列 */
 export function isPending(m: Pick<SpotMetric, 'origin'>): boolean {
-  return m.origin !== 'manual'
+  return m.origin !== 'void' && !isConfirmedOrigin(m.origin)
 }
 
 export function listReports(signal?: AbortSignal): Promise<SpotReport[]> {
