@@ -269,11 +269,12 @@ func ListMetricAudit(ctx context.Context, reportDate string, limit int) (*v1.Get
 // 库里的 created_at 有两种写法：ORM 与老 OCR 流水写带偏移的 "2026-09-22 12:33:42+00:00"，
 // pm-api 导入脚本（tools/gdpm）写不带时区的本地墙钟 "2026-11-11 16:27:21"（Asia/Shanghai）。
 // sqlite 驱动把无偏移的时间当 UTC，再 .In(上海) 就多 8 小时（页面曾把 16:27 显示成次日 00:27）。
-// 因此：有偏移的按自身偏移换算；无偏移的把数字当上海时间，不再二次换算。
+// 因此：有偏移的按自身偏移换算；无偏移的（含带小数秒的写法）把数字当上海时间，不再二次换算。
+// 布局带 .999999999 是为了同一套解析吃下整秒与带小数秒的无偏移文本。
 // 只改显示口径，不动库里已有留痕。
 func auditCreatedAt(m *s_db_model.SSpotMetricAuditModel) string {
 	if raw := strings.TrimSpace(m.CreatedAtText); raw != "" && !hasZoneOffset(raw) {
-		if t, err := time.ParseInLocation("2006-01-02 15:04:05", raw, shanghaiLocation()); err == nil {
+		if t, err := time.ParseInLocation("2006-01-02 15:04:05.999999999", raw, shanghaiLocation()); err == nil {
 			return t.Format(time.RFC3339)
 		}
 	}
