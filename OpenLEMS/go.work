@@ -23,6 +23,7 @@ use (
 	./plugins/plug_protocols/p_gpiod
 	./plugins/plug_protocols/p_modbus
 	./plugins/plug_storages/p_tsdb
+	./plugins/plug_storages/p_vm
 
 	./services/s_automation
 	./services/s_db
