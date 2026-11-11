@@ -2469,6 +2469,9 @@ await clickTo('场景', '市场出清')
   check(bodyHas('2 市') || bodyHas('1 市'), '统计各档位命中城市数')
   check(bodyHas('未复核'), '标注采样预填需人工确认')
   check(bodyHas('图像采样预填'), '脚注说明数据来源性质')
+  check(bodyHas('数据来源：图像采样预填（origin=cv）'), '页脚按行上实际 origin 渲染来源')
+  check(!bodyHas('需人工确认'), '页脚不再笼统写「需人工确认」')
+  check(!bodyHas('与图2 档位采样'), '顶部不再提「图2 档位采样」')
 
   // 档位顺序由区间下界推导：[-inf,200) 应排在 [200,400) 前面。
   // 注意按面板分别取 —— 两个面板里都有 [200,400)，跨面板 indexOf 会串。
@@ -2504,6 +2507,9 @@ await clickTo('场景', '市场出清')
   await waitFor(() => requests.filter((r) => r.url.includes('/api/spot-report/data')).length > before)
   const last = requests.filter((r) => r.url.includes('/api/spot-report/data')).pop()
   check(last.url.includes('date=2026-09-19'), '按运行日切换重新查询', last.url)
+  // 该日期桩数据没有档位行 → 空态，且不显示来源页脚
+  await waitFor(() => bodyHas('该日报没有高峰时刻地市节点电价档位数据。'))
+  check(!bodyHas('数据来源：图像采样预填'), '空态下不显示来源页脚')
 }
 
 console.log('\n== 决策支持页 ==')

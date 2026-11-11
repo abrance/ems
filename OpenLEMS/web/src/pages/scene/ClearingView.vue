@@ -15,8 +15,9 @@ import { DATASET_LABELS, getReportData, isPending, listReports, type SpotMetric 
  *   日前市场火电启停状态统计图(t96) 与统计表、日前调频价格（容量/里程）、
  *   日前输电约束及阻塞情况。
  *
- * 档位数据是**图像采样预填**（origin=cv）：数值只存在于色块里，OCR 拿不到。
- * 所以这一页要显著提示「需人工确认」，不能当成已核实的结果。
+ * 档位数据官方接口不提供（pm-api 只有表1(二)/表2(二)），现存档位行要么是历史
+ * 图像采样（origin=cv），要么已作废（void，接口层已过滤）。所以空态是常态，
+ * 面板页脚按实际 origin 渲染，没有行就不写来源。
  */
 const METRIC_PRICE_BUCKET = '价格档位'
 const DATASET_PEAK = 'node_price_peak'
@@ -43,6 +44,19 @@ function bucketMetrics(dataset: string): SpotMetric[] {
 
 const priceMetrics = (dataset: string): SpotMetric[] =>
   metrics.value.filter((m) => m.dataset === dataset)
+
+const ORIGIN_LABELS: Record<string, string> = {
+  'pm-api': '官方直采（origin=pm-api）',
+  manual: '人工复核确认（origin=manual）',
+  cv: '图像采样预填（origin=cv）',
+}
+
+/** 页脚按实际来源渲染；一条行都没有就不写来源（空态下写来源没意义） */
+function sourceFoot(dataset: string): string | false {
+  const origins = [...new Set(bucketMetrics(dataset).map((m) => m.origin || ''))].filter(Boolean)
+  if (!origins.length) return false
+  return `数据来源：${origins.map((o) => ORIGIN_LABELS[o] ?? o).join(' / ')}`
+}
 
 /**
  * 档位顺序从数据里推导（区间文本的第一段数字），不写死阈值 ——
@@ -164,8 +178,7 @@ onMounted(async () => {
         <StatusTag v-else-if="metrics.length" tone="green">本日全部已确认</StatusTag>
       </div>
       <div class="hint">
-        出清结果来自当日日报的表1(二) / 表2(二) 与图2 档位采样；未复核项在页面上标出，
-        不计入趋势聚合。
+        出清结果来自当日日报的表1(二) / 表2(二)；未复核项在页面上标出，不计入趋势聚合。
       </div>
     </PanelBox>
 
@@ -179,7 +192,7 @@ onMounted(async () => {
       :sub="`${cfg.sub} · ${DATASET_LABELS[cfg.ds] ?? cfg.ds}`"
       :span="6"
       :loading="loading"
-      :foot="`数据来源：${cfg.sub} 图像采样预填（origin=cv），需人工确认`"
+      :foot="sourceFoot(cfg.ds)"
     >
       <template v-if="cityBuckets(cfg.ds).length">
         <div class="buckets">

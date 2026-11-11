@@ -447,7 +447,8 @@ onMounted(async () => {
       :foot="false"
     >
       <div class="empty">
-        当前区间没有已确认的现货指标。去「管理 · 采集管理」采集并复核日报后回来。
+        当前区间没有已确认的现货指标。数据由官方直采（广东电力交易中心信息披露接口）
+        入库，没有记录说明该区间还没有入库。
       </div>
     </PanelBox>
 
@@ -467,7 +468,8 @@ onMounted(async () => {
         </div>
         <div v-if="priceRows.length" ref="priceEl" class="chart" />
         <div v-else class="empty">
-          本区间没有已确认的日前/实时成交电价。到「管理 · 采集管理」采集并复核日报后回来。
+          本区间没有已确认的日前/实时成交电价。数据同为官方直采入库，
+          没有记录说明该区间还没有入库。
         </div>
       </template>
     </PanelBox>
