@@ -1,0 +1,750 @@
+{
+ "c29512616fcf4438ae8e5526a9e96117": [
+  {
+   "templateUuid": "a3b4c5d6e7f81920d1e2f3a4b5c6d7e8",
+   "templateName": "电网企业基本信息",
+   "dateField": "businessRegisterDay",
+   "total": null,
+   "fields": [
+    [
+     "companyName",
+     "企业全称"
+    ],
+    [
+     "companyNature",
+     "企业性质"
+    ],
+    [
+     "creditCode",
+     "统一社会信用代码"
+    ],
+    [
+     "businessRegisterDay",
+     "工商注册时间"
+    ],
+    [
+     "legalPersonName",
+     "法定代表人"
+    ],
+    [
+     "contactPhone",
+     "联系方式"
+    ],
+    [
+     "powerArea",
+     "供电区域"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 电网企业 / 电网企业 / 基本信息"
+   ],
+   "nodeCode": "c29512616fcf4438ae8e5526a9e96117"
+  },
+  {
+   "templateUuid": "d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4",
+   "templateName": "电网企业关联信息",
+   "dateField": null,
+   "total": 14,
+   "fields": [
+    [
+     "relatedCompanyName",
+     "关联企业名称"
+    ],
+    [
+     "relatedRelation",
+     "关联关系"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 电网企业 / 电网企业 / 基本信息"
+   ],
+   "nodeCode": "c29512616fcf4438ae8e5526a9e96117"
+  }
+ ],
+ "136083801ada408c9e6084e365ef8af1": [],
+ "d0626cb715574093ae4af69c5d06c4ab": [],
+ "fc90ce716635473a909243e3f75401ba": [],
+ "41b65fd05a9c479ab7e7e91df13ba1a4": [],
+ "fd1883b991d348e0bb37fe538b2bb206": [],
+ "a699e1cbbd194b059177fb5dedceb701": [
+  {
+   "templateUuid": "c2d3e4f5a6b7c8d9e0a1b2c3d4e5f6a0b1",
+   "templateName": "交易机构基本信息",
+   "dateField": "businessRegTime",
+   "total": null,
+   "fields": [
+    [
+     "orgFullName",
+     "机构全称"
+    ],
+    [
+     "businessRegTime",
+     "工商注册时间"
+    ],
+    [
+     "unifiedSocialCreditCode",
+     "统一社会信用代码"
+    ],
+    [
+     "legalRepresentative",
+     "法定代表人"
+    ],
+    [
+     "servicePhone",
+     "服务电话"
+    ],
+    [
+     "officeAddress",
+     "办公地址"
+    ],
+    [
+     "websiteUrl",
+     "网站网址"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 交易机构基本信息"
+   ],
+   "nodeCode": "a699e1cbbd194b059177fb5dedceb701"
+  },
+  {
+   "templateUuid": "d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
+   "templateName": "交易中心股权结构",
+   "dateField": null,
+   "total": 7,
+   "fields": [
+    [
+     "shareholderName",
+     "股东"
+    ],
+    [
+     "equityRatio",
+     "持股比例（%）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 交易机构基本信息"
+   ],
+   "nodeCode": "a699e1cbbd194b059177fb5dedceb701"
+  }
+ ],
+ "14b929753d7f44729bd879a702724929": [],
+ "cbd63e7563fb4858970d19480de4da26": [],
+ "5633167d0d494e0badc12e227b6308d7": [],
+ "cf9dc0ec51d34275bce73e37ec22ffa5": [],
+ "474380b306e64c1a886228d9a565e381": [],
+ "e3eb51cfb6ad4efc804475a5de507477": [],
+ "49e5c71821cd4ee3a9f1e0f940a08a43": [],
+ "7eb925b58b594cc392c52c96034fe3e5": [],
+ "e12c1f54bf0d433db21ee3a540d4b8e0": [],
+ "55113826f24644a685c6bd40a028cc36": [],
+ "935f3c939f3d487a8b87e04b9a644834": [
+  {
+   "templateUuid": "0d1e2a3b4c5d6e7f8b9c0d1erq3b4c",
+   "templateName": "现货市场总体运行情况（日前）",
+   "dateField": "date",
+   "total": 680,
+   "fields": [
+    [
+     "date",
+     "日期"
+    ],
+    [
+     "generationSideDailyTotalVolume",
+     "发电侧日前总成交电量（MWh）"
+    ],
+    [
+     "consumerSideDailyTotalVolume",
+     "用电侧日前总成交电量（MWh）"
+    ],
+    [
+     "generationSideDailyAvgPrice",
+     "发电侧日前加权平均电价（元/MWh）"
+    ],
+    [
+     "generationSideDailyMaxPrice",
+     "发电侧日前加权最高电价（元/MWh）"
+    ],
+    [
+     "generationSideDailyMinPrice",
+     "发电侧日前加权最低电价（元/MWh）"
+    ],
+    [
+     "dailyDeclarationAvgPrice",
+     "日前申报均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 现货市场总体运行情况"
+   ],
+   "nodeCode": "935f3c939f3d487a8b87e04b9a644834"
+  },
+  {
+   "templateUuid": "0d1e2a3b4c5d6e7f8b9c0d1e2a3b4c",
+   "templateName": "现货市场总体运行情况（实时）",
+   "dateField": "date",
+   "total": 678,
+   "fields": [
+    [
+     "date",
+     "日期"
+    ],
+    [
+     "generationSideRealTimeTotalVolume",
+     "发电侧实时总成交电量（MWh）"
+    ],
+    [
+     "generationSideRealTimeAvgPrice",
+     "发电侧实时加权平均电价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 现货市场总体运行情况"
+   ],
+   "nodeCode": "935f3c939f3d487a8b87e04b9a644834"
+  }
+ ],
+ "541b11c3738d4feaa4a06118db67d886": [
+  {
+   "templateUuid": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7",
+   "templateName": "中长期年度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 3,
+   "fields": [
+    [
+     "year",
+     "年份"
+    ],
+    [
+     "netContractQuantity",
+     "净合约成交电量（MWh）"
+    ],
+    [
+     "totalContractQuantity",
+     "累计合约成交电量（MWh）"
+    ],
+    [
+     "netContractPrice",
+     "净合约成交均价（元/MWh）"
+    ],
+    [
+     "totalContractPrice",
+     "累计合约成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 年度批发电能量交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "541b11c3738d4feaa4a06118db67d886"
+  },
+  {
+   "templateUuid": "c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6",
+   "templateName": "绿电年度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 16,
+   "fields": [
+    [
+     "seqId",
+     "序列编号"
+    ],
+    [
+     "seqName",
+     "序列名称"
+    ],
+    [
+     "year",
+     "年份"
+    ],
+    [
+     "totalEnergy",
+     "成交电量（MWh）"
+    ],
+    [
+     "dnlAvgPrice",
+     "电能量成交均价（元/MWh）"
+    ],
+    [
+     "lzAvgPrice",
+     "绿色环境价值成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 年度批发电能量交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "541b11c3738d4feaa4a06118db67d886"
+  }
+ ],
+ "de68fe2aabf845c6b8f7759ba776c3fd": [
+  {
+   "templateUuid": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8",
+   "templateName": "中长期月度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 46,
+   "fields": [
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "netContractQuantity",
+     "净合约成交电量（MWh）"
+    ],
+    [
+     "totalContractQuantity",
+     "累计合约成交电量（MWh）"
+    ],
+    [
+     "netContractPrice",
+     "净合约成交均价（元/MWh）"
+    ],
+    [
+     "totalContractPrice",
+     "累计合约成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 月度批发电能量交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "de68fe2aabf845c6b8f7759ba776c3fd"
+  },
+  {
+   "templateUuid": "d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7",
+   "templateName": "绿电月度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 108,
+   "fields": [
+    [
+     "seqId",
+     "序列编号"
+    ],
+    [
+     "seqName",
+     "序列名称"
+    ],
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "totalEnergy",
+     "成交电量（MWh）"
+    ],
+    [
+     "dnlAvgPrice",
+     "电能量成交均价（元/MWh）"
+    ],
+    [
+     "lzAvgPrice",
+     "绿色环境价值成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 月度批发电能量交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "de68fe2aabf845c6b8f7759ba776c3fd"
+  }
+ ],
+ "4142ff66185e4cdd826149072313bc71": [
+  {
+   "templateUuid": "d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7",
+   "templateName": "绿电月度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 108,
+   "fields": [
+    [
+     "seqId",
+     "序列编号"
+    ],
+    [
+     "seqName",
+     "序列名称"
+    ],
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "totalEnergy",
+     "成交电量（MWh）"
+    ],
+    [
+     "dnlAvgPrice",
+     "电能量成交均价（元/MWh）"
+    ],
+    [
+     "lzAvgPrice",
+     "绿色环境价值成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 绿电批发交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "4142ff66185e4cdd826149072313bc71"
+  }
+ ],
+ "cbd7fa65a3804357b3c05dbf57c354dd": [
+  {
+   "templateUuid": "50e240540324403095364dc02ros2026",
+   "templateName": "绿电零售交易成交电量、均价及用户数",
+   "dateField": null,
+   "total": 23,
+   "fields": [
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "energy",
+     "电量（MWh）"
+    ],
+    [
+     "avgPrice",
+     "均价（元/MWh）"
+    ],
+    [
+     "userCount",
+     "用户数（户）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 电能量、绿电零售交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "cbd7fa65a3804357b3c05dbf57c354dd"
+  },
+  {
+   "templateUuid": "50e240540324403095364dc01ros2026",
+   "templateName": "电能量零售交易成交电量、均价及用户数",
+   "dateField": null,
+   "total": 37,
+   "fields": [
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "type",
+     "类型"
+    ],
+    [
+     "energy",
+     "电量（MWh）"
+    ],
+    [
+     "avgPrice",
+     "均价（元/MWh）"
+    ],
+    [
+     "userCount",
+     "用户数（户）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 电力市场运行情况 / 电能量、绿电零售交易成交均价及电量等总体情况"
+   ],
+   "nodeCode": "cbd7fa65a3804357b3c05dbf57c354dd"
+  }
+ ],
+ "6778974af067487abadc7099ac596419": [
+  {
+   "templateUuid": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+   "templateName": "强制或自愿退出且公示生效后的市场经营主体名单（售电公司）",
+   "dateField": null,
+   "total": 8498,
+   "fields": [
+    [
+     "companyNo",
+     "售电公司编码"
+    ],
+    [
+     "companyName",
+     "售电公司名称"
+    ],
+    [
+     "exitType",
+     "退市类型"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 退市市场经营主体名单 / 退市市场经营主体名单-售电公司"
+   ],
+   "nodeCode": "6778974af067487abadc7099ac596419"
+  }
+ ],
+ "b9f0bebbd1c74169a0ca3ed2418786e6": [
+  {
+   "templateUuid": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+   "templateName": "强制或自愿退出且公示生效后的市场经营主体名单（电力用户）",
+   "dateField": null,
+   "total": 784732,
+   "fields": [
+    [
+     "companyNo",
+     "企业编码"
+    ],
+    [
+     "companyName",
+     "企业名称"
+    ],
+    [
+     "retireReason",
+     "退市原因"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 退市市场经营主体名单 / 退市市场经营主体名单-电力用户"
+   ],
+   "nodeCode": "b9f0bebbd1c74169a0ca3ed2418786e6"
+  }
+ ],
+ "04186b0d8d3244f3abdbc42520568dc5": [
+  {
+   "templateUuid": "1e2a3b4c5d6e7f8b9c0d1e2a3b4c5d",
+   "templateName": "HHI指标",
+   "dateField": null,
+   "total": 2,
+   "fields": [
+    [
+     "year",
+     "年份"
+    ],
+    [
+     "hhiIndex",
+     "HHI指标"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 市场结构情况 / HHI指标"
+   ],
+   "nodeCode": "04186b0d8d3244f3abdbc42520568dc5"
+  }
+ ],
+ "970ad0be8f7c4c7eba2db0e651c944da": [
+  {
+   "templateUuid": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8g9",
+   "templateName": "Top-m指标",
+   "dateField": null,
+   "total": 12,
+   "fields": [
+    [
+     "year",
+     "年份"
+    ],
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "topM",
+     "TOP1"
+    ],
+    [
+     "top4",
+     "TOP4"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 市场结构情况 / Top-m指标"
+   ],
+   "nodeCode": "970ad0be8f7c4c7eba2db0e651c944da"
+  }
+ ],
+ "30be48fd5c57418987d11cf420ad51f7": [],
+ "800428f94fdc4320bfbbed7e801da027": [],
+ "00b3cdefa94845dd8801d13f32e73ef3": [],
+ "3008a439e8974d5fa9cc5f697683be58": [],
+ "b8bbcaad18bf490b91d2472d8b26b8e4": [],
+ "4eb3b39f25114af1850bb2b1b05a05d9": [],
+ "c5ad7507807a4c6b80b6748cb073bab7": [],
+ "7572debf8efd49d8a8e35b04fa11cc82": [],
+ "a54e58c6f7e742759118868bb38f0fb4": [],
+ "fd4c0bb4490643569e7f2e9929a30c4e": [],
+ "24f88264298543d09356286f06b9631e": [],
+ "6e2d695037b14015ad11be96c7fe589c": [],
+ "6747929c682a4cd8812fad312294c712": [],
+ "48938d469a6c4423a8ad5c296944c443": [],
+ "db8d9bbf88a949b098ca9762c3a2eded": [],
+ "64f51b14f1f24830b15d1ad3b6987380": [],
+ "c339079305934548b2ed2bee0d78e3de": [],
+ "434f710103e6454a96e7f853f49b6451": [],
+ "3b5c014143d64fc8b67f6685408e9ea1": [],
+ "69aca81b1d174c95b311f3e4b42325e6": [],
+ "f2e5d580a4a94ff5a88d36464732ff50": [],
+ "ff702beef0f147b5acbb051416c6bc1a": [],
+ "baaae8f442a64fdc9ac2dc63be6e1c7c": [],
+ "baf45f15c00b4a628c64f874ad1b2e06": [
+  {
+   "templateUuid": "d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7",
+   "templateName": "绿电月度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 108,
+   "fields": [
+    [
+     "seqId",
+     "序列编号"
+    ],
+    [
+     "seqName",
+     "序列名称"
+    ],
+    [
+     "month",
+     "月份"
+    ],
+    [
+     "totalEnergy",
+     "成交电量（MWh）"
+    ],
+    [
+     "dnlAvgPrice",
+     "电能量成交均价（元/MWh）"
+    ],
+    [
+     "lzAvgPrice",
+     "绿色环境价值成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 交易总体情况"
+   ],
+   "nodeCode": "baf45f15c00b4a628c64f874ad1b2e06"
+  },
+  {
+   "templateUuid": "c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6",
+   "templateName": "绿电年度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 16,
+   "fields": [
+    [
+     "seqId",
+     "序列编号"
+    ],
+    [
+     "seqName",
+     "序列名称"
+    ],
+    [
+     "year",
+     "年份"
+    ],
+    [
+     "totalEnergy",
+     "成交电量（MWh）"
+    ],
+    [
+     "dnlAvgPrice",
+     "电能量成交均价（元/MWh）"
+    ],
+    [
+     "lzAvgPrice",
+     "绿色环境价值成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 交易总体情况"
+   ],
+   "nodeCode": "baf45f15c00b4a628c64f874ad1b2e06"
+  },
+  {
+   "templateUuid": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7",
+   "templateName": "中长期年度交易成交均价及电量等总体情况",
+   "dateField": null,
+   "total": 3,
+   "fields": [
+    [
+     "year",
+     "年份"
+    ],
+    [
+     "netContractQuantity",
+     "净合约成交电量（MWh）"
+    ],
+    [
+     "totalContractQuantity",
+     "累计合约成交电量（MWh）"
+    ],
+    [
+     "netContractPrice",
+     "净合约成交均价（元/MWh）"
+    ],
+    [
+     "totalContractPrice",
+     "累计合约成交均价（元/MWh）"
+    ]
+   ],
+   "nodes": [
+    "根节点 / 市场运营机构 / 电力交易机构 / 交易总体情况"
+   ],
+   "nodeCode": "baf45f15c00b4a628c64f874ad1b2e06"
+  }
+ ],
+ "e551be3c3fa84c3693ef3f6eaaca8c5d": [],
+ "1e26d71b2d1b4d8cb9f51753c9a56649": [],
+ "7ff6c2aa0e884322b780e0c1b9cc486c": [],
+ "2a0fa7c147604596b161edd3a3c33337": [],
+ "a0f2554d6b3f44e7a1c3446758777268": [],
+ "aed9ae8e391242c8b96c0f4826de5645": [],
+ "a358a516000f4e76b035ec5aa8243f0e": [],
+ "3620cfd34aab4eba9ad42c22bf25f102": [],
+ "38680ee0a77a4414bad78fdb7dd60a36": [],
+ "967c75eaeddc4b64a65e089db7ee3b1b": [],
+ "4aac6ac4eacb4736a1a8f6bd97ca465f": [],
+ "81ebb788c1794774853aaef3aef175a3": [],
+ "20613377af9b4207bbdf0c1596290762": [],
+ "0ae9d9a4273945c99f7a7e11bb6c4522": [],
+ "3b09fadd44554dffbf809c7026e3f236": [],
+ "4b7609fee7774052983567db4dcc00ec": [],
+ "8749dee46711452c8f92f448e30e9a6a": [],
+ "58d0bb8e81984f9b95a76e27f4ffe66c": [],
+ "26f69d78c3b84eaf97f49196eea5526a": [],
+ "3a4b9460cd53491c9509ddb5bfe89fc4": [],
+ "c0c27170fccb40a88bff2a121013353d": [],
+ "97955b4551ff48e99efe32e3d23a5d64": [],
+ "3c9f9a45c70c4d6ab035c9f3b7581ecd": [],
+ "208cc2a9a4a9425482f47db3e8357b0b": [],
+ "c67d8a415b21485a99effc917101aa9a": [],
+ "13c20137edf34642987bf201fb8ad5a8": [],
+ "7db2cedd27b244c1b5c76b06df773d8c": [],
+ "99d3baa3a0814ce2a62952661a1bca0d": [],
+ "b59b100a90ed404d82b158c36ee0523b": [],
+ "5e1fad37f4e1497496430c634877e517": [],
+ "9b7f90ae6242473a8114f4300e962b74": [],
+ "21ed14757f48444b804770a0ea595a73": [],
+ "d3f15a260869424096788a7cf6b97a4d": [],
+ "ec18dd385a5c4051a86e15c89c6947df": [],
+ "d31ff38af78a44eb9e601acaba3ce473": [],
+ "8571fda124d343779e011e9a514ce91c": [],
+ "0905001670474ec183e647a5b47dc8eb": [],
+ "5f8af1dfa5cc4e64b62c9407b7205ec3": [],
+ "db7a0708a9794fad80045171994821c3": [],
+ "d655bc1eedb5424592d2a875ed599042": [],
+ "0bed41abcaaf4ced9a35e3b86abf7fb6": [],
+ "e2ad3e9ab756442b8033fab7a229c72b": [],
+ "79411bd76a9a4f5e8e6df4325699f9d4": [],
+ "8bd8ec3ae86f4373aa21c5cf1af1f577": [],
+ "95f9639c804d4061ac7ae68ae5932605": [],
+ "bcc25842253d43e98a24e752cc2bf133": [],
+ "99fb3819cabb4c1ebd8e2eb2bc8b06fe": [],
+ "ebd72a0da48c4ce3b8e67feec5e3b78d": [],
+ "3bf6aa98582a4e3894ce880eaa145e46": [],
+ "a9315037e0894817ba0788ec73e1e492": [],
+ "84392718fa6d4a7c9714c60f29378d4c": [],
+ "cf4e3727a33147c0bc264f6b9c23550e": [],
+ "b70192f297bd44e49ddb43deaf382c20": [],
+ "f9ad9c32209141f4bb49dd43a6491175": [],
+ "4b23375cfe5c497b87c0c0d4c86d9ad7": [],
+ "5af815da69094a7d930a367d4a4abf1b": [],
+ "301c6f196eec44c99970ff514b60699b": [],
+ "23d80d4f866a48bda1ad65a079f15afc": [],
+ "21c5a761ee1b4cdcbfac5035a7ababb7": [],
+ "f3453e2a965b4f1f85e1d025034e3066": [],
+ "2844489c2bfd435d951b3e839eaee77c": [],
+ "15f6bc19a8624742b7cd4c12a4717025": [],
+ "42973fc2164c45a884bfc48db735421e": [],
+ "a8fca3e0f5d64f489507c7b3566832b0": [],
+ "1a7d979ede58402c8c02be9873b8a791": [],
+ "91d4c33aa5d940bd8fa6d3791ec872cf": [],
+ "47e86f9ba953401684810004534d7dd3": [],
+ "5fa8bc7cba3e41d1bf1be04b9baddb99": [],
+ "2bd032f8bd6148d7b6e78c3ac6c76483": [],
+ "7f7b67fd2da04bfa9a098dad0aa866b3": []
+}

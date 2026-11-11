@@ -8,8 +8,6 @@ import (
 	"application/internal/utils"
 	_ "application/manifest"
 	"common"
-	"common/c_base"
-	"common/c_enum"
 	"common/c_log"
 	"context"
 	"os"
@@ -57,13 +55,8 @@ func InitSystem(ctx context.Context, parser *gcmd.Parser) error {
 	// 配置里的 logger.level 只是初值，运行期以设置里的为准。
 	applog.ApplyGlobalLogLevel(ctx, g.Log())
 
-	// 初始化存储管理器
-	storageManager := s_storage.NewStorageManagerWithConfig(ctx, &c_base.SStorageConfig{
-		Enable: true,
-		Type:   c_enum.EStorageTypeTsdb,
-		Url:    "",
-		Params: map[string]string{},
-	})
+	// 初始化存储管理器（后端由环境变量决定，缺省本地 TSDB）
+	storageManager := s_storage.NewStorageManagerWithConfig(ctx, storageConfigFromEnv())
 	common.RegisterStorageInstance(storageManager.GetStorageInstance())
 
 	// 数据保留：按 device/system/log 三条设置定期清理历史数据。
