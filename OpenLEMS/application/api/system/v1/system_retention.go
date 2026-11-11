@@ -18,6 +18,8 @@ type RetentionStatus struct {
 	LastRunAt           string `json:"lastRunAt" dc:"上次清理时间（本地时间，空=本次启动后还没跑过）"`
 	LastRunTimeMs       int64  `json:"lastRunTimeMs" dc:"上次清理耗时（毫秒）"`
 	LastLogRowsDeleted  int    `json:"lastLogRowsDeleted" dc:"上次清掉的日志行数"`
+	LastLogFilesDeleted int    `json:"lastLogFilesDeleted" dc:"上次删掉的磁盘日志文件个数"`
+	LastLogBytesFreed   int64  `json:"lastLogBytesFreed" dc:"上次释放的磁盘日志字节数"`
 	LastDeviceBefore    string `json:"lastDeviceBefore" dc:"上次按设备保留天数算出的截止时间"`
 	LastSystemBefore    string `json:"lastSystemBefore" dc:"上次按系统保留天数算出的截止时间"`
 	LastLogBefore       string `json:"lastLogBefore" dc:"上次按日志保留天数算出的截止时间"`

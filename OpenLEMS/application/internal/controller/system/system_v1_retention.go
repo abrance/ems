@@ -35,6 +35,8 @@ func buildRetentionStatus(ctx context.Context) v1.RetentionStatus {
 		status.LastRunAt = last.At.Format(layout)
 		status.LastRunTimeMs = last.TimeMs
 		status.LastLogRowsDeleted = last.LogRowsDeleted
+		status.LastLogFilesDeleted = last.LogFilesDeleted
+		status.LastLogBytesFreed = last.LogBytesFreed
 		status.LastDeviceBefore = last.DeviceBefore.Format(layout)
 		status.LastSystemBefore = last.SystemBefore.Format(layout)
 		status.LastLogBefore = last.LogBefore.Format(layout)

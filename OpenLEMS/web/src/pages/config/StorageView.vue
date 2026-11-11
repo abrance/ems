@@ -56,7 +56,7 @@ async function cleanNow() {
   cleaning.value = true
   try {
     retention.value = await cleanRetentionNow()
-    showToast('green', `已清理：日志删除 ${retention.value.lastLogRowsDeleted} 行，耗时 ${retention.value.lastRunTimeMs}ms`)
+    showToast('green', `已清理：日志删除 ${retention.value.lastLogRowsDeleted} 行 / 文件 ${retention.value.lastLogFilesDeleted} 个（${humanBytes(retention.value.lastLogBytesFreed)}），耗时 ${retention.value.lastRunTimeMs}ms`)
     await load()
   } catch (err) {
     showToast('red', `清理失败：${err instanceof Error ? err.message : '未知错误'}`)
@@ -163,7 +163,7 @@ onMounted(load)
         <template v-if="retention?.lastRunAt">
           <strong>上次清理 {{ retention.lastRunAt }}</strong>
           <span>
-            　删除日志 {{ retention.lastLogRowsDeleted }} 行 · 耗时 {{ retention.lastRunTimeMs }}ms ·
+            　删除日志 {{ retention.lastLogRowsDeleted }} 行 / 文件 {{ retention.lastLogFilesDeleted }} 个（{{ humanBytes(retention.lastLogBytesFreed) }}）· 耗时 {{ retention.lastRunTimeMs }}ms ·
             截止：设备 {{ retention.lastDeviceBefore }} / 系统 {{ retention.lastSystemBefore }} / 日志 {{ retention.lastLogBefore }}
           </span>
           <span v-if="retention.lastError" class="err">　⚠️ {{ retention.lastError }}</span>
