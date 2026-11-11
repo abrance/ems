@@ -24,6 +24,15 @@ func TestAuditCreatedAtNormalizesNaiveLocalTime(t *testing.T) {
 		t.Fatalf("无偏移时间应按北京时间解释: got %s want %s", got, want)
 	}
 
+	// 无偏移但带小数秒：同理按北京时间解释，小数秒被丢弃
+	naiveFractional := &s_db_model.SSpotMetricAuditModel{
+		CreatedAt:     gtime.NewFromTime(time.Date(2026, 11, 11, 16, 27, 21, 0, time.UTC)),
+		CreatedAtText: "2026-11-11 16:27:21.123",
+	}
+	if got, want := auditCreatedAt(naiveFractional), "2026-11-11T16:27:21+08:00"; got != want {
+		t.Fatalf("无偏移带小数秒的时间应按北京时间解释: got %s want %s", got, want)
+	}
+
 	// 带偏移的行：驱动按 12:33Z 解析，换算成北京时间应为 20:33
 	zoned := &s_db_model.SSpotMetricAuditModel{
 		CreatedAt:     gtime.NewFromTime(time.Date(2026, 9, 22, 12, 33, 42, 0, time.UTC)),
@@ -36,7 +45,7 @@ func TestAuditCreatedAtNormalizesNaiveLocalTime(t *testing.T) {
 
 func TestHasZoneOffset(t *testing.T) {
 	for s, want := range map[string]bool{
-		"2026-11-11 16:27:21":                  false,
+		"2026-11-11 16:27:21":                 false,
 		"2026-09-22 12:33:42.375728332+00:00": true,
 		"2026-09-22T12:33:42Z":                true,
 		"2026-09-22 12:33:42+0800":            true,
