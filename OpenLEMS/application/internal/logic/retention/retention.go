@@ -135,9 +135,9 @@ func RunOnce(ctx context.Context) *SResult {
 	}
 
 	// 数据库里的日志行清掉了，磁盘上的 rotate 文件还得单独清：GF 自带的
-	// rotateBackupLimit 只认 `.\d{20}.log` 这类名字，本项目的命名位数不对，
-	// backup 数组恒为空，一个都不删（线上 117 个 5MB 文件时仍是如此）。
-	// 这里用同一个 LogBefore 兜底，LogRetentionDays 才真的生效。
+	// rotateBackupLimit 按「份数」管，管不到按天命名的历史文件，份数上限本身也很大
+	// （100 份 × 5MB = 500MB），一次刷屏就能顶满。
+	// 这里按同一个 LogBefore 补一条时间维度，LogRetentionDays 才真的对磁盘生效。
 	logDir := strings.TrimSpace(g.Cfg().MustGet(ctx, "logger.path").String())
 	logFilePattern := g.Cfg().MustGet(ctx, "logger.file", "{Ymd}.log").String()
 	files, freed, notes := CleanLogFiles(logDir, logFilePattern, res.LogBefore)

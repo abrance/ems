@@ -22,9 +22,9 @@ func TestCleanLogFiles(t *testing.T) {
 		}
 	}
 
-	expired := "20261001.20261001120000.000000.001.log"
-	inPeriod := "20261105.20261105120000.000000.001.log"
-	active := "20261111.20261111120000.000000.001.log"
+	expired := "20261001.20261001120000000101.log"
+	inPeriod := "20261105.20261105120000000101.log"
+	active := "20261111.20261111120000000101.log"
 	write(expired, 100, 40*24*time.Hour)
 	write(inPeriod, 200, 6*24*time.Hour)
 	write(active, 300, 0)
@@ -51,8 +51,8 @@ func TestCleanLogFiles(t *testing.T) {
 func TestCleanLogFilesKeepsNewest(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
-	older := "20260901.20260901120000.000000.001.log"
-	newest := "20260902.20260902120000.000000.001.log"
+	older := "20260901.20260901120000000101.log"
+	newest := "20260902.20260902120000000101.log"
 	for name, age := range map[string]time.Duration{
 		older:  90 * 24 * time.Hour,
 		newest: 60 * 24 * time.Hour,

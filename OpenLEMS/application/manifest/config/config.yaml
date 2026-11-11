@@ -7,10 +7,10 @@ logger:
   path:    "out/logs/app"        # 应用日志文件目录，建议使用绝对路径于生产环境
   writerColorEnable: true  # 日志文件是否带上颜色。默认false，表示不带颜色
   rotateSize: 5242880            # 按照日志文件大小对文件进行滚动切分。5MB = 5*1024*1024 = 5242880字节
-  # GF 自带的备份文件清理只认 `.{20位数字}.log` 这种命名，本项目的 `{Ymd}.{时间戳}.log`
-  # 位数对不上，backup 数组恒为空 → 这个上限实际上不生效（曾经攒下 117 个 5MB 文件）。
-  # 真正的保底是数据保留任务（internal/logic/retention）：按「日志保留（天）」删磁盘文件。
-  rotateBackupLimit: 20          # 名义上的切分文件数上限（20 个 * 5MB = 100MB），不要依赖它清理
+  # GF 自带的备份清理只认 `.{20位数字}.log`，本项目 `{Ymd}.{20位}.log` 正好匹配，上限确实生效；
+  # 但它只按「份数」算，管不到按天命名的历史文件，100 份 × 5MB = 500MB 也太大。
+  # 所以降到 20 份（≈100MB），另由数据保留任务（internal/logic/retention）按天删超期文件。
+  rotateBackupLimit: 20          # 切分文件保留份数，20 份 × 5MB ≈ 100MB
   biz_ems_stdout: true # 业务日志输出到控制台
 gfcli:
   run:
