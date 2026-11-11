@@ -58,8 +58,14 @@ qiniu:
   domain: "http://file.xiaoyxq.top"
   zone: "z2"
 
-# 广东电网 15 分钟负荷 / 日前电价 / 实时电价。首页「电网日指标」卡片读取此 CSV。
+# 广东电网 15 分钟负荷 / 日前电价 / 实时电价（第三方 CSV 通道）。
+#
+# 2026-11-11 起广东市场的权威数据是官方接口直采（入库 gd_spot_metric，见 tools/gdpm），
+# 这条通道**不再更新**：enabled=false 时只读本地已有缓存，不再向第三方站点发请求。
+# 保留读缓存是为了 96 点分时序列（复盘 / 策略反演 / 分时预测）—— 官方披露接口
+# 只有日频与月频年频，没有 96 点分时。默认 true（历史行为）。
 gd_metric:
+  enabled: false
   url: "https://file.xiaoyxq.top/gd_metric.csv"
   cache_path: "out/gd_metric.csv"
   refresh_hours: 6

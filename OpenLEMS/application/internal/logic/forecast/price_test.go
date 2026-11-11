@@ -35,6 +35,36 @@ func TestResolvePriceSpec(t *testing.T) {
 	}
 }
 
+// 官方直采（pm-api）用的是源站原名，与 OCR 日报的「平均电价」不同名。
+// 切源后如果只认旧名，序列会整个变空 —— 表现是「数据不足 7 天」，很容易误判成数据没入库。
+func TestBuildDailySeriesAcceptsOfficialMetricNames(t *testing.T) {
+	for market, official := range map[string]string{
+		"ahead": metricOfficialAhead,
+		"real":  metricOfficialReal,
+	} {
+		spec, err := resolvePriceSpec(market)
+		if err != nil {
+			t.Fatalf("resolvePriceSpec(%s): %v", market, err)
+		}
+		models := []*s_db_model.SSpotMetricModel{
+			metric("2026-11-09", spec.Dataset, priceScope, official, "gdpm-api", 400, "元/兆瓦时"),
+			metric("2026-11-10", spec.Dataset, priceScope, official, "gdpm-api", 410, "元/兆瓦时"),
+			// 同名的电量指标不能被当成电价
+			metric("2026-11-10", spec.Dataset, priceScope, "发电侧日前总成交电量", "gdpm-api", 999, "MWh"),
+		}
+		dates, values, unit := buildDailySeries(models, spec)
+		if len(dates) != 2 || len(values) != 2 {
+			t.Fatalf("%s: 点数 = %d/%d, want 2/2", market, len(dates), len(values))
+		}
+		if values[0] != 400 || values[1] != 410 {
+			t.Fatalf("%s: 值不对 %v", market, values)
+		}
+		if unit != "元/兆瓦时" {
+			t.Fatalf("%s: 单位不对 %q", market, unit)
+		}
+	}
+}
+
 func TestBuildDailySeries(t *testing.T) {
 	spec, _ := resolvePriceSpec("ahead")
 	models := []*s_db_model.SSpotMetricModel{

@@ -596,6 +596,74 @@ const FAKE_SIMILAR = {
   ],
 }
 
+
+// ===== 官方电力市场指标看板（/api/spot-market/board）=====
+// 日前 3 天、实时 2 天（T+2 发布），这样「日前-实时价差」只有 2 个点 ——
+// 顺带守住「不许拿别的日期的实时价来配」这条口径。
+const marketSeries = (dataset, scope, metric, unit, values) => ({
+  dataset, scope, metric, unit, grain: 'day',
+  points: values.map(([period, value]) => ({ period, value })),
+  latest: { period: values[values.length - 1][0], value: values[values.length - 1][1] },
+  momPct: 2.5,
+  yoyPct: -4.1,
+  peak: Math.max(...values.map((v) => v[1])),
+  valley: Math.min(...values.map((v) => v[1])),
+  spread: Math.max(...values.map((v) => v[1])) - Math.min(...values.map((v) => v[1])),
+  mean: values.reduce((n, v) => n + v[1], 0) / values.length,
+  days: values.length,
+})
+const FAKE_SPOT_MARKET = {
+  date: '2026-09-21',
+  from: '2026-06-24',
+  to: '2026-09-21',
+  days: 90,
+  daily: [
+    marketSeries('day_ahead_trade', '发电侧', '发电侧日前加权平均电价', '元/兆瓦时',
+      [['2026-09-19', 380], ['2026-09-20', 390], ['2026-09-21', 400.5]]),
+    marketSeries('day_ahead_trade', '发电侧', '发电侧日前加权最高电价', '元/兆瓦时',
+      [['2026-09-21', 760]]),
+    marketSeries('day_ahead_trade', '发电侧', '发电侧日前加权最低电价', '元/兆瓦时',
+      [['2026-09-21', 60]]),
+    marketSeries('day_ahead_trade', '发电侧', '日前申报均价', '元/兆瓦时',
+      [['2026-09-21', 412.3]]),
+    marketSeries('day_ahead_trade', '发电侧', '发电侧日前总成交电量', 'MWh',
+      [['2026-09-19', 1500000], ['2026-09-20', 1510000], ['2026-09-21', 1520000]]),
+    marketSeries('day_ahead_trade', '用电侧', '用电侧日前总成交电量', 'MWh',
+      [['2026-09-19', 2300000], ['2026-09-20', 2310000], ['2026-09-21', 2320000]]),
+    marketSeries('realtime_trade', '发电侧', '发电侧实时加权平均电价', '元/兆瓦时',
+      [['2026-09-19', 360], ['2026-09-20', 370]]),
+    marketSeries('realtime_trade', '发电侧', '发电侧实时总成交电量', 'MWh',
+      [['2026-09-19', 1400000], ['2026-09-20', 1410000]]),
+  ],
+  periodic: [
+    marketSeries('mid_long_term_month', '', '净合约成交均价', '元/兆瓦时',
+      [['2026-08-01', 450], ['2026-09-01', 455]]),
+    marketSeries('mid_long_term_month', '', '累计合约成交均价', '元/兆瓦时',
+      [['2026-08-01', 449], ['2026-09-01', 449.7]]),
+    marketSeries('mid_long_term_month', '', '净合约成交电量', 'MWh',
+      [['2026-08-01', 7600000], ['2026-09-01', 7624266]]),
+    marketSeries('green_power_month', '2026年9月月度绿电挂牌交易', '成交电量', 'MWh',
+      [['2026-08-01', 200000], ['2026-09-01', 276208]]),
+    marketSeries('green_power_month', '2026年9月月度绿电挂牌交易', '电能量成交均价', '元/兆瓦时',
+      [['2026-08-01', 520], ['2026-09-01', 528]]),
+    marketSeries('hhi', '', 'HHI指标', '',
+      [['2024-01-01', 111908.82], ['2025-01-01', 319329.39]]),
+  ].map((x) => ({ ...x, grain: x.dataset.endsWith('_year') || x.dataset === 'hhi' ? 'year' : 'month' })),
+  aheadRealtimeSpread: [
+    { period: '2026-09-19', value: 20 },
+    { period: '2026-09-20', value: 20 },
+  ],
+  spreadPeak: 20,
+  spreadValley: 20,
+  spreadMean: 20,
+  coverage: [
+    { dataset: 'day_ahead_trade', from: '2026-06-24', to: '2026-09-21', periods: 90, missing: [], lastDate: '2026-09-21' },
+    { dataset: 'realtime_trade', from: '2026-06-24', to: '2026-09-21', periods: 88, missing: [], lastDate: '2026-09-20' },
+  ],
+  source: '广东电力交易中心 信息披露接口（pm.gd.csg.cn）直采，origin=pm-api',
+  updatedAt: '2026-09-21',
+}
+
 const FAKE_SUPPLY_BINS = [
   { loadFrom: 500, loadTo: 1500, loadMid: 1000, count: 500, q: uniformQ },
   { loadFrom: 1500, loadTo: 2500, loadMid: 2000, count: 500, q: uniformQ },
@@ -903,6 +971,7 @@ globalThis.fetch = async (url, init) => {
     return json(u.includes('grain=day') ? FAKE_RECORDED_DAY : FAKE_RECORDED)
   }
   if (u.includes('/api/forecast/backtest')) return json(FAKE_BACKTEST_RESULT)
+  if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
   if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
   if (u.includes('/api/gd-metric/supply-curve')) {
@@ -1085,11 +1154,11 @@ console.log('\n== 默认区间的锚点（数据滞后时不能落在空区间�
   check(r.from === '2026-08-25' && r.to === '2026-08-31', '区间右端随锚点回到数据内', JSON.stringify(r))
 }
 
-console.log('\n== 场景 · 信息披露（图表确实画出了数据）==')
+console.log('\n== 场景 · 信息披露（官方直采数据，图表确实画出了数据）==')
 await clickTo('场景', '信息披露')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
-  await waitFor(() => bodyHas('负荷与电价曲线'))
+  await waitFor(() => bodyHas('日前 / 实时加权均价'))
 
   // 数据场景：只有一支，所以是标签不是下拉；且必须说清另外两支没有数据源
   const sceneChip = doc.querySelector('[data-scene]')
@@ -1099,43 +1168,63 @@ await clickTo('场景', '信息披露')
       !sceneChip?.tagName.match(/SELECT|INPUT/i),
     '「场景」不是可切换控件（切换本来不改变任何数据）',
   )
-  const hint = sceneChip?.getAttribute('title') ?? ''
-  check(hint.includes('山西现货交易') && hint.includes('需要'), '悬停说明列出规划中的场景及各自缺的数据源', hint.split('\n')[1] ?? '')
 
-  // KPI 是模板绑定，之前「图空白」时它们照样有值 —— 所以不能只断言 KPI
-  check(bodyHas('3000.0'), 'KPI 显示接口返回的负荷均值')
-  check(bodyHas('380.0'), 'KPI 显示日前均价')
+  // 这一页必须只读官方直采数据：不再出现旧的 gd-metric 调用点
+  check(
+    requests.filter((r) => r.url.includes('/api/spot-market/board')).length > 0,
+    '走官方指标接口 /api/spot-market/board',
+  )
+  check(
+    requests.filter((r) => r.url.includes('/api/gd-metric')).length === 0,
+    '不再调用第三方 /api/gd-metric',
+    JSON.stringify(requests.filter((r) => r.url.includes('/api/gd-metric')).map((r) => r.url)),
+  )
+
+  // KPI 是模板绑定，图空白时它们照样有值 —— 所以不能只断言 KPI
+  check(bodyHas('400.50'), 'KPI 显示日前加权均价（带两位小数）')
+  check(bodyHas('2,320,000'), 'KPI 显示用电侧成交电量（千分位）')
+  check(bodyHas('日前-实时价差'), 'KPI/图表出现「日前-实时价差」')
 
   // 关键：图表容器上记录着「本次画了多少个数据点」。
   // 图形是 canvas，DOM 里看不出画没画；这个属性让「接口有数据但图空白」可断言。
   const charts = [...doc.querySelectorAll('.chart')]
-  check(charts.length === 2, `页面有两个图（曲线 + 趋势），实际 ${charts.length}`)
+  check(charts.length === 3, `日频页签有三个图（均价 / 价差 / 电量），实际 ${charts.length}`)
   await waitFor(() => charts.every((c) => Number(c.dataset.chartPoints ?? 0) > 0), 1500)
   const points = charts.map((c) => Number(c.dataset.chartPoints ?? 0))
-  check(
-    points.every((n) => n > 0),
-    '两个图都画到了数据点（不是首帧空数据）',
-    `data-chart-points = ${JSON.stringify(points)}`,
-  )
-  // 曲线图三条序列 × 各 3 个点 = 9；趋势图 2 条 × 2 天 = 4
-  check(points[0] === 9, '曲线图的点数 = 3 条序列 × 3 个点', String(points[0]))
-  check(points[1] === 4, '趋势图的点数 = 2 条序列 × 2 天', String(points[1]))
+  check(points.every((n) => n > 0), '三个图都画到了数据点（不是首帧空数据）', JSON.stringify(points))
+  // 均价：日前 3 点 + 实时 2 点 = 5；价差：2 个同日点；电量：3 + 3
+  check(points[0] === 5, '均价图点数 = 日前 3 + 实时 2（实时 T+2，少一天）', String(points[0]))
+  check(points[1] === 2, '价差图点数 = 2（只配对两个口径都有的运行日）', String(points[1]))
+  check(points[2] === 6, '电量图点数 = 发电侧 3 + 用电侧 3', String(points[2]))
 
-  // 换运行日要重新取数：日期在页头（PageHeader），绑定的是全局 runDate，
-  // 页面 watch 它 → 重新拉数据。
-  const before = requests.filter((r) => r.url.includes('/api/gd-metric')).length
-  const dateInput = doc.querySelector('input[type=date]')
-  check(!!dateInput, '页头有运行日选择')
-  dateInput.value = '2026-09-20'
-  dateInput.dispatchEvent(new window.Event('input', { bubbles: true }))
-  await waitFor(() => requests.filter((r) => r.url.includes('/api/gd-metric')).length > before, 1500)
-  check(requests.filter((r) => r.url.includes('/api/gd-metric')).length > before, '换运行日会重新取数')
-  await waitFor(() => !!requests.filter((r) => r.url.includes('/api/gd-metric')).pop()?.url.includes('date=2026-09-20'), 1200)
-  check(
-    requests.filter((r) => r.url.includes('/api/gd-metric')).pop()?.url.includes('date=2026-09-20') === true,
-    '请求带上了新的运行日',
-    requests.filter((r) => r.url.includes('/api/gd-metric')).pop()?.url,
+  // 明细表要能读出环比/同比（后端算的），不是只有最新值
+  check(bodyHas('+2.50%') && bodyHas('-4.10%'), '明细表显示环比与同比')
+
+  // 回看天数换一档要重新取数，并把 days 带上
+  const before = requests.filter((r) => r.url.includes('/api/spot-market/board')).length
+  const rangeBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '30 天')
+  check(!!rangeBtn, '有「30 天」回看档位')
+  rangeBtn?.dispatchEvent(new window.Event('click', { bubbles: true }))
+  await waitFor(
+    () => requests.filter((r) => r.url.includes('/api/spot-market/board')).length > before,
+    1500,
   )
+  const lastUrl = requests.filter((r) => r.url.includes('/api/spot-market/board')).pop()?.url ?? ''
+  check(lastUrl.includes('days=30'), '换档位后请求带上了 days=30', lastUrl)
+
+  // 月频/年频页签：图表也要真的画出来（不同数据集，另一套取数分支）
+  const periodicTab = [...doc.querySelectorAll('.radio-group button')].find((b) =>
+    b.textContent.includes('月频'),
+  )
+  check(!!periodicTab, '有「月频 / 年频」页签')
+  periodicTab?.dispatchEvent(new window.Event('click', { bubbles: true }))
+  await waitFor(() => (doc.body.textContent ?? '').includes('中长期合约成交均价'), 1500)
+  check((doc.body.textContent ?? '').includes('绿电月度成交'), '月频页签有绿电汇总图')
+  const pCharts = [...doc.querySelectorAll('.chart')]
+  await waitFor(() => pCharts.length > 0 && pCharts.every((c) => Number(c.dataset.chartPoints ?? 0) > 0), 1500)
+  const pPoints = pCharts.map((c) => Number(c.dataset.chartPoints ?? 0))
+  check(pPoints.every((n) => n > 0), '月频页签的图也都画到了数据点', JSON.stringify(pPoints))
+  check((doc.body.textContent ?? '').includes('HHI'), '月频明细表包含 HHI 指标')
 }
 
 console.log('\n== 运行监控 · 能源总览 ==')
@@ -2320,7 +2409,7 @@ await clickTo('场景', '长周期电价预测')
   mktSel.dispatchEvent(new window.Event('change', { bubbles: true }))
   await waitFor(() => requests.filter((r) => r.url.includes('/api/forecast/price')).length > before)
   const call = requests.filter((r) => r.url.includes('/api/forecast/price')).pop()
-  check(call.url.includes('market=real') && call.url.includes('horizonDays=5'), '切换市场带上参数', call.url)
+  check(call.url.includes('market=real') && call.url.includes('horizonDays=7'), '切换市场带上参数（默认 7 天）', call.url)
   check(!call.url.includes('forceRefresh=true'), '普通切换不穿透缓存')
 
   // 刷新预测要穿透
