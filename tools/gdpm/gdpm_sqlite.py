@@ -250,6 +250,10 @@ def load_periodic(data_dir):
                 if day is None:
                     continue
                 scope = str(row.get(spec["scope"]) or "").strip() if spec["scope"] else ""
+                # 2024 年绿电行没有序列名称，回落到序列编号，否则 scope 全塌成 ""
+                # 同键互相覆盖，一笔交易悄悄吃掉另一笔
+                if spec["scope"] and not scope:
+                    scope = str(row.get("序列编号") or "").strip()
                 for column, metric, unit in spec["metrics"]:
                     value = num(row.get(column))
                     if value is None:
