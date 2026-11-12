@@ -28,7 +28,7 @@ import {
  *   1. 采集台：粘微信文章链接入库
  *   2. 日报档案：按运行日列出，带复核进度
  *   3. 结构化数据 / 复核队列：逐条修订 + 一键确认（origin 为 manual 才算人工确认，pm-api 由官方直采直接成立）
- *   4. 重跑：单日解析（可选覆盖已确认）+ 批量重跑（先 dryRun 预览再执行）
+ *   4. 重跑：单日解析（只更新未复核值，已确认值原样保留）+ 批量重跑（先 dryRun 预览再执行）
  *
  * 不造数：拿不到数据就显示空态与原样错误，不复刻 overlay 的默认假数据。
  */
@@ -49,8 +49,6 @@ let toastTimer: number | undefined
 
 const collectUrl = ref('')
 const collecting = ref(false)
-/** force=true 会以 OCR 覆盖已确认值，属于危险操作，默认关 */
-const forceExtract = ref(false)
 const extracting = ref(false)
 
 /** 修订草稿：键为 `runDate|dataset|scope|metric` */
@@ -63,6 +61,78 @@ const batchRunning = ref(false)
 let pollTimer: number | undefined
 
 const pendingMetrics = computed(() => metrics.value.filter(isPending))
+
+/**
+ * 「已确认值原样保留」在后端只有告警文本，接口没有结构化字段（不动后端签名），
+ * 所以按前缀把文本拆回来。标题里的 N 就用明细条数：preserved 计数只存在于本次
+ * 解析响应里，刷新页面即丢，用它会出现「标题 N 条、明细空」的自相矛盾。
+ */
+const PRESERVED_PREFIX = '保留已确认值：'
+const FORCE_SKIP_PREFIX = '已跳过官方/人工数据'
+const PRESERVED_RE =
+  /^保留已确认值：运行日\s+(\S+)\s+(.+?)\/(.+?)（.*?）已确认\s+(.+?)，本次解析值\s+(.+?)\s+未覆盖/
+const FORCE_SKIP_RE =
+  /^已跳过官方\/人工数据（origin=(.+?)）：运行日\s+(\S+)\s+(.+?)\/(.+?)\s+保留\s+(.+?)，force 不覆盖，本次解析值\s+(.+?)\s+已丢弃/
+const ORIGIN_LABELS: Record<string, string> = { 'pm-api': '官方直采', manual: '人工确认' }
+
+interface PreservedNote {
+  runDate: string
+  scope: string
+  metric: string
+  oldValue: string
+  newValue: string
+  originLabel: string
+}
+
+function parsePreservedNotes(warnings: string[]): PreservedNote[] {
+  const out: PreservedNote[] = []
+  const seen = new Set<string>()
+  for (const w of warnings) {
+    let hit: PreservedNote | null = null
+    const preserved = PRESERVED_RE.exec(w)
+    const skipped = preserved ? null : FORCE_SKIP_RE.exec(w)
+    if (preserved) {
+      hit = {
+        runDate: preserved[1],
+        scope: preserved[2],
+        metric: preserved[3],
+        oldValue: preserved[4],
+        newValue: preserved[5],
+        originLabel: '',
+      }
+    } else if (skipped) {
+      hit = {
+        runDate: skipped[2],
+        scope: skipped[3],
+        metric: skipped[4],
+        oldValue: skipped[5],
+        newValue: skipped[6] === '本次未提取到' ? '' : skipped[6],
+        originLabel: ORIGIN_LABELS[skipped[1]] ?? skipped[1],
+      }
+    }
+    if (!hit) continue
+    const key = `${hit.runDate}|${hit.scope}|${hit.metric}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    // 保留告警里不带 origin，从当前页数据按定位键回查（force 跳过的那条自带 origin）
+    if (!hit.originLabel) {
+      const m = metrics.value.find(
+        (x) => x.runDate === hit!.runDate && x.scope === hit!.scope && x.metric === hit!.metric,
+      )
+      hit.originLabel = ORIGIN_LABELS[m?.origin ?? ''] ?? '已确认'
+    }
+    out.push(hit)
+  }
+  return out
+}
+
+const preservedNotes = computed(() => parsePreservedNotes(extract.value?.warnings ?? []))
+const otherWarnings = computed(() =>
+  (extract.value?.warnings ?? []).filter(
+    (w) => !w.startsWith(PRESERVED_PREFIX) && !w.startsWith(FORCE_SKIP_PREFIX),
+  ),
+)
+const preservedOpen = ref(false)
 const grouped = computed(() => {
   const byDataset = new Map<string, SpotMetric[]>()
   for (const m of metrics.value) {
@@ -160,7 +230,7 @@ async function doExtract() {
   if (!selectedDate.value) return
   extracting.value = true
   try {
-    const res = await extractReport(selectedDate.value, forceExtract.value)
+    const res = await extractReport(selectedDate.value, false)
     showToast(
       'green',
       `解析完成：${res.metricCount} 条指标，保留已确认 ${res.preserved} 条，仍待确认 ${res.pending} 条`,
@@ -258,7 +328,7 @@ async function pollBatch() {
       batchRunning.value = false
       window.clearInterval(pollTimer)
       pollTimer = undefined
-      showToast('green', `重跑结束：成功 ${s.succeeded} / 失败 ${s.failed}，覆盖已确认 ${s.overwritten} 条`)
+      showToast('green', `重跑结束：成功 ${s.succeeded} / 失败 ${s.failed}`)
       await loadReports()
       if (selectedDate.value) await selectReport(selectedDate.value)
     }
@@ -339,9 +409,6 @@ onBeforeUnmount(() => {
       :foot="extract ? `提取状态 ${extract.status} · OCR ${extract.ocrModel} · 提取器 ${extract.extractorVersion} · 更新于 ${extract.updatedAt}` : '尚未解析'"
     >
       <template #actions>
-        <label class="force">
-          <input v-model="forceExtract" type="checkbox" />覆盖已确认
-        </label>
         <button class="btn sm" type="button" :disabled="!selectedDate || extracting" @click="doExtract">
           {{ extracting ? '解析中…' : '解析 / 重跑' }}
         </button>
@@ -355,13 +422,29 @@ onBeforeUnmount(() => {
         </button>
       </template>
 
+      <div class="hint">本次仅替换未复核值，官方直采与人工确认的值不会被覆盖。</div>
+
       <div v-if="!selectedDate" class="empty">左侧选一份日报。</div>
       <template v-else>
         <div v-if="tradeDate && tradeDate !== selectedDate" class="hint">
           表2 承载的滞后运行日是 {{ tradeDate }}（T-2 复核值），与当日口径不是同一天。
         </div>
-        <div v-if="extract?.warnings?.length" class="warn">
-          解析告警：{{ extract.warnings.join('；') }}
+        <div v-if="preservedNotes.length" class="preserved">
+          <button type="button" class="preserved-head" @click="preservedOpen = !preservedOpen">
+            本次未改动官方直采/人工确认指标 {{ preservedNotes.length }} 条
+            <span class="preserved-toggle">{{ preservedOpen ? '收起明细' : '展开明细' }}</span>
+          </button>
+          <ul v-if="preservedOpen" class="preserved-list">
+            <li v-for="n in preservedNotes" :key="`${n.runDate}|${n.scope}|${n.metric}`">
+              {{ n.runDate }} · {{ n.scope }}/{{ n.metric }}：保留 {{ n.oldValue }}（{{ n.originLabel }}），{{
+                n.newValue ? `本次解析值 ${n.newValue} 未采用` : '本次未提取到新值'
+              }}
+            </li>
+          </ul>
+        </div>
+
+        <div v-if="otherWarnings.length" class="warn">
+          解析告警：{{ otherWarnings.join('；') }}
         </div>
 
         <section v-for="[dataset, rows] in grouped" :key="dataset" class="dataset">
@@ -439,7 +522,7 @@ onBeforeUnmount(() => {
         </button>
         <span v-if="batch" class="muted">
           {{ batch.status }} · {{ batch.done }}/{{ batch.total }} · 成功 {{ batch.succeeded }} ·
-          失败 {{ batch.failed }} · 覆盖已确认 {{ batch.overwritten }}
+          失败 {{ batch.failed }}
           <template v-if="batch.current">（当前 {{ batch.current }}）</template>
         </span>
       </div>
@@ -535,7 +618,31 @@ onBeforeUnmount(() => {
 .collect input:focus-visible { outline: 2px solid var(--brand-line); outline-offset: 1px; }
 .hint { margin-top: var(--s2); font-size: var(--fs-12); color: var(--text-3); }
 .warn { margin-bottom: var(--s3); font-size: var(--fs-12); color: var(--brand-ink); }
-.force { display: inline-flex; align-items: center; gap: var(--s1); font-size: var(--fs-12); color: var(--text-3); }
+.preserved { margin-bottom: var(--s3); }
+.preserved-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.preserved-toggle { color: var(--text-3); text-decoration: underline; }
+.preserved-list {
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  list-style: none;
+}
+.preserved-list li { padding: 2px 0; font-variant-numeric: tabular-nums; }
 .reports { max-height: 520px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
 .report { padding: var(--s3); border-bottom: 1px solid var(--divider); cursor: pointer; }
 .report:hover { background: var(--bg-4); }

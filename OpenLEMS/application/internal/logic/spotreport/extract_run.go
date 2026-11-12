@@ -337,7 +337,7 @@ func preservedWarnings(diffs []s_db_basic.SpotMetricOverwrite) []string {
 		if source == "" {
 			source = "-"
 		}
-		out = append(out, fmt.Sprintf(PreservedWarningPrefix+"：运行日 %s %s/%s（%s）已确认 %v，本次解析值 %v 未覆盖（如需采用请走批量重跑的「包含已复核」）",
+		out = append(out, fmt.Sprintf(PreservedWarningPrefix+"：运行日 %s %s/%s（%s）已确认 %v，本次解析值 %v 未覆盖",
 			d.Key.RunDate, d.Key.Scope, d.Key.Metric, source, d.OldValue, *d.NewValue))
 	}
 	return out

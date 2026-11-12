@@ -295,7 +295,20 @@ const FAKE_CLEARING_METRICS = [
   { runDate: '2026-09-19', dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', value: 365.2, unit: '元/MWh', atTime: '', textValue: '', momPct: null, sharePct: null, source: '表2(二)', conf: 0.94, origin: 'manual', editedBy: '', editedAt: '' },
 ]
 
-const FAKE_EXTRACT = { status: 'ok', ocrModel: 'pp-ocr', pageCount: 4, ocrMs: 3200, warnings: ['表2 与历史值有 1 处不一致'], updatedAt: '2026-09-21 22:12', extractorVersion: 'tpl-1' }
+const FAKE_EXTRACT = {
+  status: 'partial',
+  ocrModel: 'pp-ocr',
+  pageCount: 4,
+  ocrMs: 3200,
+  // 两种「已确认值被保留」的告警文案都来自后端文本，前缀由页面解析（接口无结构化字段）
+  warnings: [
+    '保留已确认值：运行日 2026-09-21 发电侧/平均电价（表1(二)）已确认 400.5，本次解析值 412.3 未覆盖',
+    '已跳过官方/人工数据（origin=pm-api）：运行日 2026-09-21 韶关/价格档位 保留 2，force 不覆盖，本次解析值 3 已丢弃',
+    '表2 与历史值有 1 处不一致',
+  ],
+  updatedAt: '2026-09-21 22:12',
+  extractorVersion: 'tpl-1',
+}
 
 const FAKE_AUDIT = [
   // createdAt 是后端统一成 Asia/Shanghai 的 RFC3339：页面只做格式化，不得再换算一次时区
@@ -2711,7 +2724,33 @@ await clickTo('管理', '采集管理')
   check(bodyHas('日前成交电价') && bodyHas('正文摘要指标'), '按数据集分组')
   check(bodyHas('未复核'), '未复核标记')
   check(bodyHas('表2 承载的滞后运行日是 2026-09-19'), '提示表2 是滞后运行日')
+
+  // 解析告警分区：已确认值被保留的明细单独成块（中性信息样式、默认折叠），
+  // 其余告警仍按原样拼接；标题条数 = 明细条数（同源于告警文本，刷新页面不会不一致）
+  check(bodyHas('本次仅替换未复核值，官方直采与人工确认的值不会被覆盖'), '常驻说明：只替换未复核值')
+  check(bodyHas('本次未改动官方直采/人工确认指标 2 条'), '保留分区标题带明细条数')
+  check(!bodyHas('本次解析值 412.3 未采用'), '保留明细默认折叠')
+  const preservedToggle = [...doc.querySelectorAll('.preserved-head')].find((b) =>
+    (b.textContent ?? '').includes('本次未改动'),
+  )
+  check(!!preservedToggle, '有展开/收起按钮')
+  preservedToggle?.click()
+  await tick()
+  check(
+    bodyHas('2026-09-21 · 发电侧/平均电价：保留 400.5（人工确认），本次解析值 412.3 未采用'),
+    '保留明细行：运行日/对象/指标/旧值/来源/新值',
+  )
+  check(
+    bodyHas('2026-09-21 · 韶关/价格档位：保留 2（官方直采），本次解析值 3 未采用'),
+    'force 跳过（origin=pm-api）也进同一分区',
+  )
+  preservedToggle?.click()
+  await tick()
+  check(!bodyHas('本次解析值 412.3 未采用'), '可以收起明细')
   check(bodyHas('解析告警'), '展示解析告警')
+  check(bodyHas('表2 与历史值有 1 处不一致'), '非保留类告警仍按原样拼接')
+  check(!bodyHas('包含已复核'), '不再提示已被删除的「包含已复核」选项')
+  check(!bodyHas('覆盖已确认'), '失效控件与恒为 0 的计数全部移除')
 
   // 逐条修订：填值 → 写入 → POST /metric 带正确的定位键
   // 期望值跟着桩数据走，别写死 —— /api/spot-report/data 同时供采集管理与市场出清使用
@@ -2746,7 +2785,7 @@ await clickTo('管理', '采集管理')
   await waitFor(() => requests.some((r) => r.url.includes('/api/spot-report/confirm')))
   check(true, '发出确认请求')
 
-  // 单日重跑：force 默认关，payload 里要带上
+  // 单日重跑：force 固定 false（覆盖已确认的勾选框已删，后端不改签名）
   const extractBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.includes('解析 / 重跑'))
   extractBtn?.click()
   await waitFor(() => requests.some((r) => r.url.includes('/api/spot-report/extract') && !r.url.includes('batch')))
