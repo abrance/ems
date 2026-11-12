@@ -51,12 +51,17 @@ func GetSpotExtractService() s_db_basic.ISpotExtractService {
 
 // ReplaceMetrics 全量替换：同一日报重复提取时不会留下旧指标。
 //
-// 复核状态优先：已确认（origin 为 manual / pm-api）行默认**不参与替换**——保留原值与原状态，
-// 本次解析重新提取到同键的值直接丢弃（结果计入 Preserved）。只有 force=true 才
-// 「以 OCR 为准」覆盖它们，覆盖前逐条写审计。
+// 复核状态优先：已确认（origin 为 manual / pm-api）行**永远不参与替换**——保留原值与原状态，
+// 本次解析重新提取到同键的值直接丢弃（结果计入 Preserved）。force=true 也一样：它只对
+// 未复核的 ocr/cv 值有意义，权威行改为逐条记一条告警（结果计入 Skipped）。
 //
 // 为什么默认不覆盖：解析器升级后跑一次解析不该静默清掉别人当天已核对过的判断
 // （实测发生过：一次重跑重置 24 项确认，值未变但复核状态丢失）。
+//
+// 为什么 force 也不能覆盖：2026-11-12 用 force=true 补采 10-16 / 10-25 时，各 8 行
+// origin='pm-api' 被整段删掉（旧实现 force 分支不留 keptIDs，先删后插只写回本次 OCR
+// 提取到的键），只剩 16 条 overwritten_by_extract 审计。官方直采是唯一权威源，
+// 任何重跑都不该比它更有权威。
 func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel, force bool) (*s_db_basic.SpotMetricReplaceResult, error) {
 	result := &s_db_basic.SpotMetricReplaceResult{}
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -76,20 +81,30 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 
 		now := gtime.Now()
 		keptIDs := make([]int64, 0, len(confirmed))
-		if force {
-			for _, m := range confirmed {
-				newValue := newValues[metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)]
-				row := g.Map{
-					"report_date": m.ReportDate, "run_date": m.RunDate, "dataset": m.Dataset,
-					"scope": m.Scope, "metric": m.Metric, "old_value": m.Value,
-					"new_value":  newValue,
-					"old_origin": m.Origin, "operation": s_db_model.SpotMetricAuditOverwrite,
-					"operator": "extract", "created_at": now,
-				}
-				if _, err := tx.Model(s_db_model.TableSpotMetricAudit).Ctx(ctx).Data(row).Insert(); err != nil {
-					return err
-				}
-				result.Overwritten = append(result.Overwritten, s_db_basic.SpotMetricOverwrite{
+		// 留住的已确认行不能被新插入的同键行撞唯一键，所以先把这次解析到的同键值丢掉
+		keys := make(map[string]bool, len(confirmed))
+		for _, m := range confirmed {
+			key := metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)
+			keys[key] = true
+			keptIDs = append(keptIDs, m.Id)
+			if force {
+				// force 只对未复核的 ocr/cv 值有意义：官方直采（pm-api）与人工确认（manual）
+				// 是权威值，即使 force=true 也不覆盖、不删，只留一条告警。
+				result.Skipped = append(result.Skipped, s_db_basic.SpotMetricOverwrite{
+					Key: s_db_basic.SpotMetricKey{
+						ReportDate: m.ReportDate, RunDate: m.RunDate, Dataset: m.Dataset,
+						Scope: m.Scope, Metric: m.Metric, SourceLabel: m.Source,
+					},
+					OldValue: m.Value,
+					NewValue: newValues[key],
+					Origin:   m.Origin,
+				})
+				continue
+			}
+			// 保留归保留，但重算值不一致要说出来：否则解析器修好的提取缺陷
+			// 永远不会落到已确认行上，而没人知道那些值已经旧了
+			if newValue := newValues[key]; newValue != nil && *newValue != m.Value {
+				result.PreservedDiff = append(result.PreservedDiff, s_db_basic.SpotMetricOverwrite{
 					Key: s_db_basic.SpotMetricKey{
 						ReportDate: m.ReportDate, RunDate: m.RunDate, Dataset: m.Dataset,
 						Scope: m.Scope, Metric: m.Metric, SourceLabel: m.Source,
@@ -98,29 +113,9 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 					NewValue: newValue,
 				})
 			}
-		} else {
-			// 留住的已确认行不能被新插入的同键行撞唯一键，所以先把这次解析到的同键值丢掉
-			keys := make(map[string]bool, len(confirmed))
-			for _, m := range confirmed {
-				key := metricKey(m.ReportDate, m.RunDate, m.Dataset, m.Scope, m.Metric)
-				keys[key] = true
-				keptIDs = append(keptIDs, m.Id)
-				// 保留归保留，但重算值不一致要说出来：否则解析器修好的提取缺陷
-				// 永远不会落到已确认行上，而没人知道那些值已经旧了
-				if newValue := newValues[key]; newValue != nil && *newValue != m.Value {
-					result.PreservedDiff = append(result.PreservedDiff, s_db_basic.SpotMetricOverwrite{
-						Key: s_db_basic.SpotMetricKey{
-							ReportDate: m.ReportDate, RunDate: m.RunDate, Dataset: m.Dataset,
-							Scope: m.Scope, Metric: m.Metric, SourceLabel: m.Source,
-						},
-						OldValue: m.Value,
-						NewValue: newValue,
-					})
-				}
-			}
-			metrics = dropConfirmedIncoming(keys, metrics)
-			result.Preserved = len(confirmed)
 		}
+		metrics = dropConfirmedIncoming(keys, metrics)
+		result.Preserved = len(confirmed)
 
 		del := tx.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 			Where(s_db_model.FieldSpotMetricReportDate, reportDate)

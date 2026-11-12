@@ -25,7 +25,8 @@ import (
 // 只是解析失败，不影响日报图片档案。
 //
 // force=false（默认）：已确认（origin 为 manual / pm-api）行原样保留，不被本次解析覆盖；
-// force=true：以 OCR 为准覆盖已确认值（覆盖前写审计，逐条回到 Warnings 里）。
+// force=true：只覆盖未复核的 ocr/cv 值；已确认行（官方直采 / 人工确认）也不覆盖、不删，
+// 逐条进 Warnings（「已跳过官方/人工数据」）。
 func ExtractReport(ctx context.Context, reportDate string, force bool) (*v1.ExtractSpotReportRes, error) {
 	model, err := s_db.GetSpotReportService().GetByDate(ctx, reportDate)
 	if err != nil {
@@ -94,6 +95,7 @@ func ExtractReport(ctx context.Context, reportDate string, force bool) (*v1.Extr
 	}
 	extracted.Warnings = append(extracted.Warnings, overwriteWarnings(replaced.Overwritten)...)
 	extracted.Warnings = append(extracted.Warnings, preservedWarnings(replaced.PreservedDiff)...)
+	extracted.Warnings = append(extracted.Warnings, forceSkipWarnings(replaced.Skipped)...)
 
 	status := s_db_model.SpotExtractStatusOk
 	if len(metrics) == 0 {
@@ -299,6 +301,29 @@ const OverwriteWarningPrefix = "重跑覆盖人工修订"
 
 // PreservedWarningPrefix 「保留已确认值」告警前缀
 const PreservedWarningPrefix = "保留已确认值"
+
+// ForceSkipWarningPrefix 「force 跳过权威行」告警前缀：force 只对 ocr/cv 生效，
+// 官方直采（pm-api）与人工确认（manual）即使 force=true 也原样保留。
+const ForceSkipWarningPrefix = "已跳过官方/人工数据"
+
+// forceSkipWarnings 把 force=true 被跳过的权威行转成可读告警：
+// 旧实现会把这些行直接删掉，现在必须让人看到「这次重跑没动它们」。
+func forceSkipWarnings(skipped []s_db_basic.SpotMetricOverwrite) []string {
+	out := make([]string, 0, len(skipped))
+	for _, s := range skipped {
+		newText := "本次未提取到"
+		if s.NewValue != nil {
+			newText = fmt.Sprintf("%v", *s.NewValue)
+		}
+		origin := s.Origin
+		if origin == "" {
+			origin = "-"
+		}
+		out = append(out, fmt.Sprintf(ForceSkipWarningPrefix+"（origin=%s）：运行日 %s %s/%s 保留 %v，force 不覆盖，本次解析值 %s 已丢弃",
+			origin, s.Key.RunDate, s.Key.Scope, s.Key.Metric, s.OldValue, newText))
+	}
+	return out
+}
 
 // preservedWarnings 把「已确认值被保留，但本次解析算出了不同的值」转成可读告警。
 // 保留是刻意的（复核状态优先），但值不一致必须让人知道，否则解析器的修复永远不会落地。
