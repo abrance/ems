@@ -129,8 +129,9 @@ func initConfigDatabase() error {
 	}
 
 	// 告警历史按 trigger_at DESC 翻页、按 device_id 过滤，原先两列均无索引。
-	// 30 万行实测：无过滤排序 25.3ms → 0.02ms，device_id 过滤排序 18.4ms → 0.02ms。
-	// 建索引开销线性：约 75ms / 10 万行（两张合计），300 万行约 2.3s。
+	// 30 万行实测：无过滤列表 173.9ms → 6.3ms，按设备列表 52.6ms → 0.6ms，深翻页 58.8ms → 0.8ms。
+	// 两条必须成对：只加 (trigger_at DESC) 会让深翻页从 58.8ms 恶化到 113.5ms。
+	// 建索引开销随行数线性增长（30 万行合计不到 1s）；表涨到千万行后应把建索引移出启动路径。
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_alarm_history_trigger_at ON alarm_history (trigger_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_alarm_history_device_trigger ON alarm_history (device_id, trigger_at DESC)`,
