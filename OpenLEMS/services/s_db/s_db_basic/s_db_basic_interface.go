@@ -151,11 +151,12 @@ type SpotMetricKey struct {
 	SourceLabel string // 来源表（如 表1(二)），仅用于提示
 }
 
-// SpotMetricOverwrite 被重跑解析覆盖的人工修订
+// SpotMetricOverwrite 被重跑解析覆盖/跳过的人工修订
 type SpotMetricOverwrite struct {
 	Key      SpotMetricKey
 	OldValue float64  // 人工填写值
 	NewValue *float64 // 本次 OCR 值（为 nil 表示本次未提取到该字段）
+	Origin   string   // 原值来源（manual / pm-api / ocr / cv），仅 Skipped 使用
 }
 
 // SpotMetricReplaceResult 全量替换指标的结果
@@ -164,6 +165,9 @@ type SpotMetricOverwrite struct {
 type SpotMetricReplaceResult struct {
 	Overwritten []SpotMetricOverwrite // force 覆盖掉的已确认值（已写审计）
 	Preserved   int                   // 原样保留的已确认行数（未覆盖）
+	// Skipped 是 force=true 时被跳过的权威行（origin 为 pm-api / manual）：force 只对
+	// ocr/cv 生效，这些行不覆盖也不删，逐条转成告警回到调用方。
+	Skipped []SpotMetricOverwrite
 	// PreservedDiff 保留下来但本次解析算出了不同值的行（OldValue=已确认值，NewValue=本次 OCR 值）。
 	// 值不变就不记，仅用于告警——否则解析器修好的 bug 永远不会落到已确认行上，而没人知道。
 	PreservedDiff []SpotMetricOverwrite
@@ -189,8 +193,8 @@ type IPriceForecastService interface {
 // ISpotExtractService 现货日报结构化提取结果
 type ISpotExtractService interface {
 	// ReplaceMetrics 全量替换某份日报的提取指标（同一事务：先删后插）。
-	// 已确认（origin 为 manual / pm-api）行默认原样保留、不被重跑覆盖（force=false，Preserved 计数）；
-	// force=true 时才「以 OCR 为准」覆盖它们，覆盖前逐条写审计并返回 Overwritten。
+	// 已确认（origin 为 manual / pm-api）行任何时候都原样保留、不被重跑覆盖（force=false 计数进 Preserved）；
+	// force=true 也只对 ocr/cv 生效，权威行改为逐条进 Skipped（覆盖写审计不再发生）。
 	ReplaceMetrics(ctx context.Context, reportDate string, metrics []*s_db_model.SSpotMetricModel, force bool) (*SpotMetricReplaceResult, error)
 	// UpdateMetricValue 人工修订单个指标值（origin 置为 manual，并写审计）
 	UpdateMetricValue(ctx context.Context, key SpotMetricKey, value float64, operator string) (*s_db_model.SSpotMetricModel, error)
