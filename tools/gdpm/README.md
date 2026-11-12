@@ -6,7 +6,7 @@
 
 | 旧数据源 | 处置 | 说明 |
 | --- | --- | --- |
-| OCR 日报（`gd_spot_metric` 里 `origin=manual` 的 804 行，2026-09-14~09-25） | **标记作废但保留**：`origin='void'`，逐条写 `gd_spot_metric_audit`（`operation=deprecated_by_pm_api`） | 可查、可追溯、不删行 |
+| OCR 日报（`gd_spot_metric` 里 `origin=manual` 的 804 行，2026-09-14~09-25） | **只作废被官方整表取代的 400 行**（日前/实时成交电价四类指标），`origin='void'`，逐条写 `gd_spot_metric_audit`（`operation=deprecated_by_pm_api`）；其余 404 行（档位 232、申报容量/台数 122、燃煤·燃气均价 50）保持原 origin | 可查、可追溯、不删行；官方没有的指标不作废 |
 | 第三方 CSV（`gdmetric`，`https://file.xiaoyxq.top/gd_metric.csv`） | **已停更**：`gd_metric.enabled=false`，只读本地缓存、不再向第三方站点拉取 | 见文末「怎么恢复/停用 gdmetric」 |
 
 ## 三段式
@@ -104,7 +104,52 @@ python3 gdpm_sqlite.py --db /path/db.sqlite3 --report /tmp/report.json --apply
 | `day_ahead_decl/平均电价` | `日前申报均价` | 简单均价 vs 加权均价，OCR 系统性高 2%~4% |
 
 官方表**没有**「燃煤/燃气/新能源」分电源类型拆分，也没有节点电价、申报容量、地市档位。
-这些指标切换后不再有官方更新，历史 OCR 行保留为 `void` 供追溯。
+所以作废范围必须收窄，只到「官方整表取代」的这两类数据集 × 四个指标：
+
+| 作废（`origin='void'`） | 保持原 origin（官方不给数） |
+| --- | --- |
+| `day_ahead_trade` / `realtime_trade` × `平均电价` `最高电价` `最低电价` `电价环比`：280 + 120 = **400 行** | 地市档位 232、`day_ahead_decl` 申报容量/台数/煤机气机新能源容量 122、`summary` 燃煤·燃气均价等 50 = **404 行** |
+
+2026-11-12 之前的版本是一刀切：`UPDATE ... WHERE origin NOT IN ('pm-api','void')`，把上面右边的
+404 行也一起作废了。现在的做法：
+
+1. 只按行（`id`）作废白名单里的指标，且要求同日官方已有对应数据（实时 T+2 未发布那天不动）；
+2. 每条作废依据（取代它的官方指标名 + 官方值）写进报告 `void_plan`，审计表逐条留痕；
+3. 已被上一版误伤、又不在白名单里的行，按 `gd_spot_metric_audit.old_origin` 原样放回去
+   （`operation=restored_by_pm_api_scope_fix`）。没有审计可查的老 void 行不乱猜，保持 void。
+
+## ②b 档位回灌 gdpm_tier_backfill.py
+
+节点电价档位只存在于日报图片（图2-1 高峰 / 图2-2 低谷），pm-api 没有这个指标；
+11-11 换数据卷后新库只剩官方 6126 行，档位 0 行。原始识别结果仍在
+`gd_spot_extract_run.payload` 里（9-16~9-25 共 232 行），可直接回灌：
+
+```
+python3 gdpm_tier_backfill.py --db /tmp/db.sqlite3 --report /tmp/tier.json          # 只算不写
+python3 gdpm_tier_backfill.py --db /tmp/db.sqlite3 --report /tmp/tier.json --apply
+```
+
+- `origin`：审计里有 `operation=confirm` 的行回灌 `manual`（这些行 2026-09-22 已经人工确认过），
+  没确认过的按 payload 里的 `cv`（图像采样预填，页面标「需人工确认」）。
+- 幂等：唯一键 upsert，重跑只更新同样的值；`origin='pm-api'` 的行永远不覆盖。
+- 页面对 `cv` 与 `manual` 都显示（`ListMetrics` 只排除 `void`），差异只在页脚来源文案与
+  「待确认」计数；「历史复盘」趋势只聚合 `manual/pm-api`，所以已确认的档位优先回灌 `manual`。
+
+## ②c 日报采集缺口 gdpm_report_gap.py
+
+日报来源唯一：微信公众号「广东电力交易中心」当天推文 → 正文 4 张图片（page-1 市场概况、
+page-2 日前成交+高峰档位、page-3 低谷档位、page-4 实时交易）。文章列表没有可枚举接口，
+链接要人工取，所以脚本不自带搜索，只做缺口判定 + 调 ems 自己的采集/解析接口：
+
+```
+python3 gdpm_report_gap.py --db /tmp/db.sqlite3 --report /tmp/gap.json            # 只看缺口
+python3 gdpm_report_gap.py --db /tmp/db.sqlite3 --links links.tsv --apply \
+    --api http://127.0.0.1:80                                                    # 真采
+```
+
+`links.tsv` 每行 `YYYY-MM-DD<TAB>文章链接`。拿不到链接的日期不静默跳过，写一条
+`status=partial` 的采集记录 + `warnings` 留痕；已有 `ok` 的日期不会被降级。
+与周更链路解耦：周更只写官方指标，作废白名单里没有档位，两者互不覆盖。
 
 ## ③ 读路径（已接）
 

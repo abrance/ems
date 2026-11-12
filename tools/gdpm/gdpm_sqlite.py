@@ -3,13 +3,17 @@
 
 官方 API（pm.gd.csg.cn）是**唯一权威源**：OCR 日报旧值与第三方 gdmetric CSV 都作废。
 本脚本只做「文件 -> 业务表」：读 `gdpm_dataset.py` 产出的长表 CSV，写
-`gd_spot_metric`（origin=pm-api）、采集元数据表 `gd_pm_fetch_run`，并把被取代的
-旧行标成 origin=void（不删行，逐条写审计），最后出校验报告。
+`gd_spot_metric`（origin=pm-api）、采集元数据表 `gd_pm_fetch_run`，并把被官方整表取代的
+旧行（日前/实时成交电价四类指标）标成 origin=void，逐条写审计；官方不给数的指标
+（地市档位、申报容量/台数、燃煤·燃气均价）保持原 origin，上一版误伤的按审计原值放回。
 
 口径（与 OCR 日报现有约定一致，已用生产库核对）：
     日前：report_date = run_date = 数据日（日报日 D 的日前出清落在 D）
     实时：run_date = 数据日（运行日），report_date = 数据日 + 2（T+2 发布）
     电价 unit = 元/兆瓦时；电量 unit = MWh
+
+作废范围就是 `VOID_DATASETS × VOID_METRICS`（见下方常量），不再是一刀切；
+改这个范围前先确认官方是否真的提供了该指标，否则作废等于丢数据（2026-11-11 踩过）。
 
 用法：
     python3 gdpm_sqlite.py --db /tmp/db.sqlite3 --report /tmp/report.json          # 只算不写
@@ -34,6 +38,14 @@ SOURCE = "gdpm-api"
 OPERATOR = "gdpm-api"
 VOID_ORIGIN = "void"
 AUDIT_DEPRECATE = "deprecated_by_pm_api"
+AUDIT_RESTORE = "restored_by_pm_api_scope_fix"
+
+# 作废范围只到「官方整表取代」的这两类数据集 × 这四个指标。
+# 之前是一刀切（origin NOT IN ('pm-api','void') 全作废），把官方根本不给数的行也埋了：
+#   地市节点电价档位 232 行、日前申报容量/台数/煤机气机新能源容量 122 行、
+#   燃煤·燃气均价 20 行 —— 这些指标 pm-api 没有，作废等于丢数据。
+VOID_DATASETS = ("day_ahead_trade", "realtime_trade")
+VOID_METRICS = ("平均电价", "最高电价", "最低电价", "电价环比")
 
 # OCR 日报的指标名与官方指标名的对应关系（只有这两个指标两边同义，实测差 < 0.01）。
 # 不映射的项目及原因：
@@ -45,6 +57,9 @@ METRIC_MAP = [
     ("day_ahead_trade", "发电侧", "平均电价", "发电侧日前加权平均电价"),
     ("realtime_trade", "发电侧", "平均电价", "发电侧实时加权平均电价"),
 ]
+# 作废依据：用同日官方加权均价行证明「这份日报的成交电价表已被官方取代」
+VOID_BASIS = {ds: api_metric for ds, _sc, ocr_metric, api_metric in METRIC_MAP
+              if ocr_metric == "平均电价"}
 
 # 同名不同义/口径不同，只在报告里列对照，不当成「同一指标的新值」
 METRIC_NOTE = [
@@ -282,9 +297,73 @@ def fetch_run_rows(records):
 
 def existing_ocr(conn):
     return conn.execute(
-        "SELECT report_date,run_date,dataset,scope,metric,value,origin,source,unit "
+        "SELECT id,report_date,run_date,dataset,scope,metric,value,origin,source,unit "
         "FROM gd_spot_metric WHERE origin IS NULL OR origin NOT IN (?,?)",
         (ORIGIN, VOID_ORIGIN)).fetchall()
+
+
+def existing_void(conn):
+    """已作废行 + 上一次作废时记下的原 origin（用来把误伤的行放回去）。
+
+    审计表在老库上可能不存在（gdpm 之前只写不建），读不到就当作没有可复原的依据。
+    """
+    try:
+        return conn.execute(
+            "SELECT m.id, m.report_date, m.run_date, m.dataset, m.scope, m.metric, m.value,"
+            " (SELECT a.old_origin FROM gd_spot_metric_audit a"
+            "   WHERE a.report_date=m.report_date AND a.run_date=m.run_date"
+            "     AND a.dataset=m.dataset AND a.scope=m.scope AND a.metric=m.metric"
+            "     AND a.operation=? ORDER BY a.id DESC LIMIT 1) AS old_origin"
+            " FROM gd_spot_metric m WHERE m.origin=?",
+            (AUDIT_DEPRECATE, VOID_ORIGIN)).fetchall()
+    except sqlite3.OperationalError as e:
+        if "no such table" not in str(e):
+            raise
+        return []
+
+
+def replaced_by(row, api):
+    """该行是否已被官方同日数据取代：返回 (官方指标名, 官方值)，否则 None。"""
+    if row["dataset"] not in VOID_DATASETS or row["metric"] not in VOID_METRICS:
+        return None
+    basis = VOID_BASIS[row["dataset"]]
+    got = api.get((row["run_date"], row["dataset"], "发电侧", basis))
+    return (basis, got[0]) if got else None
+
+
+def plan_voids(api, ocr):
+    """只有「官方同日给了这几类指标」的行才作废；依据逐条记在 replaced_by 里。"""
+    voids = []
+    for r in ocr:
+        basis = replaced_by(r, api)
+        if not basis:
+            continue
+        voids.append({"id": r["id"], "report_date": r["report_date"],
+                      "run_date": r["run_date"], "dataset": r["dataset"],
+                      "scope": r["scope"], "metric": r["metric"], "value": r["value"],
+                      "origin": r["origin"] or "",
+                      "replaced_by": basis[0], "api_value": basis[1]})
+    return voids
+
+
+def plan_restores(voided, api):
+    """已在 void 但不在作废范围内的行：按审计里的原 origin 放回去。
+
+    判断用「是否仍属官方取代范围」，不用「本次新作废了哪些」—— 后者在重跑时为空，
+    会把本来就该 void 的行全部复原。
+    """
+    restores = []
+    for r in voided:
+        if replaced_by(r, api):
+            continue
+        to = (r["old_origin"] or "").strip()
+        if not to or to == VOID_ORIGIN:
+            continue
+        restores.append({"id": r["id"], "report_date": r["report_date"],
+                         "run_date": r["run_date"], "dataset": r["dataset"],
+                         "scope": r["scope"], "metric": r["metric"],
+                         "value": r["value"], "restore_to": to})
+    return restores
 
 
 def plan(conn, records):
@@ -324,28 +403,47 @@ def plan(conn, records):
             notes.append({"dataset": ds, "run_date": r["run_date"],
                           "metric_ocr": ocr_metric, "metric_api": api_metric,
                           "ocr": r["value"], "api": got[0], "why": why})
-    return api, ocr, diff, notes
+    voids = plan_voids(api, ocr)
+    restores = plan_restores(existing_void(conn), api)
+    return {"api": api, "ocr": ocr, "diff": diff, "notes": notes,
+            "voids": voids, "restores": restores}
 
 
-def apply(conn, records, api, ocr, log=print):
+def apply(conn, records, p, log=print):
     # 时间带时区偏移写入（如 2026-11-11 16:27:21.123456+08:00）。不带偏移的本地时间会被
     # Go 侧按 UTC 解析，页面上就多 8 小时（历史行由读侧兜底，见 application/internal/logic/
     # spotreport/extract_run.go 的 auditCreatedAt）。
     now = dt.datetime.now().astimezone().isoformat(sep=" ")
     conn.execute(DDL_METRIC)
     conn.execute(DDL_FETCH_RUN)
+    voids, restores = p["voids"], p["restores"]
 
-    audit = []
-    for r in ocr:
-        audit.append((r["report_date"], r["run_date"], r["dataset"], r["scope"], r["metric"],
-                      r["value"], None, r["origin"] or "", AUDIT_DEPRECATE, OPERATOR, now))
-    conn.executemany(
-        "INSERT INTO gd_spot_metric_audit (report_date,run_date,dataset,scope,metric,"
-        "old_value,new_value,old_origin,operation,operator,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        audit)
-    conn.execute(
-        "UPDATE gd_spot_metric SET origin=?, updated_at=? WHERE origin IS NULL OR origin NOT IN (?,?)",
-        (VOID_ORIGIN, now, ORIGIN, VOID_ORIGIN))
+    def write_audit(entries, operation, old_origin_of):
+        conn.executemany(
+            "INSERT INTO gd_spot_metric_audit (report_date,run_date,dataset,scope,metric,"
+            "old_value,new_value,old_origin,operation,operator,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [(r["report_date"], r["run_date"], r["dataset"], r["scope"], r["metric"],
+              r["value"], None, old_origin_of(r), operation, OPERATOR, now) for r in entries])
+
+    # 1. 先把上一版误伤的行按审计原 origin 放回去（只动还在 void 的行，重跑不会重复写审计）
+    restored = 0
+    for r in restores:
+        restored += conn.execute(
+            "UPDATE gd_spot_metric SET origin=?, updated_at=? WHERE id=? AND origin=?",
+            (r["restore_to"], now, r["id"], VOID_ORIGIN)).rowcount
+    if restores:
+        write_audit(restores, AUDIT_RESTORE, lambda _r: VOID_ORIGIN)
+
+    # 2. 再作废官方确实取代的那几类（逐行按 id 更新，不再一刀切）
+    voided = 0
+    for r in voids:
+        voided += conn.execute(
+            "UPDATE gd_spot_metric SET origin=?, updated_at=? WHERE id=?"
+            " AND (origin IS NULL OR origin NOT IN (?,?))",
+            (VOID_ORIGIN, now, r["id"], ORIGIN, VOID_ORIGIN)).rowcount
+    if voids:
+        write_audit(voids, AUDIT_DEPRECATE, lambda r: r["origin"])
 
     rows = []
     for day, ds, sc, mt, value, unit in records:
@@ -371,9 +469,10 @@ def apply(conn, records, api, ocr, log=print):
         [(r["target_date"], r["dataset"], r["status"], r["rows_written"], r["source_url"],
           r["payload"], r["warnings"], r["extractor_version"], now, now) for r in runs])
     conn.commit()
-    log(f"作废旧行 {len(audit)} 条（写审计），写入 {len(rows)} 条 pm-api 指标，"
-        f"采集元数据 {len(runs)} 条")
-    return len(audit), len(rows), len(runs)
+    log(f"复原误伤行 {restored} 条，作废旧行 {voided} 条（逐条写审计），"
+        f"写入 {len(rows)} 条 pm-api 指标，采集元数据 {len(runs)} 条")
+    return {"restored": restored, "deprecated": voided,
+            "metrics": len(rows), "fetch_runs": len(runs)}
 
 
 def anomalies(records):
@@ -420,7 +519,8 @@ def anomalies(records):
     return out
 
 
-def build_report(conn, records, api, ocr, diff, notes, anomalies_, audit_n, metric_n, run_n):
+def build_report(conn, records, p, anomalies_, written):
+    api, diff, notes = p["api"], p["diff"], p["notes"]
     days = {}
     for day, ds, sc, metric, value, unit in records:
         days.setdefault(ds, set()).add(day)
@@ -452,6 +552,16 @@ def build_report(conn, records, api, ocr, diff, notes, anomalies_, audit_n, metr
         " MIN(run_date) AS first_day, MAX(run_date) AS last_day"
         " FROM gd_spot_metric GROUP BY dataset, origin ORDER BY dataset, origin")]
 
+    voids = p["voids"]
+    void_summary = {}
+    for v in voids:
+        key = f"{v['dataset']}/{v['metric']}"
+        void_summary[key] = void_summary.get(key, 0) + 1
+    restore_summary = {}
+    for r in p["restores"]:
+        key = f"{r['dataset']}/{r['metric']}"
+        restore_summary[key] = restore_summary.get(key, 0) + 1
+
     csvs = []
     return {
         "csv": csvs,
@@ -460,10 +570,15 @@ def build_report(conn, records, api, ocr, diff, notes, anomalies_, audit_n, metr
         "coverage": span,
         "overlap_diff": diff,
         "overlap_notes": notes,
-        "ocr_rows_to_void": len(ocr),
+        "void_scope": {"datasets": list(VOID_DATASETS), "metrics": list(VOID_METRICS)},
+        "void_plan": voids,
+        "void_summary": void_summary,
+        "restore_plan": p["restores"],
+        "restore_summary": restore_summary,
+        "ocr_rows_to_void": len(voids),
         "anomalies": anomalies_,
         "db_after_import": db_after,
-        "written": {"deprecated": audit_n, "metrics": metric_n, "fetch_runs": run_n},
+        "written": written,
     }
 
 
@@ -482,16 +597,15 @@ def main():
     records += periodic
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
-    api, ocr, diff, notes = plan(conn, records)
+    p = plan(conn, records)
 
-    audit_n = metric_n = run_n = 0
+    written = {"restored": 0, "deprecated": 0, "metrics": 0, "fetch_runs": 0}
     if args.apply:
-        audit_n, metric_n, run_n = apply(conn, records, api, ocr)
+        written = apply(conn, records, p)
     else:
         print("dry-run：未写库", file=sys.stderr)
 
-    report = build_report(conn, records, api, ocr, diff, notes,
-                          anomalies(records), audit_n, metric_n, run_n)
+    report = build_report(conn, records, p, anomalies(records), written)
     report["periodic_files"] = {"loaded": loaded, "skipped": skipped}
     report["daily_records"] = len(records) - len(periodic)
     report["periodic_records"] = len(periodic)

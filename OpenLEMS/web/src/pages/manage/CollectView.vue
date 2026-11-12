@@ -78,6 +78,16 @@ function keyOf(m: SpotMetric): string {
   return `${m.runDate}|${m.dataset}|${m.scope}|${m.metric}`
 }
 
+/** 审计操作名：之前只认 edit，confirm/deprecated 全被写成「重跑覆盖」，事后排查会被误导 */
+const AUDIT_OP_LABELS: Record<string, string> = {
+  edit: '人工修订',
+  confirm: '人工确认',
+  overwritten_by_extract: '重跑覆盖',
+  deprecated_by_pm_api: '官方源取代',
+  restored_by_pm_api_scope_fix: '复原（作废范围修正）',
+}
+const auditOpLabel = (op: string) => AUDIT_OP_LABELS[op] ?? op
+
 /** 审计时间：后端已统一成 Asia/Shanghai 的 RFC3339，这里只换成本地可读格式，不再做时区换算 */
 function fmtAuditTime(s: string): string {
   return s ? s.slice(0, 19).replace('T', ' ') : '—'
@@ -474,7 +484,7 @@ onBeforeUnmount(() => {
             </td>
             <td>
               <StatusTag :tone="a.operation === 'edit' ? 'blue' : 'brand'">
-                {{ a.operation === 'edit' ? '人工修订' : '重跑覆盖' }}
+                {{ auditOpLabel(a.operation) }}
               </StatusTag>
             </td>
             <td>{{ a.operator || '—' }}</td>

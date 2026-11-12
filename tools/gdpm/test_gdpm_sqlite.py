@@ -49,10 +49,9 @@ class ImportTest(unittest.TestCase):
         records = imp.load_long(self.csv)
         conn = sqlite3.connect(self.db)
         conn.row_factory = sqlite3.Row
-        api, ocr, diff, notes = imp.plan(conn, records)
-        imp.apply(conn, records, api, ocr, log=lambda *_: None)
-        out = imp.build_report(conn, records, api, ocr, diff, notes,
-                               imp.anomalies(records), 0, 0, 0)
+        p = imp.plan(conn, records)
+        written = imp.apply(conn, records, p, log=lambda *_: None)
+        out = imp.build_report(conn, records, p, imp.anomalies(records), written)
         conn.close()
         return out
 
@@ -177,10 +176,9 @@ class ImportTest(unittest.TestCase):
         for _ in range(2):
             conn = sqlite3.connect(self.db)
             conn.row_factory = sqlite3.Row
-            api, ocr, diff, notes = imp.plan(conn, records)
-            imp.apply(conn, records, api, ocr, log=lambda *_: None)
-            out = imp.build_report(conn, records, api, ocr, diff, notes,
-                                   imp.anomalies(records), 0, 0, 0)
+            p = imp.plan(conn, records)
+            written = imp.apply(conn, records, p, log=lambda *_: None)
+            out = imp.build_report(conn, records, p, imp.anomalies(records), written)
             conn.close()
         conn = sqlite3.connect(self.db)
         got = dict(conn.execute(
@@ -193,6 +191,155 @@ class ImportTest(unittest.TestCase):
         # 月频不当成日频：coverage 不追每日缺失
         self.assertEqual(out["coverage"]["mid_long_term_month"]["missing"], [])
         self.assertEqual(out["coverage"]["mid_long_term_month"]["periods"], 2)
+
+
+class VoidScopeTest(unittest.TestCase):
+    """作废范围：只有官方整表取代的「日前/实时成交电价」四类指标，其余行原样不动。"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.db = os.path.join(self.dir, "db.sqlite3")
+        conn = sqlite3.connect(self.db)
+        conn.execute(imp.DDL_METRIC)
+        conn.execute("""CREATE TABLE gd_spot_metric_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, report_date VARCHAR(10), run_date VARCHAR(10),
+            dataset VARCHAR(32), scope VARCHAR(32), metric VARCHAR(32), old_value REAL,
+            new_value REAL, old_origin VARCHAR(8), operation VARCHAR(32), operator VARCHAR(64),
+            created_at DATETIME)""")
+        rows = [
+            # 要被官方取代的：发电侧四类 + 燃煤/新能源分电源行（同一张成交电价表）
+            ("2026-09-16", "day_ahead_trade", "发电侧", "平均电价", 428.95),
+            ("2026-09-16", "day_ahead_trade", "发电侧", "最高电价", 1420.14),
+            ("2026-09-16", "day_ahead_trade", "燃煤", "平均电价", 430.10),
+            ("2026-09-16", "realtime_trade", "发电侧", "电价环比", -1.2),
+            # 官方不给数的：不能动
+            ("2026-09-16", "node_price_peak", "广州", "价格档位", 4),
+            ("2026-09-16", "day_ahead_decl", "发电侧", "申报容量", 12345.0),
+            ("2026-09-16", "day_ahead_decl", "发电侧", "新能源容量", 6789.0),
+            ("2026-09-16", "summary", "市场", "燃煤均价", 429.85),
+            # 官方当日没有数据（实时 T+2 未发布）→ 不当作已被取代
+            ("2026-09-30", "realtime_trade", "发电侧", "平均电价", 400.0),
+        ]
+        conn.executemany(
+            "INSERT INTO gd_spot_metric (report_date,run_date,dataset,scope,metric,value,"
+            "unit,origin,source) VALUES (?,?,?,?,?,?,'元/兆瓦时','manual','表1(二)')",
+            [(d, d, ds, sc, mt, v) for d, ds, sc, mt, v in rows])
+        conn.commit()
+        conn.close()
+        self.csv = os.path.join(self.dir, "long.csv")
+        make_csv(self.csv, [
+            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权平均电价", 428.9, "元/兆瓦时", "pm.gd.csg.cn"),
+            ("2026-09-16", "realtime_trade", "发电侧", "发电侧实时加权平均电价", 420.5, "元/兆瓦时", "pm.gd.csg.cn"),
+        ])
+
+    def run_import(self):
+        records = imp.load_long(self.csv)
+        conn = sqlite3.connect(self.db)
+        conn.row_factory = sqlite3.Row
+        p = imp.plan(conn, records)
+        written = imp.apply(conn, records, p, log=lambda *_: None)
+        out = imp.build_report(conn, records, p, imp.anomalies(records), written)
+        conn.close()
+        return out, p
+
+    def test_only_replaced_categories_are_voided(self):
+        _out, p = self.run_import()
+        self.assertEqual(len(p["voids"]), 4)
+        conn = sqlite3.connect(self.db)
+        voided = dict(conn.execute(
+            "SELECT metric||'@'||scope||'@'||dataset, COUNT(*) FROM gd_spot_metric"
+            " WHERE origin='void' GROUP BY 1").fetchall())
+        kept = dict(conn.execute(
+            "SELECT dataset||'/'||metric, origin FROM gd_spot_metric"
+            " WHERE origin<>'void' AND origin<>'pm-api'").fetchall())
+        conn.close()
+        self.assertEqual(voided, {"平均电价@发电侧@day_ahead_trade": 1,
+                                  "最高电价@发电侧@day_ahead_trade": 1,
+                                  "平均电价@燃煤@day_ahead_trade": 1,
+                                  "电价环比@发电侧@realtime_trade": 1})
+        # 档位、申报容量/台数、燃煤均价、以及官方还没发布那天的实时行，origin 全不变
+        self.assertEqual(kept, {"node_price_peak/价格档位": "manual",
+                                "day_ahead_decl/申报容量": "manual",
+                                "day_ahead_decl/新能源容量": "manual",
+                                "summary/燃煤均价": "manual",
+                                "realtime_trade/平均电价": "manual"})
+
+    def test_every_void_has_audit_row_and_basis(self):
+        out, p = self.run_import()
+        conn = sqlite3.connect(self.db)
+        ops = conn.execute(
+            "SELECT dataset, metric, old_origin, operation FROM gd_spot_metric_audit"
+            " ORDER BY id").fetchall()
+        conn.close()
+        self.assertEqual(len(ops), 4)
+        self.assertTrue(all(o[3] == imp.AUDIT_DEPRECATE and o[2] == "manual" for o in ops))
+        # 每条作废都写清依据哪条官方指标取代（报告里逐条可查）
+        self.assertEqual(out["void_summary"], {"day_ahead_trade/平均电价": 2,
+                                               "day_ahead_trade/最高电价": 1,
+                                               "realtime_trade/电价环比": 1})
+        self.assertTrue(all(v["replaced_by"] in ("发电侧日前加权平均电价",
+                                                 "发电侧实时加权平均电价")
+                            for v in out["void_plan"]))
+        for v in p["voids"]:
+            self.assertIsNotNone(v["api_value"])
+
+    def test_previously_voided_rows_outside_scope_are_restored(self):
+        """上一版一刀切把档位/容量/均价埋了：按审计里的原 origin 放回去，且只放一次。"""
+        conn = sqlite3.connect(self.db)
+        conn.executemany(
+            "UPDATE gd_spot_metric SET origin='void' WHERE dataset=? AND metric=?",
+            [("node_price_peak", "价格档位"), ("day_ahead_decl", "申报容量"),
+             ("day_ahead_decl", "新能源容量"), ("summary", "燃煤均价")])
+        conn.executemany(
+            "INSERT INTO gd_spot_metric_audit (report_date,run_date,dataset,scope,metric,"
+            "old_value,new_value,old_origin,operation,operator)"
+            " SELECT report_date,run_date,dataset,scope,metric,value,NULL,'manual',?,?"
+            " FROM gd_spot_metric WHERE dataset=? AND metric=?",
+            [(imp.AUDIT_DEPRECATE, imp.OPERATOR, "node_price_peak", "价格档位"),
+             (imp.AUDIT_DEPRECATE, imp.OPERATOR, "day_ahead_decl", "申报容量"),
+             (imp.AUDIT_DEPRECATE, imp.OPERATOR, "day_ahead_decl", "新能源容量"),
+             (imp.AUDIT_DEPRECATE, imp.OPERATOR, "summary", "燃煤均价")])
+        conn.commit()
+        conn.close()
+
+        out, _p = self.run_import()
+        self.assertEqual(out["written"]["restored"], 4)
+        conn = sqlite3.connect(self.db)
+        got = dict(conn.execute(
+            "SELECT dataset||'/'||metric, origin FROM gd_spot_metric"
+            " WHERE dataset IN ('node_price_peak','day_ahead_decl','summary')").fetchall())
+        restores = conn.execute(
+            "SELECT COUNT(*) FROM gd_spot_metric_audit WHERE operation=?",
+            (imp.AUDIT_RESTORE,)).fetchone()[0]
+        conn.close()
+        self.assertEqual(set(got.values()), {"manual"})
+        self.assertEqual(restores, 4)
+
+        # 重跑：已复原的行不再出现在 restore 计划里，审计不重复写
+        again, p2 = self.run_import()
+        self.assertEqual(again["written"]["restored"], 0)
+        self.assertEqual(p2["restores"], [])
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM gd_spot_metric WHERE origin='void'").fetchone()[0], 4)
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM gd_spot_metric_audit WHERE operation=?",
+            (imp.AUDIT_RESTORE,)).fetchone()[0], 4)
+        conn.close()
+
+    def test_void_row_without_audit_stays_void(self):
+        """没有审计可查的老 void 行：不知道原 origin 就不乱改，保持 void。"""
+        conn = sqlite3.connect(self.db)
+        conn.execute("UPDATE gd_spot_metric SET origin='void' WHERE metric='价格档位'")
+        conn.commit()
+        conn.close()
+        out, p = self.run_import()
+        self.assertEqual(p["restores"], [])
+        self.assertEqual(out["written"]["restored"], 0)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(conn.execute(
+            "SELECT origin FROM gd_spot_metric WHERE metric='价格档位'").fetchone()[0], "void")
+        conn.close()
 
 
 if __name__ == "__main__":
