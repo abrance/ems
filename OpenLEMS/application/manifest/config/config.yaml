@@ -36,7 +36,10 @@ gfcli:
 
 database:
   default:
-    link: "sqlite::@file(out/db.sqlite3)"
+    # journal_mode=WAL：写不再阻塞读（原默认 rollback journal 读写互斥）。
+    # 分隔符只认 `=`，写成 `extra: journal_mode:WAL` 会被 gstr.Parse 解析成空 map。
+    # WAL 会在同目录额外产生 db.sqlite3-wal / -shm，备份须整目录或先 checkpoint。
+    link: "sqlite::@file(out/db.sqlite3)?journal_mode=WAL"
     timezone: "Local"
 
 # 电网电价自动同步配置
