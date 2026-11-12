@@ -18,7 +18,6 @@ const (
 	FieldAlarmHistoryPoint          = "point"
 	FieldAlarmHistoryPointName      = "point_name"
 	FieldAlarmHistoryLevel          = "level"
-	FieldAlarmHistoryTitle          = "title"
 	FieldAlarmHistoryDetail         = "detail"
 	FieldAlarmHistoryTriggerAt      = "trigger_at"
 	FieldAlarmHistoryClearAt        = "clear_at"
@@ -151,9 +150,9 @@ func (a *SAlarmHistoryModel) GetPage(ctx context.Context, page, pageSize int, fi
 			model = model.Where(FieldAlarmHistoryPoint, point)
 		}
 
-		// 标题模糊搜索
-		if title, ok := filters[FieldAlarmHistoryTitle].(string); ok && title != "" {
-			model = model.Where(FieldAlarmHistoryTitle+" LIKE ?", "%"+title+"%")
+		// 点位名称模糊搜索
+		if pointName, ok := filters[FieldAlarmHistoryPointName].(string); ok && pointName != "" {
+			model = model.Where(FieldAlarmHistoryPointName+" LIKE ?", "%"+pointName+"%")
 		}
 	}
 

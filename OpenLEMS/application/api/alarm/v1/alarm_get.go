@@ -43,7 +43,7 @@ type GetHistoryAlarmsReq struct {
 	DeviceId  string `json:"deviceId" dc:"可选，指定设备ID；为空则查询全部"`
 	Level     string `json:"level" v:"in:None,Warn,Alarm,Error,All" dc:"告警级别过滤(可空/为All返回全部)"`
 	Point     string `json:"point" dc:"可选，告警点位名称过滤"`
-	PointName string `json:"pointName" dc:"可选，告警标题模糊搜索"`
+	PointName string `json:"pointName" dc:"可选，告警点位名称模糊搜索"`
 	Date      string `json:"date" dc:"可选，日期过滤，格式：2006-01-02"`
 	Page      int    `json:"page" d:"1" dc:"页码，从1开始"`
 	PageSize  int    `json:"pageSize" d:"20" dc:"每页条数(最大100)"`
@@ -56,7 +56,7 @@ type HistoryAlarmItem struct {
 	SourceDeviceId   string     `json:"sourceDeviceId" dc:"源告警设备ID"`
 	SourceDeviceName string     `json:"sourceDeviceName" dc:"源设备名称"`
 	Point            string     `json:"point" dc:"告警点位名称"`
-	PointName        string     `json:"pointName" dc:"告警标题"`
+	PointName        string     `json:"pointName" dc:"告警点位名称"`
 	Level            string     `json:"level" dc:"告警级别"`
 	Detail           string     `json:"detail" dc:"告警详情"`
 	TriggerAt        *time.Time `json:"triggerAt" dc:"触发时间"`

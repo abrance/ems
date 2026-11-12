@@ -34,7 +34,7 @@ func (c *ControllerV1) GetHistoryAlarms(ctx context.Context, req *v1.GetHistoryA
 		filters["point"] = req.Point
 	}
 	if req.PointName != "" {
-		filters["title"] = req.PointName
+		filters["point_name"] = req.PointName
 	}
 	if req.Date != "" {
 		filters["date"] = req.Date
