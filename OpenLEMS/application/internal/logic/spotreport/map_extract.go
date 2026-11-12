@@ -3,6 +3,7 @@ package spotreport
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"regexp"
 	"sort"
@@ -23,6 +24,11 @@ import (
 //     按色系（绿/蓝/黄/橙/红）匹配，容忍饱和度与明度差异，置信度打折并给出告警
 //
 // 无论哪一段，都要求采样占比 ≥ 0.6（标签跨在色块边界上时留空）。
+//
+// 半透明填充（2026-10-15 起，实测 alpha 0.55~0.86）：上面的严格匹配靠「最大单色占比」，
+// 793px 缩放抗锯齿把一片色拆成上千种近邻色，占比掉到 0.05~0.30 全部落空。
+// 这种情况下一张图一个地市都判不出来，此时先把像素按「档位色叠在白底上」反解回色板实色
+// 再重跑上面两段（见 sampleMapBuckets）；实色图不进这条分支，结果与旧版逐字一致。
 const (
 	DatasetNodePricePeak   = "node_price_peak"
 	DatasetNodePriceValley = "node_price_valley"
@@ -39,6 +45,15 @@ const (
 	// OriginVoid 已被官方直采取代的 OCR 旧值：保留可查，但永远不再参与展示/确认/统计
 	OriginVoid = "void"
 )
+
+// defaultFillTolerance 地市窗口像素反解 alpha 后允许的 RGB 残差。
+//
+// 取值依据：实色图残差≈0；半透明图反解后残差多在 10 以内。调大反而有害——
+// 浅黄(255,255,126) 与浅橙(255,224,126) 只差 31，半透明浅黄按浅橙反解（alpha≈0.3）
+// 也能拟合到残差 39 左右，容差 40 会把相邻档位混在一起；12 会漏掉抗锯齿边缘。
+// 实测 26 天：容差 40 比 25 多认一些地市（多为“不透明色但被抗锯齿拉飞”的像素），但出现
+// 同一张图整片倒向相邻档位的风险；25 与 tim 的 TOL=25 参考值逐日一致，因此用它做默认。
+const defaultFillTolerance = 25
 
 var (
 	reLegendItem = regexp.MustCompile(`(?i)^[\[(]\s*(?:-?inf|\d+)\s*,\s*(?:\d+|\+?inf)\s*[\])]$`)
@@ -81,6 +96,33 @@ type CityBucket struct {
 // SampleMapBuckets 从一张地图页的 OCR 结果 + 图像中采样各地市所属档位。
 // 返回空切片表示无法可靠判定（色板缺失或配色不一致），调用方应提示人工填写。
 func SampleMapBuckets(img image.Image, lines []OCRLine) ([]CityBucket, []string) {
+	return sampleMapBuckets(img, lines, defaultFillTolerance)
+}
+
+// sampleMapBuckets 同 SampleMapBuckets，容差可配（12 严 / 25 默认 / 40 宽，用于对比与回归）。
+//
+// 实色填充走原路径，一个像素都不预处理，结果与旧版逐字一致；只有原路径一个地市都判不出来时，
+// 才认为填充被换成了半透明（2026-10-15 起），按 alpha-over-white 反解还原实色后重试一次。
+// shortcut: 只有「整张图 0 命中」才重试；将来若出现半透明但侥幸命中 1~3 个地市的日子，
+// 这些日子不会被重试，届时改成按地市回退。
+func sampleMapBuckets(img image.Image, lines []OCRLine, tolerance float64) ([]CityBucket, []string) {
+	out, warnings := sampleMapBucketsOnce(img, lines)
+	if len(out) > 0 || tolerance <= 0 {
+		return out, warnings
+	}
+	restored, ok := restoreSolidFill(img, lines, tolerance)
+	if !ok {
+		return out, warnings
+	}
+	if retried, retryWarnings := sampleMapBucketsOnce(restored, lines); len(retried) > 0 {
+		return retried, append(retryWarnings,
+			"该图填充为半透明，已按白底反解还原实色后判定档位（置信度为还原后的采样占比）")
+	}
+	return out, warnings
+}
+
+// sampleMapBucketsOnce 一遍：读色板 → 取地市标签 → 逐地市严格匹配 / 色相回退。
+func sampleMapBucketsOnce(img image.Image, lines []OCRLine) ([]CityBucket, []string) {
 	var warnings []string
 	palette := legendPalette(img, lines)
 	if len(palette) == 0 {
@@ -233,6 +275,63 @@ func hasDuplicateColor(runs []rgb) bool {
 	return false
 }
 
+// restoreSolidFill 把「档位色以 alpha 叠在白底上」的半透明填充反解回色板实色。
+// 只动有色像素：白底、黑字、灰色描边原样保留，因此重跑采样时地市名与图例照旧可读。
+// 返回 false 表示图例色板读不到（无从反解），调用方保持原结果。
+func restoreSolidFill(img image.Image, lines []OCRLine, tolerance float64) (image.Image, bool) {
+	palette := legendPalette(img, lines)
+	if len(palette) == 0 {
+		return nil, false
+	}
+	b := img.Bounds()
+	out := image.NewRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := at(img, x, y)
+			if c.saturated() {
+				best, bestResidual := bucketColor{}, math.MaxFloat64
+				for _, p := range palette {
+					if r := alphaResidual(c, p); r < bestResidual {
+						best, bestResidual = p, r
+					}
+				}
+				if bestResidual <= tolerance {
+					c = rgb{best.R, best.G, best.B}
+				}
+			}
+			out.Set(x, y, color.RGBA{uint8(c.R), uint8(c.G), uint8(c.B), 255})
+		}
+	}
+	return out, true
+}
+
+// alphaResidual 假设像素 c 是「档位色 p 以 alpha 叠在白底上」，反解出最可能的 alpha 后
+// 返回残差（RGB 欧氏距离）。实色像素 alpha≈1，退化为 c 与 p 的直接距离。
+//
+// 反解只用 p 的非近白通道：近白通道 (255-x) 当分母会放大误差（浅黄 R=255 除零）。
+func alphaResidual(c rgb, p bucketColor) float64 {
+	channels := [3][2]int{{c.R, p.R}, {c.G, p.G}, {c.B, p.B}}
+	sum, n := 0.0, 0
+	for _, pair := range channels {
+		if pair[1] >= 245 {
+			continue
+		}
+		sum += float64(255-pair[0]) / float64(255-pair[1])
+		n++
+	}
+	if n == 0 {
+		return math.MaxFloat64
+	}
+	alpha := math.Min(1, math.Max(0, sum/float64(n)))
+	var d float64
+	for _, pair := range channels {
+		pred := math.Min(255, float64(pair[1])*alpha+255*(1-alpha))
+		diff := float64(pair[0]) - pred
+		d += diff * diff
+	}
+	return math.Sqrt(d)
+}
+
 // dominantFillColor 标签窗口内出现最多的高饱和色及其占比
 func dominantFillColor(img image.Image, line OCRLine) (*rgb, float64) {
 	bounds := img.Bounds()
@@ -269,6 +368,7 @@ func dominantFillColor(img image.Image, line OCRLine) (*rgb, float64) {
 	return &best, float64(bestN) / float64(total)
 }
 
+// nearestBucket 色板中与该颜色 RGB 距离最近的一档
 func nearestBucket(palette []bucketColor, c rgb) (int, float64) {
 	bestIdx, bestDist := -1, math.MaxFloat64
 	for i, p := range palette {
