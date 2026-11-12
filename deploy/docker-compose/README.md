@@ -115,7 +115,7 @@ cron**。所以调度落在常驻容器 `ems-backup`（`ems-backup:2`）里的 c
 
 ```bash
 cd deploy/docker-compose
-cp .env.example .env.drill        # 改 LEMS_IMAGE_TAG 到目标版本
+cp .env.drill.example .env.drill  # 改 LEMS_IMAGE_TAG 到目标版本
 docker compose -p lems-drill -f docker-compose.drill.yml --env-file .env.drill up -d
 PROJECT=lems-drill CONTAINER=lems-drill VOLUME=lems-drill_lems-data \
   HEALTH_URL=http://127.0.0.1:18080/api/health ./restore.sh <备份>
