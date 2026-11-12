@@ -66,6 +66,10 @@ func (s *sAlarmServiceImpl) clearCountCache(ctx context.Context) {
 	c_log.Debugf(ctx, "已清除告警计数缓存")
 }
 
+// alarmHistoryKeepRows 是 alarm_history 的保留条数上限（全表，不是每设备）。
+// 改这里就改保留条数。
+const alarmHistoryKeepRows = 1000
+
 // ==================== 告警历史相关方法 ====================
 
 // CreateAlarmHistory 创建告警历史记录
@@ -86,6 +90,15 @@ func (s *sAlarmServiceImpl) CreateAlarmHistory(ctx context.Context, deviceId, so
 	if err != nil {
 		c_log.Errorf(ctx, "创建告警历史记录失败 - 设备ID: %s, 点位: %s, 错误: %+v", deviceId, point.GetKey(), err)
 		return err
+	}
+
+	// 按条数封顶。失败只打日志：插入已经成功，返回 error 会让调用方误判「保存告警记录失败」
+	// 而丢掉一条真实告警。放在 clearCountCache 之前——先让表回到 1000 条，再让缓存失效，
+	// 否则下一次查询可能把超额的旧计数缓存住 5 分钟。
+	//
+	// shortcut: 按 id 计数封顶 1000 条，不 VACUUM（每次插入都 VACUUM 太重），已释放页由后续写入复用、文件不缩；要按天/按设备分别保留时改设计。
+	if _, err := alarmHistory.TrimToNewest(ctx, alarmHistoryKeepRows); err != nil {
+		c_log.Errorf(ctx, "清理告警历史超额记录失败 - 设备ID: %s, 保留条数: %d, 错误: %+v", deviceId, alarmHistoryKeepRows, err)
 	}
 
 	// 清除计数缓存，确保下次查询能获取到最新状态
