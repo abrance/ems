@@ -1,0 +1,44 @@
+# 回滚/恢复演练专用：独立项目名 + 独立卷 + 独立端口，绝不碰生产 lems。
+# 独立文件（不与生产 compose 合并），只保留 lems 一个服务——演练只验数据与版本兼容。
+#
+#   docker compose -p lems-drill -f docker-compose.drill.yml --env-file .env.drill up -d
+#   docker compose -p lems-drill -f docker-compose.drill.yml --env-file .env.drill down
+#
+# 改 .env.drill 里的 LEMS_IMAGE_TAG 即可在 v1.0.65 / v1.0.66 之间来回验。
+name: lems-drill
+
+services:
+  lems:
+    image: ${LEMS_IMAGE:-ghcr.chenby.cn/abrance/ems}:${LEMS_IMAGE_TAG:-v1.0.65}
+    container_name: lems-drill
+    restart: "no"            # 演练容器不自动重启，避免残留
+    pull_policy: missing
+    platform: linux/amd64
+    environment:
+      APP_PROFILE: ${APP_PROFILE:-prod}
+      TZ: ${TZ:-Asia/Shanghai}
+    command:
+      - ./ems
+      - --web=true
+      - --force=true
+    ports:
+      - "${DRILL_LEMS_PORT:-18080}:80"
+    volumes:
+      - lems-data:/app/out
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://localhost:80/api/health
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  lems-data:
+    name: lems-drill_lems-data
