@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -39,7 +39,7 @@ jobs:
       # //go:embed web.zip 要求编译时该文件存在，而 zip 已不再入库（构建镜像时才生成）。
       # 所以这里必须先构建前端，否则 go vet/test/build 直接编译不过。
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: OpenLEMS/web/package.json
           cache: npm
@@ -82,7 +82,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v7
