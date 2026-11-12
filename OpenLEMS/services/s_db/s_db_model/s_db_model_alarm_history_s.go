@@ -186,6 +186,21 @@ func (a *SAlarmHistoryModel) GetPage(ctx context.Context, page, pageSize int, fi
 	return records, total, nil
 }
 
+// TrimToNewest 只保留最新的 keep 条，删除更早的。
+// 按自增 id 判新旧（id 单调），删除条件落在主键上，不新增索引；不足 keep 条时子查询为 NULL，
+// 比较不成立，一行都不会删。
+func (a *SAlarmHistoryModel) TrimToNewest(ctx context.Context, keep int) (int64, error) {
+	if keep < 1 {
+		return 0, nil
+	}
+	res, err := g.DB().Exec(ctx,
+		`DELETE FROM alarm_history WHERE id <= (SELECT id FROM alarm_history ORDER BY id DESC LIMIT 1 OFFSET ?)`, keep)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ClearAll 清除所有告警历史记录并执行VACUUM
 func (a *SAlarmHistoryModel) ClearAll(ctx context.Context) error {
 	// 删除所有记录 - 使用 WHERE 1=1 来满足安全要求
