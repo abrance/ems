@@ -35,23 +35,27 @@ mkdir -p "$BACKUP_DIR"
 exec 9>"${BACKUP_DIR}/.backup.lock"
 flock -n 9 || die "另一个备份正在进行（锁 ${BACKUP_DIR}/.backup.lock）"
 
-# 容器内 sqlite3；库目录只读挂载，备份产物写 /dst
-# 两种跑法：宿主机没有 sqlite3 时走 docker run（卷只读挂进去）；
-# 备份容器里自带 sqlite3 时直接用，省一层 docker
-if command -v sqlite3 >/dev/null 2>&1; then
+# sqlite3 跑在哪，决定它眼里的路径——写死 /dst 会在容器内跑到卷外去（备份静默失败）。
+#   本机有 sqlite3 且 VOLUME 是真实目录（备份容器内 VOLUME=/src）：直接用本机路径
+#   其余情况（宿主机上是命名卷）：走 docker run，库挂 /src、备份目录挂 /dst
+if command -v sqlite3 >/dev/null 2>&1 && [ -d "${VOLUME}" ]; then
+  SRC_DIR="${VOLUME}"
+  DST_DIR="${BACKUP_DIR}"
   sq() { sqlite3 "$@"; }
 else
+  SRC_DIR="/src"
+  DST_DIR="/dst"
   sq() { docker run --rm -v "${VOLUME}:/src:ro" -v "${BACKUP_DIR}:/dst" \
            --entrypoint sqlite3 "$SQLITE_IMAGE" "$@"; }
 fi
 
 # 1) 一致性快照
 echo "$LOG_PREFIX snapshot ${VOLUME}/${DB} -> ${BACKUP_DIR}/${NAME}"
-sq "/src/${DB}" ".backup '/dst/${PART}'" || die "sqlite3 .backup 失败"
+sq "${SRC_DIR}/${DB}" ".backup '${DST_DIR}/${PART}'" || die "sqlite3 .backup 失败"
 
 # 2) 校验：integrity_check + 关键表行数（行数落进 .last-backup 供事后比对）
 # 只取 stdout：sqlite 的告警、shell 的 xtrace 都会走 stderr，混进来会把 ok 判成失败
-ROWS=$(sq "/dst/${PART}" "PRAGMA integrity_check; $(for t in $TABLES; do echo "select '$t=' || count(*) from $t;"; done)" 2>/dev/null) \
+ROWS=$(sq "${DST_DIR}/${PART}" "PRAGMA integrity_check; $(for t in $TABLES; do echo "select '$t=' || count(*) from $t;"; done)" 2>/dev/null) \
   || { rm -f "${BACKUP_DIR}/${PART}"; die "校验查询失败"; }
 [ "$(printf '%s\n' "$ROWS" | head -n1)" = "ok" ] \
   || { rm -f "${BACKUP_DIR}/${PART}"; die "integrity_check 未通过: $ROWS"; }
