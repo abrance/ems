@@ -1,6 +1,9 @@
 package spotreport
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // 复现线上 2026-09-21 那篇文章（/s/pxdJ0CyMva1evGOKsCpE0w）的结构：
 //
@@ -125,5 +128,46 @@ func TestParseArticleWithMixedPageWidth(t *testing.T) {
 		if img.Width == 0 || img.Height == 0 {
 			t.Fatalf("page[%d] 尺寸缺失", i)
 		}
+	}
+}
+
+// 复现线上 2026-09-29 补采（报 code 53「文章中没有识别到日报图片」）的结构：
+// 4 页日报里第 4 页在 picturePageInfoList 里的 width/height 都是 0，正文 DOM 里也没有
+// data-w/data-ratio（微信偶尔就是这么给的）。旧实现按 `img.Width <= 0` 直接把这一页
+// 跳过，只剩 3 个候选，又因为「候选 > 0 就返回」而不走兜底，上层凑不满 4 页直接报错。
+const articleWithUnsizedReportPage = `
+<meta property="og:title" content="通报 | 广东电力现货市场2026年9月运行日报(09.29)">
+<div id="js_content">
+<img data-src="https://mmbiz.qpic.cn/mmbiz_png/0EVF5ArhZk8yTc1Xmlt2Uv36NibR2KLh9WTVjv/640?wx_fmt=png" data-w="1080" data-ratio="0.26851851">
+<img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageOneAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/640?wx_fmt=png" data-w="2381" data-ratio="1.41411171">
+<img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageTwoAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/640?wx_fmt=png" data-w="2381" data-ratio="1.41411171">
+<img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageThreeAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/640?wx_fmt=png" data-w="2381" data-ratio="1.41411171">
+<img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageFourAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/640?wx_fmt=png">
+<img data-src="https://mmbiz.qpic.cn/mmbiz_png/0EVF5ArhZk8cPHNTtib35oyYH2COnywfXA2ImRPnBzDibPdsE/640?wx_fmt=png" data-w="1080" data-ratio="0.52777777">
+</div>
+<script>
+var picturePageInfoList = "[{\"cdn_url\":\"https://mmbiz.qpic.cn/mmbiz_png/0EVF5ArhZk8yTc1Xmlt2Uv36NibR2KLh9WTVjv/0?wx_fmt=png\x26amp;from=appmsg\",\"width\":1080,\"height\":290},{\"cdn_url\":\"https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageOneAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/0?wx_fmt=png\x26amp;from=appmsg\",\"width\":2381,\"height\":3367},{\"cdn_url\":\"https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageTwoAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/0?wx_fmt=png\x26amp;from=appmsg\",\"width\":2381,\"height\":3367},{\"cdn_url\":\"https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageThreeAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/0?wx_fmt=png\x26amp;from=appmsg\",\"width\":2381,\"height\":3367},{\"cdn_url\":\"https://mmbiz.qpic.cn/sz_mmbiz_png/0929pageFourAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp/0?wx_fmt=png\x26amp;from=appmsg\",\"width\":0,\"height\":0},{\"cdn_url\":\"https://mmbiz.qpic.cn/mmbiz_png/0EVF5ArhZk8cPHNTtib35oyYH2COnywfXA2ImRPnBzDibPdsE/0?wx_fmt=png\x26amp;from=appmsg\",\"width\":1080,\"height\":570}]";
+</script>
+`
+
+// 4 页日报里 1 页缺尺寸元数据时，仍必须选出 4 张日报页，且顺序与正文 DOM 一致。
+func TestSelectReportImagesWithUnsizedReportPage(t *testing.T) {
+	images := extractImages(articleWithUnsizedReportPage)
+	if len(images) != 6 {
+		t.Fatalf("用例本身应合并出 6 张图（页眉 + 4 页日报 + 页脚），实际 %d: %+v", len(images), images)
+	}
+	got := SelectReportImages(images)
+	if len(got) != 4 {
+		t.Fatalf("want 4 pages, got %d: %+v", len(got), got)
+	}
+	wantTokens := []string{"0929pageOne", "0929pageTwo", "0929pageThree", "0929pageFour"}
+	for i, want := range wantTokens {
+		if !strings.Contains(got[i].OriginURL, want) {
+			t.Fatalf("第 %d 页 URL 顺序不对：want 含 %q，实际 %q", i+1, want, got[i].OriginURL)
+		}
+	}
+	// 前 3 页有元数据、第 4 页没有：缺尺寸不影响它被选中，仍按 DOM 顺序排在第 4。
+	if got[3].Width != 0 || got[3].Height != 0 {
+		t.Fatalf("第 4 页本应缺元数据，实际 %dx%d", got[3].Width, got[3].Height)
 	}
 }

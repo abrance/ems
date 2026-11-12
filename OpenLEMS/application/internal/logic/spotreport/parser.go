@@ -6,6 +6,7 @@ import (
 	"html"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -140,21 +141,32 @@ func SelectReportImages(images []ParsedImage) []ParsedImage {
 	// 同一篇文章里微信可能给出 1080 的展示宽度（data-w 与 picturePageInfoList 都会，
 	// 而 /0 原图仍是 2381 宽），用绝对宽度筛会漏掉其中几页
 	// —— 实测 2026-09-20 那篇只认到 3 页，最终报「文章中没有识别到日报图片」。
-	candidates := make([]ParsedImage, 0, len(images))
-	for _, img := range images {
+	candidateIdx := make([]int, 0, len(images))
+	unsized := make([]int, 0, len(images))
+	for i, img := range images {
 		if img.Width <= 0 || img.Height <= 0 {
+			unsized = append(unsized, i)
 			continue
 		}
 		if float64(img.Height)/float64(img.Width) >= reportPageAspect {
-			candidates = append(candidates, img)
+			candidateIdx = append(candidateIdx, i)
 		}
 	}
-	if len(candidates) >= 4 {
-		return candidates[:4]
+	if len(candidateIdx) >= 4 {
+		return pickImages(images, candidateIdx[:4])
 	}
-	if len(candidates) > 0 {
-		// 不够 4 页时交给上层报错（比拿 5-6 张的兜底结果更准确）
-		return candidates
+	if len(candidateIdx) > 0 {
+		// 候选只有 1~3 页时不能直接交给上层报错：picturePageInfoList 里可能有一页日报页的
+		// width/height 写成了 0（实测 2026-09-29 补采：4 页日报里 1 页缺元数据，只剩 3 个候选，
+		// 上层凑不满 4 页就报「文章中没有识别到日报图片」）。
+		// 优先用下载实测尺寸——带正数宽高的图本来就落在候选里；这里拿不到下载结果，
+		// 就按 DOM 顺序把缺尺寸的图补进候选，凑到 4 页。
+		picked := append(append([]int{}, candidateIdx...), unsized...)
+		sort.Ints(picked)
+		if len(picked) > 4 {
+			picked = picked[:4]
+		}
+		return pickImages(images, picked)
 	}
 	// 尺寸元数据全缺失时的兜底：正文 DOM 里常见重复的页眉/页脚图，它们不在
 	// picturePageInfoList 中、拿不到宽高。这里必须固定取 4 张：旧实现取
@@ -166,6 +178,15 @@ func SelectReportImages(images []ParsedImage) []ParsedImage {
 		return images[:4]
 	}
 	return images
+}
+
+// pickImages 按给的下标（DOM 顺序）取出对应图片。
+func pickImages(images []ParsedImage, idx []int) []ParsedImage {
+	out := make([]ParsedImage, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, images[i])
+	}
+	return out
 }
 
 func NormalizeImageURL(raw string) string {
