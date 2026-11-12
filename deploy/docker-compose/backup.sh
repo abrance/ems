@@ -14,6 +14,7 @@ BACKUP_DIR="${BACKUP_DIR:-/opt/cops/backup/lems}"         # 本地备份目录
 OFFSITE="${OFFSITE-nas:/pool1_8t/public/backup/lems}"    # 异地目标 ssh:path；显式置空（OFFSITE=）= 不做异地
 KEEP_DAILY="${KEEP_DAILY:-7}"                             # 本地保留日备份数
 KEEP_WEEKLY="${KEEP_WEEKLY:-4}"                           # 本地保留周备份数（UTC 周日那份）
+KEEP_OFFSITE="${KEEP_OFFSITE:-7}"                         # 异地保留份数（至少留 1 份日备）
 # ------------------------------
 
 VOLUME="${VOLUME:-lems_lems-data}"   # 生产命名卷；演练时用 VOLUME=lems-drill_lems-data
@@ -35,15 +36,22 @@ exec 9>"${BACKUP_DIR}/.backup.lock"
 flock -n 9 || die "另一个备份正在进行（锁 ${BACKUP_DIR}/.backup.lock）"
 
 # 容器内 sqlite3；库目录只读挂载，备份产物写 /dst
-sq() { docker run --rm -v "${VOLUME}:/src:ro" -v "${BACKUP_DIR}:/dst" \
-         --entrypoint sqlite3 "$SQLITE_IMAGE" "$@"; }
+# 两种跑法：宿主机没有 sqlite3 时走 docker run（卷只读挂进去）；
+# 备份容器里自带 sqlite3 时直接用，省一层 docker
+if command -v sqlite3 >/dev/null 2>&1; then
+  sq() { sqlite3 "$@"; }
+else
+  sq() { docker run --rm -v "${VOLUME}:/src:ro" -v "${BACKUP_DIR}:/dst" \
+           --entrypoint sqlite3 "$SQLITE_IMAGE" "$@"; }
+fi
 
 # 1) 一致性快照
 echo "$LOG_PREFIX snapshot ${VOLUME}/${DB} -> ${BACKUP_DIR}/${NAME}"
 sq "/src/${DB}" ".backup '/dst/${PART}'" || die "sqlite3 .backup 失败"
 
 # 2) 校验：integrity_check + 关键表行数（行数落进 .last-backup 供事后比对）
-ROWS=$(sq "/dst/${PART}" "PRAGMA integrity_check; $(for t in $TABLES; do echo "select '$t=' || count(*) from $t;"; done)" 2>&1) \
+# 只取 stdout：sqlite 的告警、shell 的 xtrace 都会走 stderr，混进来会把 ok 判成失败
+ROWS=$(sq "/dst/${PART}" "PRAGMA integrity_check; $(for t in $TABLES; do echo "select '$t=' || count(*) from $t;"; done)" 2>/dev/null) \
   || { rm -f "${BACKUP_DIR}/${PART}"; die "校验查询失败"; }
 [ "$(printf '%s\n' "$ROWS" | head -n1)" = "ok" ] \
   || { rm -f "${BACKUP_DIR}/${PART}"; die "integrity_check 未通过: $ROWS"; }
@@ -58,21 +66,44 @@ SIZE=$(stat -c%s "${BACKUP_DIR}/${NAME}")
 if [ -n "$OFFSITE" ]; then
   OFF_HOST=${OFFSITE%%:*}
   OFF_PATH=${OFFSITE#*:}
-  scp -q -o BatchMode=yes -o ConnectTimeout=10 "${BACKUP_DIR}/${NAME}" "${OFFSITE}/" \
+  # SSH_KEY / SSH_KNOWN_HOSTS 用于容器内跑：容器里没有 ~/.ssh/config 与默认 known_hosts，
+  # 密钥和主机指纹都是只读挂进来的，必须显式指路径
+  SSHO="-o BatchMode=yes -o ConnectTimeout=10"
+  [ -n "${SSH_KEY:-}" ] && SSHO="$SSHO -i $SSH_KEY"
+  [ -n "${SSH_KNOWN_HOSTS:-}" ] && SSHO="$SSHO -o UserKnownHostsFile=$SSH_KNOWN_HOSTS"
+  # shellcheck disable=SC2086
+  scp -q $SSHO "${BACKUP_DIR}/${NAME}" "${OFFSITE}/" \
     || die "异地传输失败（本地 ${NAME} 已保留）: ${OFFSITE}"
   # 按字节数核对，避免半截文件被当成备份
-  REMOTE_SIZE=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$OFF_HOST" "stat -c%s '${OFF_PATH}/${NAME}'" 2>/dev/null || echo 0)
+  # shellcheck disable=SC2086
+  REMOTE_SIZE=$(ssh $SSHO "$OFF_HOST" "stat -c%s '${OFF_PATH}/${NAME}'" 2>/dev/null || echo 0)
   [ "$REMOTE_SIZE" = "$SIZE" ] || die "异地文件大小不符（本地 ${SIZE} / 异地 ${REMOTE_SIZE}），本地已保留"
   echo "$LOG_PREFIX offsite ok ${OFFSITE}/${NAME} bytes=${SIZE}"
+
+  # 异地也按份数清，否则只增不减；清理失败只告警，不影响本次备份的成功判定
+  # shellcheck disable=SC2086
+  ssh $SSHO "$OFF_HOST" "ls -1t '${OFF_PATH}'/db-*.sqlite3.gz 2>/dev/null | tail -n +$((KEEP_OFFSITE + 1)) | xargs -r rm -f" \
+    || echo "$LOG_PREFIX WARN 异地旧备份清理失败（不影响本次备份）" >&2
 fi
 
 # 5) 本地保留：最新 KEEP_DAILY 份全留，另外每天周日（UTC）那份额外留 KEEP_WEEKLY 份
 #    只有异地成功（或未配置异地）才走到这里：异地挂了不会删掉本地唯一的副本
 keep_list=$(ls -1t "${BACKUP_DIR}"/db-*.sqlite3.gz 2>/dev/null | head -n "$KEEP_DAILY")
+# 周备份靠文件名的 UTC 日期判断：busybox 的 date 不支持 -d，这里用 posix 算式算星期几
 weekly=$(ls -1t "${BACKUP_DIR}"/db-*.sqlite3.gz 2>/dev/null \
   | while read -r f; do
       d=$(basename "$f" | sed 's/^db-\([0-9]\{8\}\)T.*/\1/')
-      [ "$(date -u -d "$d" +%u)" = "7" ] && echo "$f"
+      y=$(printf '%s' "$d" | cut -c1-4); m=$(printf '%s' "$d" | cut -c5-6); dd=$(printf '%s' "$d" | cut -c7-8)
+      # Zeller 同余求星期（1=周一 … 7=周日），不依赖 date -d
+      wd=$(awk -v y="$y" -v m="$m" -v d="$dd" 'BEGIN{
+        if (m<3){m+=12;y-=1}
+        K=y%100; J=int(y/100)
+        h=int(d + int(13*(m+1)/5) + K + int(K/4) + int(J/4) + 5*J)%7
+        # h: 0=周六 1=周日 2=周一 ... 6=周五
+        w=(h==0)?6:((h==1)?7:(h-1))
+        print w
+      }')
+      [ "$wd" = "7" ] && echo "$f"
     done | head -n "$KEEP_WEEKLY")
 for f in $(ls -1t "${BACKUP_DIR}"/db-*.sqlite3.gz 2>/dev/null); do
   printf '%s\n%s\n' "$keep_list" "$weekly" | grep -qxF "$f" && continue
@@ -81,5 +112,7 @@ for f in $(ls -1t "${BACKUP_DIR}"/db-*.sqlite3.gz 2>/dev/null); do
 done
 
 echo "$LOG_PREFIX OK ${NAME} size=${SIZE} ${COUNTS}"
-# 状态落一份在宿主机目录，容器/日志丢了它也在
-printf '%s OK %s size=%s %s\n' "$(date '+%F %T %Z')" "${NAME}" "${SIZE}" "${COUNTS}" > "${BACKUP_DIR}/.last-backup"
+# 状态落一份在宿主机目录，容器/日志丢了它也在。
+# 写不了不算备份失败：老方案（root 容器）留下的文件属主可能不同，备份本身已经成功。
+printf '%s OK %s size=%s %s\n' "$(date '+%F %T %Z')" "${NAME}" "${SIZE}" "${COUNTS}" > "${BACKUP_DIR}/.last-backup" 2>/dev/null \
+  || echo "$LOG_PREFIX WARN 无法写 ${BACKUP_DIR}/.last-backup（备份本身已成功）" >&2

@@ -54,12 +54,17 @@ live 抖动）。改完 `docker compose up -d emsdevice` 生效；`.env` 里的
 ### 备份
 
 ```bash
-# 宿主机上直接跑，不需要 sudo
-./deploy/docker-compose/backup.sh
-
-# cron（每天 03:00，与 DockPanel 站点备份错开）
+# 有 cron 的机器（需要 docker 权限即可，不需要 root）
 0 3 * * * BACKUP_DIR=/opt/cops/backup/lems /path/to/backup.sh >> /var/log/lems-backup.log 2>&1
+
+# 手工跑一次
+./deploy/docker-compose/backup.sh
 ```
+
+**cloud2 现状**：该机没有 crond、没有 root、user linger 也开不了，宿主机上**没有可用的
+cron**。所以调度落在常驻容器 `ems-backup`（`ems-backup:2`）里的 crond 上，容器内
+`0 3 * * *` 直接执行同一份 `backup.sh`。容器只读挂生产卷、挂备份目录与异地密钥，
+不写生产库。改脚本后 `cd /opt/cops/backup/lems-tools-v2 && docker compose up -d --force-recreate`。
 
 流程：`sqlite3 .backup` 出一致快照（不停容器）→ 校验 `PRAGMA integrity_check`
 并统计关键表行数 → gzip → scp 到异地并核对字节数 → 按保留策略清本地。
@@ -68,6 +73,8 @@ live 抖动）。改完 `docker compose up -d emsdevice` 生效；`.env` 里的
 | --- | --- | --- |
 | `BACKUP_DIR` | `/opt/cops/backup/lems` | 本地目录 |
 | `OFFSITE` | `nas:/pool1_8t/public/backup/lems` | `ssh:path`；`OFFSITE=` 关闭异地 |
+| `KEEP_OFFSITE` | `7` | 异地保留份数 |
+| `SSH_KEY` / `SSH_KNOWN_HOSTS` | 空 | 容器内跑时显式指定（容器里没有 `~/.ssh/config`）|
 | `KEEP_DAILY` | `7` | 本地保留日备份数 |
 | `KEEP_WEEKLY` | `4` | 本地保留周备份数（UTC 周日那份） |
 | `VOLUME` | `lems_lems-data` | 数据卷 |
@@ -119,3 +126,16 @@ docker volume rm lems-drill_lems-data
 实测（cloud2，2026-11-12，库 13.7 MB / 压缩后 1.0 MB）：
 恢复 4 秒，v1.0.65→v1.0.66 升级 55 秒，v1.0.66 库回滚到 v1.0.65 32 秒，三次 health 均 200、
 行数一致。按每天 03:00 备份算，**RPO ≤ 24h，RTO ≈ 1 分钟**（恢复 + 启动 + health 通过）。
+
+### 生产落点（cloud2，2026-11-12 实测）
+
+| 项 | 值 |
+| --- | --- |
+| 主机 | cloud2（10.193.0.9） |
+| compose 项目 | `lems`，文件 `/opt/cops/apps/lems/compose.yaml`（**不是**本目录，本目录是模板） |
+| 镜像 | `ghcr.chenby.cn/abrance/ems:v1.0.65`，digest `sha256:ff45a34d...` |
+| 重启策略 | `unless-stopped` |
+| 卷 | `lems_lems-data` → `/var/lib/docker/volumes/lems_lems-data/_data` |
+| 库 | `db.sqlite3` 13.7 MB（WAL，`-wal` 常态 0 B） |
+| 健康检查 | `GET http://127.0.0.1:11000/api/health` |
+| 异地 | cloud2→nas 免密 SSH，`/pool1_8t/public/backup/lems` |
