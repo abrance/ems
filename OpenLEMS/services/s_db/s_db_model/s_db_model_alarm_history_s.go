@@ -130,9 +130,20 @@ func (a *SAlarmHistoryModel) GetPage(ctx context.Context, page, pageSize int, fi
 
 	// 应用过滤条件
 	if filters != nil {
-		// 日期过滤 (yyyy-MM-dd)
+		// 日期过滤 (yyyy-MM-dd)，按墙钟文本半开区间匹配，与列表原样显示 trigger_at 的口径一致。
+		// shortcut: 按墙钟日筛选，与列表原样显示一致；若将来前端改为按浏览器时区格式化 triggerAt，
+		// 须改为瞬时比较 datetime(trigger_at) + 表达式索引。
 		if date, ok := filters["date"].(string); ok && date != "" {
-			model = model.Where("DATE(trigger_at) = ?", date)
+			// 严格解析：带时分秒或非法值都当「筛不到」，保持旧 DATE() 比较对非日期串返回 0 行的行为，
+			// 不退化成忽略过滤返回全部。
+			if d, err := time.Parse("2006-01-02", date); err != nil {
+				model = model.Where("1=0")
+			} else {
+				// 列上不包函数，才能走 idx_alarm_history_trigger_at。
+				model = model.Where("trigger_at >= ? AND trigger_at < ?",
+					d.Format("2006-01-02")+" 00:00:00",
+					d.AddDate(0, 0, 1).Format("2006-01-02")+" 00:00:00")
+			}
 		}
 
 		// 设备ID过滤
