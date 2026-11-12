@@ -79,8 +79,9 @@ cron**。所以调度落在常驻容器 `ems-backup`（`ems-backup:2`）里的 c
 | `KEEP_WEEKLY` | `4` | 本地保留周备份数（UTC 周日那份） |
 | `VOLUME` | `lems_lems-data` | 数据卷 |
 
-保留策略：最新 7 份全留，另外 UTC 周日那份额外留 4 份，**异地只留最新 1 份日备**。
-要改只改脚本顶部这一段。
+保留策略：本地最新 7 份全留，另外 UTC 周日那份额外留 4 份；**异地按 `KEEP_OFFSITE`（默认 7）留最新 7 份**。
+要改只改脚本顶部这一段。超过 24h 的 `*.part` 半成品与 `FAILED-*` 标记也会被顺手清掉
+（prune 只认 `db-*.sqlite3.gz`，这两类不在它的匹配范围内）。
 
 失败行为：任何一步失败都**非零退出**并写 `FAILED:` 到 stderr，cron 日志里直接可见；
 `FAILED-*` 的半成品会留在目录里而不是被当成可用备份。**异地传失败不会删本地**——
@@ -89,14 +90,29 @@ cron**。所以调度落在常驻容器 `ems-backup`（`ems-backup:2`）里的 c
 ### 恢复
 
 ```bash
-./deploy/docker-compose/restore.sh /opt/cops/backup/lems/db-20261112T121406Z.sqlite3.gz
+# 生产：必须显式 --yes，否则只打印「将停止 lems、把 lems_lems-data/db.sqlite3 改名留底」并退出 1
+./deploy/docker-compose/restore.sh /opt/cops/backup/lems/db-20261112T121406Z.sqlite3.gz --yes
+# 也可以指定 health 地址（默认按 LEMS_PORT 从 /opt/cops/apps/lems/.env 取，兜底 11000）
+HEALTH_URL=http://127.0.0.1:11000/api/health \
+  ./deploy/docker-compose/restore.sh /opt/cops/backup/lems/db-20261112T121406Z.sqlite3.gz --yes
 ```
 
-流程：解压 + `integrity_check`（不过就**什么都不动**）→ 停 `lems` → 现存库改名
+**生产护栏**：`CONTAINER=lems` 或 `VOLUME=lems_lems-data`（两个默认值）时必须带 `--yes`
+或 `PROD_CONFIRM=1`，否则脚本只打印将要动的容器与卷名后 `exit 1`。演练用显式变量绕开。
+
+`HEALTH_URL` 默认是 `http://127.0.0.1:<LEMS_PORT>/api/health`，`LEMS_PORT` 从
+`/opt/cops/apps/lems/.env` 读、兜底 `11000`。**生产宿主映射是 `80/tcp -> 0.0.0.0:11000`**，
+所以不能默认写 80——那会让恢复成功后仍判 health 失败退出 1。
+
+流程：解压 + `integrity_check` + 取备份行数（任一步不过就**什么都不动**，容器不会被停）→
+停 `lems` → 现存库改名
 `db.sqlite3.pre-restore-<UTC>`（**保留，不删**）→ 删 `-wal`/`-shm` → 放回备份 →
 容器停止状态下核行数 → 起容器 → 等 `/api/health` 返回 200。
 
 `-wal`/`-shm` 必须删：它们属于旧库，残留会被当成新库的未提交事务回放，数据错乱。
+
+失败路径：停容器之后的任何一步失败都会打印「容器仍处于停止状态，执行 `docker start <容器>` 恢复」，
+现存库已改名留底、没有删除，可原样换回。
 
 ### 恢复后可能看到什么
 

@@ -111,6 +111,14 @@ for f in $(ls -1t "${BACKUP_DIR}"/db-*.sqlite3.gz 2>/dev/null); do
   rm -f "$f"
 done
 
+# 6) 清 24h 前的半成品与失败标记：prune 只认 db-*.sqlite3.gz，.part / FAILED-* 否则永远留着。
+#    清不掉（属主不同）只告警，不影响本次备份成功判定
+find "$BACKUP_DIR" -maxdepth 1 -type f \( -name '*.part' -o -name 'FAILED-*' \) -mmin +1440 -print 2>/dev/null \
+  | while read -r f; do
+      rm -f "$f" 2>/dev/null && echo "$LOG_PREFIX prune stale $(basename "$f")" \
+        || echo "$LOG_PREFIX WARN 无法删除残留 $(basename "$f")（属主不同？）" >&2
+    done
+
 echo "$LOG_PREFIX OK ${NAME} size=${SIZE} ${COUNTS}"
 # 状态落一份在宿主机目录，容器/日志丢了它也在。
 # 写不了不算备份失败：老方案（root 容器）留下的文件属主可能不同，备份本身已经成功。
