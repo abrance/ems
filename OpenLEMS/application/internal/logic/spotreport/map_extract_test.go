@@ -3,6 +3,7 @@ package spotreport
 import (
 	"image"
 	"image/color"
+	"math"
 	"strings"
 	"testing"
 )
@@ -27,12 +28,53 @@ type cityBox struct {
 }
 
 func buildMapImage(fill []color.RGBA) (image.Image, []OCRLine, []cityBox) {
+	return buildMapImageAlpha(fill, 1, 0)
+}
+
+// buildMapImageAlpha 同 buildMapImage，但地市色块可以是半透明（alpha<1）并且带抗锯齿抖动。
+//
+// 抖动不是装饰：2026-10-15 起的真实地图把一片色拆成 800~1200 种近邻色，单色占比掉到
+// 0.05~0.30，旧逻辑直接落空；只改 alpha 而不抖动的话，合成图仍是「一块纯净色」，
+// 旧逻辑照样能把档位判出来，测不出这个 bug。
+func buildMapImageAlpha(fill []color.RGBA, alpha float64, jitter int) (image.Image, []OCRLine, []cityBox) {
 	const w, h = 1600, 2200
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			img.Set(x, y, color.RGBA{255, 255, 255, 255})
 		}
+	}
+	blend := func(c color.RGBA, x, y int) color.RGBA {
+		out := color.RGBA{255, 255, 255, 255}
+		if jitter > 0 {
+			// 确定性伪随机抖动，不引入 rand，保证测试可重跑
+			d := (x*7919+y*104729)%(2*jitter+1) - jitter
+			out.R, out.G, out.B = uint8(255+d), uint8(255+d), uint8(255+d)
+		}
+		for i, v := range []uint8{c.R, c.G, c.B} {
+			v = uint8(math.Round(float64(v)*alpha + 255*(1-alpha)))
+			if jitter > 0 {
+				// 每通道独立抖动，模拟缩放重采样后的近邻色扩散；饱和到 0..255 防溢出
+				d := (x*31 + y*17 + i*97) % (2*jitter + 1)
+				n := int(v) + d - jitter
+				if n > 255 {
+					n = 255
+				}
+				if n < 0 {
+					n = 0
+				}
+				v = uint8(n)
+			}
+			switch i {
+			case 0:
+				out.R = v
+			case 1:
+				out.G = v
+			case 2:
+				out.B = v
+			}
+		}
+		return out
 	}
 	// 地市色块（先画，图例后画，互不重叠）
 	boxes := []cityBox{
@@ -45,13 +87,13 @@ func buildMapImage(fill []color.RGBA) (image.Image, []OCRLine, []cityBox) {
 		c := fill[i%len(fill)]
 		for y := b.box.Min.Y; y < b.box.Max.Y; y++ {
 			for x := b.box.Min.X; x < b.box.Max.X; x++ {
-				img.Set(x, y, c)
+				img.Set(x, y, blend(c, x, y))
 			}
 		}
 	}
 
 	var lines []OCRLine
-	// 图例：标签在 x=1400，左侧 1340~1390 是色块
+	// 图例：标签在 x=1400，左侧 1340~1390 是色块（真实日报的图例始终是实色）
 	for i, label := range testLegendLabels {
 		top := 1600 + i*70
 		for y := top; y < top+50; y++ {
@@ -101,6 +143,27 @@ func TestSampleMapBuckets(t *testing.T) {
 		}
 		if b.Conf <= 0 {
 			t.Fatalf("%s 采样置信度缺失", b.City)
+		}
+	}
+}
+
+// 半透明填充（2026-10-15 起）：旧逻辑一个地市都判不出来，反解实色后应全部判出。
+// 同时锁住「实色图走原路径」：同一个合成图不透明时结果必须与旧版一致。
+func TestSampleMapBucketsSemiTransparent(t *testing.T) {
+	fill := []color.RGBA{testPalette[4], testPalette[2], testPalette[0], testPalette[3]}
+	want := map[string]int{"韶关": 5, "清远": 3, "梅州": 1, "河源": 4}
+
+	img, lines, boxes := buildMapImageAlpha(fill, 0.7, 3)
+	if legacy, _ := sampleMapBuckets(img, lines, 0); len(legacy) != 0 {
+		t.Fatalf("半透明 + 抗锯齿抖动应让旧逻辑全部落空，实际判出 %d 个：%+v", len(legacy), legacy)
+	}
+	got, warnings := SampleMapBuckets(img, lines)
+	if len(got) != len(boxes) {
+		t.Fatalf("半透明填充应判出 %d 个地市，实际 %d：%+v（warnings=%v）", len(boxes), len(got), got, warnings)
+	}
+	for _, b := range got {
+		if want[b.City] != b.Bucket {
+			t.Fatalf("%s 档位期望 %d，实际 %d（%s）", b.City, want[b.City], b.Bucket, b.Label)
 		}
 	}
 }
