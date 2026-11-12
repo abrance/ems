@@ -325,6 +325,9 @@ func writeIndexHTML(r *ghttp.Request, indexHTML []byte) {
 	}
 
 	r.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// 壳必须每次回源校验：它里面写的是当次构建的 chunk hash，
+	// 浏览器缓存住旧壳就会去拉已经不存在的 chunk（线上出现过 RealtimeView-*.js 404）。
+	r.Response.Header().Set("Cache-Control", "no-cache")
 	_, _ = r.Response.Writer.Write(indexHTML)
 }
 
