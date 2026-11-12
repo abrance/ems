@@ -56,22 +56,29 @@ func TestInitEnablesWalAndLogIndexes(t *testing.T) {
 		t.Fatalf("journal_mode = %q，期望 wal（config.yaml 的 link 里 ?journal_mode=WAL 被改掉了？）", got)
 	}
 
-	// ② log 表的两条索引必须由 Init() 建出来：日志分页深翻页靠 created_at，
-	// 按设备过滤靠 device_id，缺任一条都会退回全表扫描。
-	names, err := g.DB().GetArray(ctx,
-		`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='log'`)
-	if err != nil {
-		t.Fatalf("查询 log 表索引失败: %v", err)
-	}
-	indexes := make(map[string]bool, len(names))
-	for _, name := range names {
-		indexes[name.String()] = true
-	}
-	for _, want := range []string{"idx_log_created_at", "idx_log_device_id"} {
-		if !indexes[want] {
-			t.Fatalf("log 表缺少索引 %s，实际索引: %v", want, names)
+	// ② log / alarm_history 表的索引必须由 Init() 建出来：日志分页深翻页靠 created_at，
+	// 按设备过滤靠 device_id；告警历史按 trigger_at 倒序翻页、按 device_id 过滤。
+	// 缺任一条都会退回全表扫描。
+	assertIndexes := func(table string, want []string) {
+		t.Helper()
+		names, err := g.DB().GetArray(ctx,
+			`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='`+table+`'`)
+		if err != nil {
+			t.Fatalf("查询 %s 表索引失败: %v", table, err)
+		}
+		indexes := make(map[string]bool, len(names))
+		for _, name := range names {
+			indexes[name.String()] = true
+		}
+		for _, w := range want {
+			if !indexes[w] {
+				t.Fatalf("%s 表缺少索引 %s，实际索引: %v", table, w, names)
+			}
 		}
 	}
+
+	assertIndexes("log", []string{"idx_log_created_at", "idx_log_device_id"})
+	assertIndexes("alarm_history", []string{"idx_alarm_history_trigger_at", "idx_alarm_history_device_trigger"})
 }
 
 // readDatabaseLink 取 config.yaml 里 default 组的 link。
