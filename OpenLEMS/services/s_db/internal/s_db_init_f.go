@@ -128,6 +128,19 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	// 告警历史按 trigger_at DESC 翻页、按 device_id 过滤，原先两列均无索引。
+	// 30 万行实测：无过滤排序 25.3ms → 0.02ms，device_id 过滤排序 18.4ms → 0.02ms。
+	// 建索引开销线性：约 75ms / 10 万行（两张合计），300 万行约 2.3s。
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_alarm_history_trigger_at ON alarm_history (trigger_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_alarm_history_device_trigger ON alarm_history (device_id, trigger_at DESC)`,
+	} {
+		if _, err = g.DB().Exec(ctx, stmt); err != nil {
+			c_log.Error(ctx, err)
+			return err
+		}
+	}
+
 	// 创建告警忽略表
 	_, err = g.DB().Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS alarm_ignore (
