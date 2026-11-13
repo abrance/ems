@@ -52,6 +52,12 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		"POST /api/gd-metric/home-market/backfill",
 		// 分时研究（第三方 · 非官方，只读冻结快照）
 		"GET /api/research/intraday",
+		// 日报核对（OCR 落独立表，右列读官方 pm-api）
+		"GET /api/report-daily/reconcile",
+		"POST /api/report-daily/extract",
+		"POST /api/report-daily/extract/batch",
+		"GET /api/report-daily/extract/batch/status",
+		"POST /api/report-daily/backfill",
 		"POST /api/spot-report/collect",
 		"POST /api/spot-report/extract",
 		"POST /api/spot-report/extract/batch",
