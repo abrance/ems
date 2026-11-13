@@ -8,6 +8,7 @@ import (
 	"application/internal/logic/spotreport"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"s_db"
 	"s_db/s_db_model"
 )
@@ -310,4 +311,110 @@ func TestReportDailyUpsertBatchKeepsClosestReportDate(t *testing.T) {
 		}
 		t.Logf("force=true：覆盖成 %q", scalarStr(t, needleSQL))
 	})
+}
+
+// TestReportDailyUpsertBatchWritesNormalRow 正常路径：一行完整字段经活链路落库后原样读回。
+//
+// 现有用例只断言 report_date/report_title/value（「最接近」判定用到的三列），
+// 若 INSERT 的列顺序或字段映射写错（例如 source 与 origin 对调、extractor_version 漏写），
+// 那几条仍会绿，但核对页的单位/来源/抽取版本会静默错。这条按列断言落库契约。
+func TestReportDailyUpsertBatchWritesNormalRow(t *testing.T) {
+	newTestDB(t)
+	ctx := t.Context()
+	svc := s_db.GetReportDailyService()
+	collectedAt := gtime.Now()
+
+	res, err := svc.UpsertBatch(ctx, []*s_db_model.SReportDailyModel{{
+		RunDate: "2026-09-19", ReportDate: "2026-09-19",
+		Dataset: spotreport.DatasetTrade, Scope: spotreport.ScopeSellSide,
+		Metric: spotreport.MetricAvgPrice, Value: 431.0,
+		Unit: spotreport.UnitPrice, Source: "表1(二)", Origin: s_db_model.ReportDailyOriginOCR,
+		ExtractorVersion: "v1", ReportTitle: "R(09.19) 表1(二)", CollectedAt: collectedAt,
+	}}, false)
+	if err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	if res.Written != 1 || res.Preserved != 0 || res.SkippedFarther != 0 {
+		t.Fatalf("正常一行应 written=1 且无保留/跳过，实际 %+v", res)
+	}
+
+	rows, err := svc.ListByRunDateRange(ctx, "2026-09-19", "2026-09-19")
+	if err != nil {
+		t.Fatalf("读回失败: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("应读回 1 行，实际 %d", len(rows))
+	}
+	got := rows[0]
+	for _, c := range []struct {
+		column, got, want string
+	}{
+		{"run_date", got.RunDate, "2026-09-19"},
+		{"report_date", got.ReportDate, "2026-09-19"},
+		{"dataset", got.Dataset, spotreport.DatasetTrade},
+		{"scope", got.Scope, spotreport.ScopeSellSide},
+		{"metric", got.Metric, spotreport.MetricAvgPrice},
+		{"unit", got.Unit, spotreport.UnitPrice},
+		{"source", got.Source, "表1(二)"},
+		{"origin", got.Origin, s_db_model.ReportDailyOriginOCR},
+		{"extractor_version", got.ExtractorVersion, "v1"},
+		{"report_title", got.ReportTitle, "R(09.19) 表1(二)"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s 落库/读回不一致：%q，期望 %q", c.column, c.got, c.want)
+		}
+	}
+	if !near(got.Value, 431.0) {
+		t.Errorf("value = %v，期望 431.0", got.Value)
+	}
+	if got.CollectedAt == nil {
+		t.Error("collected_at 丢了：读取回来是 NULL")
+	}
+	t.Logf("正常一行读回：%s/%s/%s value=%v unit=%q source=%q origin=%q version=%q title=%q",
+		got.RunDate, got.Dataset, got.Metric, got.Value, got.Unit, got.Source,
+		got.Origin, got.ExtractorVersion, got.ReportTitle)
+}
+
+// TestReportDailyUpsertBatchSkipsMissingOrInvalidRows 缺失/异常路径：
+// 关键键缺失的行（nil、run_date/dataset/scope/metric 有空）必须整行跳过 ——
+// 既不能写进一行空键的残值（核对页会多出一行无 scope 的幽灵数据），
+// 也不能因为一条坏数据让整批失败。
+func TestReportDailyUpsertBatchSkipsMissingOrInvalidRows(t *testing.T) {
+	newTestDB(t)
+	ctx := t.Context()
+	svc := s_db.GetReportDailyService()
+
+	rows := []*s_db_model.SReportDailyModel{
+		nil,
+		// 缺 run_date
+		{Dataset: spotreport.DatasetTrade, Scope: spotreport.ScopeSellSide,
+			Metric: spotreport.MetricAvgPrice, Value: 1, Unit: spotreport.UnitPrice, Origin: OriginOCR},
+		// 缺 dataset
+		{RunDate: "2026-09-19", ReportDate: "2026-09-19", Scope: spotreport.ScopeSellSide,
+			Metric: spotreport.MetricAvgPrice, Value: 2, Unit: spotreport.UnitPrice, Origin: OriginOCR},
+		// 缺 scope
+		{RunDate: "2026-09-19", ReportDate: "2026-09-19", Dataset: spotreport.DatasetTrade,
+			Metric: spotreport.MetricAvgPrice, Value: 3, Unit: spotreport.UnitPrice, Origin: OriginOCR},
+		// 缺 metric
+		{RunDate: "2026-09-19", ReportDate: "2026-09-19", Dataset: spotreport.DatasetTrade,
+			Scope: spotreport.ScopeSellSide, Value: 4, Unit: spotreport.UnitPrice, Origin: OriginOCR},
+	}
+	res, err := svc.UpsertBatch(ctx, rows, false)
+	if err != nil {
+		t.Fatalf("缺关键字段的行应被跳过，不应整批报错: %v", err)
+	}
+	if res.Written != 0 || res.Preserved != 0 || res.SkippedFarther != 0 {
+		t.Fatalf("全部是坏行，不应写任何东西，实际 %+v", res)
+	}
+	if n := scalar(t, `SELECT COUNT(*) FROM gd_report_daily`); n != 0 {
+		t.Fatalf("坏行不得落库，表里实际有 %d 行", n)
+	}
+	list, err := svc.ListByRunDateRange(ctx, "2026-09-19", "2026-09-19")
+	if err != nil {
+		t.Fatalf("读回失败: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("区间内不应有行，实际 %d 行", len(list))
+	}
+	t.Logf("缺失/异常路径：%d 条坏行全部跳过，written=0，表内 0 行", len(rows))
 }
