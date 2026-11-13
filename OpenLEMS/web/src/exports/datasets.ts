@@ -1,6 +1,6 @@
 import { fetchBacktest, fetchEffectSummary } from '@/api/effect'
 import { fetchPriceBacktest, fetchPriceForecast } from '@/api/forecast'
-import { fetchMetricSeries, fetchSupplyCurve } from '@/api/gdmetric'
+import { fetchMetricSeries } from '@/api/gdmetric'
 import { getReportData, listReports } from '@/api/spotreport'
 
 /**
@@ -169,7 +169,7 @@ export const DATASETS: Dataset[] = [
   {
     key: 'price-forecast',
     title: '电价预测（TimesFM）',
-    desc: '模型输入的历史序列 + 预测点及分位带，一次导出成一张纵向表。',
+    desc: '模型输入的历史序列 + 预测点及分位带，一次导出成一张纵向表（官方日频日均价）。\n96 点不导出：它的输入是冻结在 2026-10-02 的第三方曲线，导出来会像「今天的预测」。',
     source: 'GET /api/forecast/price',
     params: [
       MARKET,
@@ -177,11 +177,8 @@ export const DATASETS: Dataset[] = [
         key: 'grain',
         label: '粒度',
         type: 'select',
-        options: [
-          { value: 'day', label: '日均（日报）' },
-          { value: 'intraday', label: '96 点' },
-        ],
-        default: 'intraday',
+        options: [{ value: 'day', label: '日均（官方日频）' }],
+        default: 'day',
       },
       { key: 'historyDays', label: '历史天数', type: 'number', default: '30', min: 1, max: 400 },
       { key: 'horizonDays', label: '预测天数', type: 'number', default: '5', min: 1, max: 15 },
@@ -234,26 +231,6 @@ export const DATASETS: Dataset[] = [
           pt.q90,
           Number((pt.predicted - pt.actual).toFixed(4)),
           Number(Math.abs(pt.predicted - pt.actual).toFixed(4)),
-        ]),
-        suffix: MARKET_LABEL[p.market] ?? p.market,
-      }
-    },
-  },
-  {
-    key: 'supply-curve',
-    title: '策略反演·反演报价段',
-    desc: '由 (负荷, 出清价) 反演出的市场聚合报价段（估计值，不是任何一台机组的真实报价）。',
-    source: 'GET /api/gd-metric/supply-curve',
-    params: [MARKET, dateParam('from', '起始日期', 89), dateParam('to', '结束日期', 0)],
-    async load(p) {
-      const res = await fetchSupplyCurve({ from: p.from, to: p.to, market: p.market })
-      return {
-        columns: ['负荷下限 MW', '负荷上限 MW', '反演报价 元/MWh', '观测点数'],
-        rows: res.steps.map((s) => [
-          Number(s.loadFrom.toFixed(0)),
-          Number(s.loadTo.toFixed(0)),
-          Number(s.price.toFixed(2)),
-          s.count,
         ]),
         suffix: MARKET_LABEL[p.market] ?? p.market,
       }

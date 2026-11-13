@@ -2013,9 +2013,22 @@ console.log('\n== 报表导出页 ==')
   await clickTo('管理', '报表导出')
   await waitFor(() => bodyHas('数据集'))
   const dsEls = [...doc.querySelectorAll('.ds')]
-  check(dsEls.length === 7, `数据集 7 个（实际 ${dsEls.length}）`, dsEls.map((e) => e.querySelector('strong')?.textContent).join('/'))
-  check(bodyHas('电网日指标') && bodyHas('效果评估·实测汇总') && bodyHas('策略反演·反演报价段'), '数据集覆盖电网指标/效果/反演')
+  check(dsEls.length === 6, `数据集 6 个（实际 ${dsEls.length}）`, dsEls.map((e) => e.querySelector('strong')?.textContent).join('/'))
+  // 策略反演页已下线，导出门录里也不能留口子（还能出反演报价段 = 口径漏洞）
+  check(bodyHas('电网日指标') && bodyHas('效果评估·实测汇总') && !bodyHas('策略反演'), '数据集覆盖电网指标/效果，且已移除策略反演')
   check(bodyHas('报表模板与生成任务') && bodyHas('没有任务、没有历史文件'), '写清与设计稿的差距（无模板/任务/历史文件）')
+  // 电价预测只导官方日频：96 点的输入是冻结在 2026-10-02 的第三方曲线，导出来会像「今天的预测」
+  const forecastCard = [...doc.querySelectorAll('.ds')].find((e) => e.textContent.includes('电价预测'))
+  forecastCard.click()
+  await waitFor(() => bodyHas('预测天数'), 800)
+  const grainSel = [...doc.querySelectorAll('.toolbar select')].find((sel) =>
+    [...sel.options].some((o) => o.value === 'day'),
+  )
+  const grainOpts = grainSel ? [...grainSel.options].map((o) => o.value) : []
+  check(grainOpts.join(',') === 'day' && grainSel.value === 'day', '电价预测导出只有「日均」且默认为它', grainOpts.join(','))
+  ;[...doc.querySelectorAll('.ds')][0].click()
+  await waitFor(() => bodyHas('电网日指标'), 800)
+
   check(bodyHas('受浏览器内存限制'), '写清前端生成的代价（区间上限）')
 
   // 默认数据集就是电网日指标，直接生成预览

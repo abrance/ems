@@ -274,7 +274,8 @@ async function loadBacktest() {
       grain: day ? 'day' : 'intraday',
       from: from.value,
       to: to.value,
-      // 日频：一天一点，抽满 7 天也只要 7 次推理；96 点：每点一天 96 次配对，间隔抽样
+      // 日频：一天一点，最多后端 maxBacktestPoints（6）个点 —— 所以「近 7 天」档实际是最近 6 天；
+      // 96 点：每点一天 96 次配对，间隔抽样 3 天
       sampleDays: day ? 1 : 3,
       // 只有「黄色档（3~14 天）」与「用户主动展开历史」才穿透服务端阈值：
       // 绿色档不该无脑绕过守卫，红色档默认连数都不取。
