@@ -259,7 +259,7 @@ onMounted(load)
 
   <div class="notice">
     这些是<strong>全局默认</strong>约束：策略与手动控制没单独指定时按这里走。
-    保存后**立即生效，下一个调度周期采纳**（策略每个周期重新读配置）。
+    保存后<strong>立即生效，下一个调度周期采纳</strong>（策略每个周期重新读配置）。
   </div>
 
   <div class="grid">

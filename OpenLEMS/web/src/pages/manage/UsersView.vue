@@ -217,7 +217,7 @@ onMounted(loadSession)
           <strong><code>session_admin_timeout</code> / <code>session_user_timeout</code> 不生效</strong>：
           登录控制器用 <code>g.Cfg().MustGet(ctx, "int:"+值)</code> 去读它，这是个无效的配置键，
           永远回退默认 2 小时。而且服务端会话上限是全局的（<code>SetSessionMaxAge</code>），
-          就算修好读取，per-role 的会话时长也做不到 —— 所以本页**没有**给这两个设置做控件。
+          就算修好读取，per-role 的会话时长也做不到 —— 所以本页<strong>没有</strong>给这两个设置做控件。
         </li>
       </ul>
     </PanelBox>

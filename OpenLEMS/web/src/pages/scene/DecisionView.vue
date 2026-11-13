@@ -427,7 +427,7 @@ watch(
         <div class="warn">
           本块出的是<strong>日均</strong>序列（官方直采日均成交价）。15 分钟（96 点）分时预测
           已于 2026-11-13 停用：它依赖的第三方分时通道止于 2026-10-02，官方匿名接口没有 96 点。
-          两者**不是同一份数据**，不要互相换算。
+          两者<strong>不是同一份数据</strong>，不要互相换算。
         </div>
         <div ref="priceEl" class="chart" />
       </template>

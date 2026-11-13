@@ -164,7 +164,7 @@ function num(v: number, digits = 2): string {
     </div>
 
     <p class="explain">
-      96 点（15 分钟）日前电价。官方披露接口只有日频，这一页读的是**第三方冻结快照**
+      96 点（15 分钟）日前电价。官方披露接口只有日频，这一页读的是<strong>第三方冻结快照</strong>
       （<code>gd_metric.csv</code>，已停更），因此只读、不采集、不刷新，也不进复盘口径 ——
       复盘页的 MAE 只算官方日频。新数据靠人工导入（<code>go run ./cmd/gdmetric-import</code>），
       没有定时任务、没有自动抓取。{{ data?.source?.name || '' }}
@@ -195,7 +195,7 @@ function num(v: number, digits = 2): string {
       <div class="blocked" data-empty>
         <p class="blocked-title">未入库（空态）</p>
         <p>
-          这个区间没有第三方分时数据。本页**只读**已有快照，不做采集，也不补数 ——
+          这个区间没有第三方分时数据。本页<strong>只读</strong>已有快照，不做采集，也不补数 ——
           空态就是空态，不画 0 线。
         </p>
         <p v-if="missing.length" class="muted" data-missing>区间内未入库：{{ missing.join('、') }}</p>
