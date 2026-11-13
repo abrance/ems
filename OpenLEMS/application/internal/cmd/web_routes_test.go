@@ -45,6 +45,8 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		"GET /api/spot-report/audit",
 		// 官方接口直采（pm-api）的电力市场指标面
 		"GET /api/spot-market/board",
+		// 分时研究（第三方 · 非官方，只读冻结快照）
+		"GET /api/research/intraday",
 		"POST /api/spot-report/collect",
 		"POST /api/spot-report/extract",
 		"POST /api/spot-report/extract/batch",

@@ -64,6 +64,14 @@ export const NAV: NavTab[] = [
       },
       { key: 'clearing', title: '市场出清', path: '/scene/clearing', status: 'ready' },
       { key: 'history', title: '历史信息', path: '/scene/history', status: 'ready' },
+      {
+        key: 'intradayResearch',
+        title: '分时研究',
+        path: '/scene/intraday-research',
+        status: 'ready',
+        note:
+          '第三方 · 非官方：96 点（15 分钟）冻结快照，只读、不采集、不刷新。官方披露只有日频，所以本页不进复盘 MAE 口径',
+      },
     ],
   },
   {
