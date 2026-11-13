@@ -48,9 +48,12 @@ export const NAV: NavTab[] = [
       { key: 'alarms', title: '告警中心', path: '/monitor/alarms', status: 'ready', perm: 'monitor:alarm' },
     ],
   },
+  // 原「场景」一个 Tab 7 页，按「看数据」与「做预测」拆成两个 Tab。
+  // path 一律留在 /scene/*：书签、lems:ui:landing、冒烟断言都锚在 path 上，
+  // 拆 Tab 只改归属，不改地址（改 path 收益为零、代价是三条锚全断）。
   {
-    key: 'scene',
-    title: '场景',
+    key: 'market',
+    title: '市场数据',
     scene: true,
     pages: [
       {
@@ -59,8 +62,16 @@ export const NAV: NavTab[] = [
         path: '/scene/disclosure',
         status: 'ready',
       },
-      { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
       { key: 'clearing', title: '市场出清', path: '/scene/clearing', status: 'ready' },
+      { key: 'history', title: '历史信息', path: '/scene/history', status: 'ready' },
+    ],
+  },
+  {
+    key: 'analysis',
+    title: '分析预测',
+    scene: true,
+    pages: [
+      { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
       { key: 'review', title: '预测复盘', path: '/scene/review', status: 'ready' },
       {
         key: 'inference',
@@ -69,7 +80,6 @@ export const NAV: NavTab[] = [
         status: 'ready',
         note: '基础版 = 统计反演：由 (负荷, 出清价) 观测反推市场聚合报价曲线。逐机组反演与逆优化仍需出清明细/网络模型（设计稿 §14.1）',
       },
-      { key: 'history', title: '历史信息', path: '/scene/history', status: 'ready' },
       { key: 'forecast', title: '长周期电价预测', path: '/scene/forecast', status: 'ready' },
     ],
   },

@@ -1193,7 +1193,7 @@ check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
 console.log('\n== 历史信息：默认区间锚到最新日报日 ==')
-await clickTo('场景', '历史信息')
+await clickTo('市场数据', '历史信息')
 {
   await waitFor(() => doc.querySelectorAll('input[type=date]').length >= 3, 1500)
   // 页头有一个「运行日」，页面自己还有起/止两个
@@ -1224,8 +1224,8 @@ console.log('\n== 默认区间的锚点（数据滞后时不能落在空区间�
   check(r.from === '2026-08-25' && r.to === '2026-08-31', '区间右端随锚点回到数据内', JSON.stringify(r))
 }
 
-console.log('\n== 场景 · 信息披露（官方直采数据，图表确实画出了数据）==')
-await clickTo('场景', '信息披露')
+console.log('\n== 市场数据 · 信息披露（官方直采数据，图表确实画出了数据）==')
+await clickTo('市场数据', '信息披露')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('日前 / 实时加权均价'))
@@ -2216,7 +2216,7 @@ console.log('\n== 日志级别页 ==')
   // 普通用户会话：只读（写设置需要 admin，否则每个控件都会吃 403）
   check(!bodyHas('本页**只读**') && !bodyHas('本页只读'), '管理员会话下不显示只读提示')
   localStorage.setItem('ems:user:role', 'user')
-  await clickTo('场景', '信息披露') // 先离开这一页，避免组件缓存
+  await clickTo('市场数据', '信息披露') // 先离开这一页，避免组件缓存
   await clickTo('配置', '日志级别')
   await waitFor(() => bodyHas('只读'), 1200)
   check(bodyHas('只读'), '普通用户会话下给出只读提示')
@@ -2231,15 +2231,18 @@ console.log('\n== 导航结构 ==')
 //   两者都是「后端接口挂在别的功能下」：保留→存储管理，时间→系统操作，不留两个入口
 const EXPECTED_PAGES = 31
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
-check(tabEls.length === 4, `Tab 数量 = ${tabEls.length}（期望 4）`, tabEls.map((e) => e.textContent.trim()).join('/'))
+check(tabEls.length === 5, `Tab 数量 = ${tabEls.length}（期望 5）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(
-  tabEls.map((e) => e.textContent.trim()).join('/') === '运行监控/场景/管理/配置',
-  'Tab 顺序：运行监控插在场景之前（设计稿 §9）',
+  tabEls.map((e) => e.textContent.trim()).join('/') === '运行监控/市场数据/分析预测/管理/配置',
+  'Tab 顺序：运行监控 → 市场数据 → 分析预测 → 管理 → 配置',
   tabEls.map((e) => e.textContent.trim()).join('/'),
 )
 // 按 key 找而不是按序号：Tab 顺序变过一次（加了运行监控），序号断言会跟着一起错
-const sceneTab = NAV.find((t) => t.key === 'scene')
-check(sceneTab?.pages.length === 7, `场景页 7 个（实际 ${sceneTab?.pages.length}）`)
+const marketTab = NAV.find((t) => t.key === 'market')
+const analysisTab = NAV.find((t) => t.key === 'analysis')
+check(marketTab?.pages.length === 3, `市场数据页 3 个（实际 ${marketTab?.pages.length}）`)
+check(analysisTab?.pages.length === 4, `分析预测页 4 个（实际 ${analysisTab?.pages.length}）`)
+check(!NAV.some((t) => t.key === 'scene'), '原「场景」Tab 已拆掉，不留空壳')
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
 check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${totalPages}）`)
 
@@ -2288,7 +2291,7 @@ for (const tab of NAV) {
     continue
   }
   tabEl.click()
-  // 判断依据要唯一：两栏项数可能相同（配置与场景都是 7），按首页标题等才可靠
+  // 判断依据要唯一：两栏项数可能相同（市场数据与配置都是 3），按首页标题等才可靠
   await waitFor(() => !!findSide(tab.pages[0].title))
 
   const sideCount = sideTitles().length
@@ -2335,7 +2338,7 @@ check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}�
 console.log('\n== 预测复盘页 ==')
 {
   const reqBase = requests.length
-  await clickTo('场景', '预测复盘')
+  await clickTo('分析预测', '预测复盘')
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   const btn = (label) => [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === label)
   const kpi = (label) => [...doc.querySelectorAll('.kpi')].find((k) => (k.querySelector('.label')?.textContent ?? '').includes(label))
@@ -2467,7 +2470,7 @@ console.log('\n== 预测复盘页 ==')
 }
 
 console.log('\n== 策略反演页 ==')
-await clickTo('场景', '策略反演')
+await clickTo('分析预测', '策略反演')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('统计反演'))
@@ -2525,7 +2528,7 @@ await clickTo('场景', '策略反演')
 }
 
 console.log('\n== 长周期电价预测页 ==')
-await clickTo('场景', '长周期电价预测')
+await clickTo('分析预测', '长周期电价预测')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('预测概览'))
@@ -2593,7 +2596,7 @@ await clickTo('场景', '长周期电价预测')
 }
 
 console.log('\n== 市场出清页 ==')
-await clickTo('场景', '市场出清')
+await clickTo('市场数据', '市场出清')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('高峰时刻地市节点电价档位'))
@@ -2647,7 +2650,7 @@ await clickTo('场景', '市场出清')
 }
 
 console.log('\n== 决策支持页 ==')
-await clickTo('场景', '决策支持')
+await clickTo('分析预测', '决策支持')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('总节省'))
@@ -2746,7 +2749,7 @@ await clickTo('场景', '决策支持')
 }
 
 console.log('\n== 历史信息页 ==')
-await clickTo('场景', '历史信息')
+await clickTo('市场数据', '历史信息')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('已排除未复核'))
