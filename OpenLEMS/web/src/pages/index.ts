@@ -14,6 +14,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   alarms: () => import('./monitor/AlarmsView.vue'),
   disclosure: () => import('./scene/DisclosureView.vue'),
   history: () => import('./scene/HistoryView.vue'),
+  intradayResearch: () => import('./scene/IntradayResearchView.vue'),
   decision: () => import('./scene/DecisionView.vue'),
   clearing: () => import('./scene/ClearingView.vue'),
   review: () => import('./scene/ReviewView.vue'),
