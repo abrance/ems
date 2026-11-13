@@ -80,35 +80,91 @@ func TestFirstRunBackfillsHome24hAndNodePrice(t *testing.T) {
 	newTestDB(t)
 	newLagStub(t)
 
-	// 窗口取 9 天（> 滞后 6 天），这样 24 点应有 3 天可回补：T-8 / T-7 / T-6。
-	// 若首次启动只跑 CollectHome24h，只会写进 T-6 一天 —— 那就是这次要守的缺口。
-	const days = 9
+	// 窗口用**生产默认配置值**（config.yaml 里的 home_market.backfill_days: 7），
+	// 不手写一个好看的数字 —— 之前测试写 9（> 滞后 6）所以绿了，而生产 7 天窗口
+	// 里只有 T-6 一天有数，停机 5 天重启仍然缺 4 天。
+	days := ParseDays(g.Cfg().MustGet(context.Background(), "home_market.backfill_days", "7").String())
+	if days != 7 {
+		t.Fatalf("测试假设配置回补天数 = 7（生产默认），实际读到 %d", days)
+	}
+
 	now := time.Now()
 	runOnce(context.Background(), days, true)
 
 	got24h := distinctDates(t, `SELECT DISTINCT price_date AS d FROM gd_home_24h ORDER BY price_date`)
-	want24h := []string{
-		now.AddDate(0, 0, -8).Format(dateLayout),
-		now.AddDate(0, 0, -7).Format(dateLayout),
-		now.AddDate(0, 0, -6).Format(dateLayout),
+	// 24 点窗口与地市解耦：7 天窗口扣掉 6 天滞后只剩 1 天，所以窗口必须比 days 大。
+	// 下界 = maxLookbackDays - 滞后；上界 = 地市窗口（24 点不能比地市窗口小）。
+	wantMin := Home24hWindowDays(days) - stubLagDays
+	if len(got24h) < wantMin {
+		t.Fatalf("24 点回补天数 = %d %v，期望 ≥ %d（窗口 %d 天减去滞后 %d 天）；"+
+			"只得到 1 天说明两路窗口被塞进同一个数字里了",
+			len(got24h), got24h, wantMin, Home24hWindowDays(days), stubLagDays)
 	}
-	if len(got24h) != len(want24h) {
-		t.Fatalf("24 点回补天数 = %d %v，期望 %d 天 %v（首次启动必须整窗回补，不能只取最近有数的一天）",
-			len(got24h), got24h, len(want24h), want24h)
+	if len(got24h) <= 1 {
+		t.Fatalf("24 点回补只有 %v 一天：默认配置下这不叫整窗回补", got24h)
 	}
-	for i := range want24h {
-		if got24h[i] != want24h[i] {
-			t.Errorf("24 点第 %d 天 = %s，期望 %s", i, got24h[i], want24h[i])
+	// 最后一天必须是 T-滞后（24 点能取到的最新一天），往前连续不缺
+	newest := now.AddDate(0, 0, -stubLagDays).Format(dateLayout)
+	if got24h[len(got24h)-1] != newest {
+		t.Errorf("24 点最新一天 = %s，期望 %s", got24h[len(got24h)-1], newest)
+	}
+	for i := 1; i < len(got24h); i++ {
+		prev, err := time.ParseInLocation(dateLayout, got24h[i-1], time.Local)
+		if err != nil {
+			t.Fatalf("解析日期 %s 失败: %v", got24h[i-1], err)
+		}
+		if want := prev.AddDate(0, 0, 1).Format(dateLayout); got24h[i] != want {
+			t.Errorf("24 点回补不连续：%s 之后是 %s，期望 %s", got24h[i-1], got24h[i], want)
 		}
 	}
 	// 每天的 24 个整点都要齐（回补是按日取整批，不是只写一个点）
-	if n := len(distinctDates(t, `SELECT DISTINCT hour AS d FROM gd_home_24h WHERE price_date = '`+want24h[0]+`'`)); n != 24 {
-		t.Errorf("%s 的点数 = %d，期望 24", want24h[0], n)
+	if n := len(distinctDates(t, `SELECT DISTINCT hour AS d FROM gd_home_24h WHERE price_date = '`+got24h[0]+`'`)); n != 24 {
+		t.Errorf("%s 的点数 = %d，期望 24", got24h[0], n)
 	}
 
 	gotNode := distinctDates(t, `SELECT DISTINCT run_date AS d FROM gd_node_price ORDER BY run_date`)
 	if len(gotNode) != days {
-		t.Fatalf("地市回补天数 = %d %v，期望 %d 天（含当天）", len(gotNode), gotNode, days)
+		t.Fatalf("地市回补天数 = %d %v，期望 %d 天（含当天，T+0 口径不受 24 点滞后影响）", len(gotNode), gotNode, days)
+	}
+}
+
+// TestHome24hWindowDecoupledFromNodePrice 守「调用方无法再把两个不同滞后的口径
+// 塞进同一个数字里」：手动接口传 7（生产默认）时，24 点窗口不能被 7 截住。
+func TestHome24hWindowDecoupledFromNodePrice(t *testing.T) {
+	newTestDB(t)
+	newLagStub(t)
+
+	const days = defaultBackfillDays // 生产默认 7
+	now := time.Now()
+	home24h, node := RunBackfill(context.Background(), now, days)
+
+	if len(node) != days {
+		t.Errorf("地市回补天数 = %d，期望 %d（地市窗口就是调用方给的那个数字）", len(node), days)
+	}
+	if len(home24h) != Home24hWindowDays(days)-stubLagDays {
+		t.Errorf("24 点回补天数 = %d %v，期望 %d（窗口 %d - 滞后 %d）",
+			len(home24h), home24h, Home24hWindowDays(days)-stubLagDays, Home24hWindowDays(days), stubLagDays)
+	}
+	if len(home24h) <= 1 {
+		t.Errorf("24 点只回补了 %d 天：窗口按地市的 7 天算就会正好剩 T-6 一天", len(home24h))
+	}
+}
+
+func TestHome24hWindowDays(t *testing.T) {
+	// 默认值 / 小于 maxLookbackDays 都提到 14；大于则跟随；再大就夹到 30。
+	cases := []struct{ in, want int }{
+		{0, maxLookbackDays},
+		{1, maxLookbackDays},
+		{defaultBackfillDays, maxLookbackDays},
+		{maxLookbackDays, maxLookbackDays},
+		{20, 20},
+		{MaxBackfillDays, MaxBackfillDays},
+		{999, MaxBackfillDays},
+	}
+	for _, c := range cases {
+		if got := Home24hWindowDays(c.in); got != c.want {
+			t.Errorf("Home24hWindowDays(%d) = %d，期望 %d", c.in, got, c.want)
+		}
 	}
 }
 
@@ -118,7 +174,7 @@ func TestLaterRunsDoNotRescanWindow(t *testing.T) {
 
 	// 非首次：24 点只采最近有数的一天、地市只采当天。
 	// 守住 P2 —— 别把每 30 分钟一轮都变成整窗重扫（源站有动态防护）。
-	const days = 9
+	days := defaultBackfillDays
 	now := time.Now()
 	runOnce(context.Background(), days, false)
 
@@ -146,10 +202,10 @@ func TestRunBackfillClampsWindowAndCoversBothRoutes(t *testing.T) {
 	if len(node) != MaxBackfillDays {
 		t.Errorf("地市回补天数 = %d，期望夹到上限 %d", len(node), MaxBackfillDays)
 	}
-	// 24 点只有滞后 6 天以后的日期才有数，30 天窗口里应得 24 天
-	if want := MaxBackfillDays - stubLagDays; len(home24h) != want {
+	// 24 点窗口同样夹到上限，只有滞后 6 天以后的日期才有数
+	if want := Home24hWindowDays(MaxBackfillDays) - stubLagDays; len(home24h) != want {
 		t.Errorf("24 点回补天数 = %d，期望 %d（窗口 %d 天减去滞后 %d 天）",
-			len(home24h), want, MaxBackfillDays, stubLagDays)
+			len(home24h), want, Home24hWindowDays(MaxBackfillDays), stubLagDays)
 	}
 	for date, n := range home24h {
 		if n != 24 {

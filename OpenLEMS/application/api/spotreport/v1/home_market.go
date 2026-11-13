@@ -37,11 +37,12 @@ type GetNodePriceRes struct {
 // 这里让运维能指定窗口重跑，而不是只能进容器敲 SQL 或重启进程。
 type BackfillHomeMarketReq struct {
 	g.Meta `path:"/gd-metric/home-market/backfill" method:"post" tags:"电力市场" summary:"手动回补官网主页两路数据（24 点 + 地市节点价）" role:"admin"`
-	Days   int `json:"days" d:"从今天往回回补的天数，缺省读配置 home_market.backfill_days（7），上限 30"`
+	Days   int `json:"days" d:"地市回补窗口：从今天往回的天数，缺省读配置 home_market.backfill_days（7），上限 30。24 点窗口与此不同（源站 T-6），由服务端换算"`
 }
 
 type BackfillHomeMarketRes struct {
-	Days      int            `json:"days" dc:"实际回补窗口（含当天）"`
-	Home24h   map[string]int `json:"home24h" dc:"24 点：日期 → 写入点数（无数据的日子不出现）"`
-	NodePrice map[string]int `json:"nodePrice" dc:"地市：日期 → 写入条数"`
+	Days        int            `json:"days" dc:"地市窗口（含当天）"`
+	Home24hDays int            `json:"home24hDays" dc:"24 点窗口（含当天，= max(14, days)，上限 30）"`
+	Home24h     map[string]int `json:"home24h" dc:"24 点：日期 → 写入点数（无数据的日子不出现）"`
+	NodePrice   map[string]int `json:"nodePrice" dc:"地市：日期 → 写入条数"`
 }

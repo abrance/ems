@@ -51,7 +51,10 @@ const (
 	// maxLookbackDays 24 点往回最多探几天。实测滞后 6 天左右，给到 14 天留余量；
 	// 再往回探是给「服务端某几天整段缺失」兜底，不是常态。
 	maxLookbackDays = 14
-	// defaultBackfillDays 地市按日期回补的默认天数（brief 定 N=7）
+	// defaultBackfillDays 地市按日期回补的默认天数（brief 定 N=7）。
+	//
+	// 只用于地市（T+0），**不要**拿它当 24 点的窗口：24 点源站滞后 6 天，
+	// 7 天窗口只剩 1 天有数，停机几天后中间全是空洞。24 点走 Home24hWindowDays。
 	defaultBackfillDays = 7
 	// requestTimeout 单次 HTTP 超时
 	requestTimeout = 30 * time.Second
@@ -287,6 +290,24 @@ func sourceLabelOf(source string, fallback string) string {
 		return source
 	}
 	return fallback
+}
+
+// Home24hWindowDays 把调用方给的回补天数换算成 24 点的窗口。
+//
+// 两路滞后不同，不能共用一个数字：24 点源站 T-6 才发布，7 天窗口里
+// 只有最后一天有数，停机几天后中间全是空洞。所以 24 点窗口至少 maxLookbackDays
+// （14 天，按「滞后 6 天 + 余量」定），调用方要更大就跟更大。
+func Home24hWindowDays(days int) int {
+	if days <= 0 {
+		days = defaultBackfillDays
+	}
+	if days < maxLookbackDays {
+		return maxLookbackDays
+	}
+	if days > MaxBackfillDays {
+		return MaxBackfillDays
+	}
+	return days
 }
 
 // ParseDays 读配置里的回补天数，非法值回落默认。

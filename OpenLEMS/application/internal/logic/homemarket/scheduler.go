@@ -63,28 +63,36 @@ func Start(ctx context.Context, interval time.Duration) {
 
 // RunBackfill 手动回补一次两路（供运维接口调用）。
 //
-// 与首次启动的窗口口径一致：24 点与地市都是「今天往回 days 天」。
+// days 是**地市**的窗口（T+0 口径，含当天）；24 点的窗口由 Home24hWindowDays
+// 单独换算（源站 T-6 才发布，共用一个数字会让整窗只剩一天有数）。
 // 失败只记日志、不补假数据，与自动采集同一套语义 —— 调用方看返回值就知道哪几天真写进去了。
 func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, map[string]int) {
+	nodeDays := clampDays(days)
+	home24hWindow := Home24hWindowDays(nodeDays)
+	from := now.In(time.Local).AddDate(0, 0, -(home24hWindow - 1))
+	home24h, err := BackfillHome24h(ctx, from, now)
+	if err != nil {
+		c_log.Warningf(ctx, "手动回补 24 点分时中断（不补假数据）：%+v，已写入 %v", err, home24h)
+	}
+	node := BackfillNodePrice(ctx, now, nodeDays)
+	return home24h, node
+}
+
+// clampDays 把回补窗口夹到 [默认值, 上限]。
+func clampDays(days int) int {
 	if days <= 0 {
 		days = defaultBackfillDays
 	}
 	if days > MaxBackfillDays {
 		days = MaxBackfillDays
 	}
-	from := now.In(time.Local).AddDate(0, 0, -(days - 1))
-	home24h, err := BackfillHome24h(ctx, from, now)
-	if err != nil {
-		c_log.Warningf(ctx, "手动回补 24 点分时中断（不补假数据）：%+v，已写入 %v", err, home24h)
-	}
-	node := BackfillNodePrice(ctx, now, days)
-	return home24h, node
+	return days
 }
 
 // runOnce 一次采集：24 点取最近有数的一天，地市按最近 N 天回补。
 //
-// first 为 true 时两路都做一次回补（覆盖最近 N 天）；之后每次只采当天 ——
-// 回补是「补历史缺口」，每次定时都重扫 7 天既浪费请求也容易触发源站限流。
+// first 为 true 时两路都做一次回补（24 点按 Home24hWindowDays，地市按 backfillDays）；
+// 之后每次只采当天 —— 回补是「补历史缺口」，每次定时都重扫窗口既浪费请求也容易触发源站限流。
 //
 // 24 点必须回补而不能只靠 CollectHome24h：它探到「最近一个有数的一天」就停手，
 // 进程停机跨过一个发布日时，恢复后只会采到最新那天，中间几天永久缺。

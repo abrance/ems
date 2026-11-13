@@ -1334,6 +1334,9 @@ await clickTo('市场数据', '市场总览')
     bodyHas('地市节点价 2026-11-13') && bodyHas('日频指标 2026-09-21') && bodyHas('24 点分时 2026-11-07'),
     '页脚三个批次分别写出，不拿一个日期代表全部',
   )
+  // 页脚必须写明口径差异：24 点日均 463.27 ≠ 官方日频日均 456.55，不可互校
+  check(bodyHas('463.27') && bodyHas('456.55'), '页脚写出 463.27 / 456.55 两个实测日均')
+  check(bodyHas('不可互校'), '页脚明写「不可互校」')
 
   // 24 点整 24 个点、地市 42 条
   const chartPts = [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
