@@ -219,7 +219,7 @@
 
 | 条目 | 依赖 | 现状 |
 |---|---|---|
-| 1.2 / 1.4 / 1.5、2.1 ~ 2.4 | `stopped` 四态后端真会返回 | 后端逻辑与单测已在（#151），**未跑真实采集实测**。`stopped` 目前只有夹具模拟 |
+| 1.2 / 1.4 / 1.5、2.1 ~ 2.4 | `stopped` 四态后端真会返回 | **已实测**（2026-11-13，走 `CollectHome24h` 真实采集路径 + HTTP 桩）：库里有历史数、源站连续回 `200`+空，第 3 轮起状态变 `stopped`，与 `stoppedEmptyRounds=3` 一致 |
 | 1.3 / 2.2 的 `errorKindLabel` | 后端 `errorKind` 真的下发 `blocked`/`network`/`parse` | 字段已在契约里，未验证三类在真实故障下都能正确分类 |
 | 2.3 的误报窗口 | 源站停发 + 采集正常的组合 | 未实测。约 1 天原因定错，会自恢复 |
 | 5.5 | `channelRetiredAsOf()` 运行时能取到最晚实际值 | 取不到时回落常量 `2026-10-02`，可接受 |
@@ -243,3 +243,45 @@ Format("2006-01-02 15:04:05") -> "2006-01-02 15:04:05"   // 错误，且不报�
 影响面：§1.3 / §2.2 的 `最近一次成功是 ${fetchedAt}` 依赖这个字段。如果按错误建议改成 Go layout，页面会把字面的 `2006-01-02 15:04:05` 当成时间印出来，而且测试全绿（原断言只查非空）。
 
 现在的护栏：`homemarket/status_db_test.go` 断言 `fetchedAt` 不得等于任一格式串本身，改回 Go layout 会立刻红（PR #154）。**§1.3 / §2.2 的文案可以直接照抄，字段本身是对的。**
+
+---
+
+## 15. `never` 吞掉 `stopped`：全新环境里「源站改版」会被说成「采集配置没配好」
+
+实测（走 `CollectHome24h` 真实采集路径 + HTTP 桩，2026-11-13）：
+
+**库里有历史数** → 源站连续回 `200`+空：第 3 轮变 `stopped`，符合预期。
+
+**库是空的**（全新部署、或换了 DSN 还没采过数）→ 源站连续回 `200`+空：**5 轮之后仍然是 `never`**，`consecutiveEmpties` 已经涨到 5。
+
+原因在 `status.go` 的判定顺序：
+
+```go
+case asOf == "":
+    st.State = StateNever                 // 先命中，直接短路
+case last.ConsecutiveEmpties >= stoppedEmptyRounds:
+    st.State = StateStopped               // 永远走不到
+```
+
+`asOf == ""` 是「库里一条数都没有」，而 `ConsecutiveEmpties` 是「源站连续回了多少次空」——两件完全不同的事。全新环境里源站一旦改版，用户看到的是 §1.2 的「从未采集成功，请检查采集配置」，去查配置，而真实原因是源站改版。
+
+**建议改判定顺序**（后端改动，不在本文档落地）：
+
+| 现状顺序 | 建议顺序 |
+|---|---|
+| `failed` → `never` → `stopped` → `lagging` | `failed` → **`stopped`** → `never` → `lagging` |
+
+改完之后，全新环境第一次遇到源站改版会直接说 §1.5 的话，两句都成立时优先说信息量更大的那句。
+
+**在这条改掉之前**，§1.2 的文案照抄时补一句兜底：
+
+| 场景 | 触发 | 文案 |
+|---|---|---|
+| 1.2' | `state === 'never'` 且 `consecutiveEmpties > 0`（前端拿不到这个字段时可不做） | `从未采集成功，源站最近连续 ${n} 次返回空数据 —— 优先确认源站是否改版，其次看采集配置` |
+
+**前端目前拿不到 `consecutiveEmpties`**：`DatasetStatus`（`homemarket/status.go` 的 DTO，前端 `api/homemarket.ts` 同构）只下发 `state / asOf / lagDays / rows / rowsExpected / fetchedAt / lastError / errorKind`，没有这个计数字段。所以 1.2' 现在做不了，实际可选只有两条：
+
+- 后端把 `stopped` 判定提到 `never` 前面（推荐，一处顺序改动，前端零改动）；
+- 或者后端在 DTO 里加 `consecutiveEmpties`，前端再按 1.2' 分叉。
+
+在任一落地之前，新环境遇到源站改版会一直误报 §1.2 的「请检查采集配置」——这是本规范里**唯一一条已知会误导用户当前排期下的行为**。
