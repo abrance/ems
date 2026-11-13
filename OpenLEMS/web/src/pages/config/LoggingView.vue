@@ -93,7 +93,7 @@ onMounted(load)
       foot="默认 ALL，与配置里的 logger.level 一致；本项改完立即生效（运行期覆盖配置初值）"
     >
       <div v-if="!isAdmin" class="alert warn">
-        当前账号是普通用户：本页**只读**。写设置需要管理员（管理类接口会返回 403「权限不足」）。
+        当前账号是普通用户：本页<strong>只读</strong>。写设置需要管理员（管理类接口会返回 403「权限不足」）。
       </div>
       <div v-if="error" class="alert error">{{ error }}</div>
       <div v-if="ok" class="alert ok">{{ ok }}</div>
@@ -141,7 +141,7 @@ onMounted(load)
 
     <PanelBox
       title="调试日志开关"
-      sub="已有开关，与上面的级别是**两个条件**，都要满足才记录"
+      sub="已有开关，与上面的级别是<strong>两个条件</strong>，都要满足才记录"
       :span="12"
       :loading="loading"
       foot="SystemEnableDebugLog：ems 的 DEBUG 是否入库。设备侧另有逐设备的调试开关（在「管理 · 设备管理」里）"

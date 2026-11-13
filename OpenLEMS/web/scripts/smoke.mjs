@@ -32,6 +32,11 @@ function check(ok, label, detail = '') {
   }
 }
 const tick = () => new Promise((r) => setTimeout(r, 0))
+/** 今天的上海日期（YYYY-MM-DD）：空库夹具要把 board.date 回落成今天，lag 才会是 0 */
+const todayIso = () => {
+  const d = new Date(Date.now() + 8 * 3600_000)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
 
 /**
  * 等条件成立。懒加载分块（含它自带的 CSS）在 happy-dom 下的解析时机不确定，
@@ -1010,6 +1015,13 @@ let intradayEmpty = false
 let reportDailyEmpty = false
 /** 24 点缺点日开关：true 时后端只给 17/24 点且不下发峰谷（验证页脚说清原因） */
 let home24hPartial = false
+/**
+ * 日频空态开关：'none' 正常；'never' 空库（daily=[] 且 date 回落成今天，
+ * 后端 spotmarket/board.go 就是这个行为）；其余值是「库里有数但旧了」时的滞后天数。
+ */
+let dailyLagOverride = null
+/** 留痕全都没出实际值（pairs 为空）→ 复盘页走「还没到」的空态 */
+let recordedNoActual = false
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -1212,6 +1224,13 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
   if (u.includes('/api/forecast/recorded')) {
+    if (u.includes('grain=day') && recordedNoActual) {
+      return json({
+        ...FAKE_RECORDED_DAY,
+        actualMissing: FAKE_RECORDED_DAY.points.length,
+        points: FAKE_RECORDED_DAY.points.map((p) => ({ ...p, actual: null })),
+      })
+    }
     return json(u.includes('grain=day') ? FAKE_RECORDED_DAY : FAKE_RECORDED)
   }
   if (u.includes('/api/forecast/backtest')) {
@@ -1227,7 +1246,19 @@ globalThis.fetch = async (url, init) => {
     // 空态分支由 reportDailyEmpty 开关驱动（整段无数据 → days: []，页面走空态）
     return json(reportDailyEmpty ? { ...FAKE_REPORT_RECONCILE, days: [], asOfReport: '', asOfOfficial: '' } : FAKE_REPORT_RECONCILE)
   }
-  if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
+  if (u.includes('/api/spot-market/board')) {
+    if (dailyLagOverride === 'never') {
+      // 空库：daily 全空，date 回落成查询末日（今天）—— lag 恒为 0
+      return json({ ...FAKE_SPOT_MARKET, daily: [], date: todayIso() })
+    }
+    if (typeof dailyLagOverride === 'number') {
+      const d = new Date()
+      d.setDate(d.getDate() - dailyLagOverride)
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      return json({ ...FAKE_SPOT_MARKET, daily: [], date: day })
+    }
+    return json(FAKE_SPOT_MARKET)
+  }
   // 注意顺序：这两个也以 /api/gd-metric 开头，必须排在下面的 gd-metric 兜底之前，
   // 否则会被兜底桩吞掉，页面拿到的是 96 点快照的形状
   if (u.includes('/api/gd-metric/home-market/status')) {
@@ -1621,6 +1652,98 @@ async function remountMarket() {
   marketStatusDown = false
   marketStatusState = null
   await remountMarket()
+}
+
+// ---- 日频空态三档 + 空库（P1-2 / P1-2b）----
+//
+// 为什么必须分档：日频停 10 天还写「实时 T+2 才发布」，等于把采集挂了说成正常节奏。
+// 空库更极端：board.date 回落成今天 ⇒ lag 恒为 0，不分档就永远落进「T+2 内，等着就行」。
+console.log('\n== 市场数据 · 日频空态三档（采集停了不许说成 T+2）==')
+{
+  const dailyNotes = () =>
+    [...doc.querySelectorAll('[data-daily-state]')].map((el) => ({
+      text: (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      alert: el.classList.contains('is-alert'),
+      neutral: el.classList.contains('is-neutral'),
+    }))
+  const expectDaily = (lag, mustText, tone, count = 1) => {
+    const notes = dailyNotes()
+    check(notes.length === count, `lag=${lag}：出空态 ${count} 处（实际 ${notes.length} 条）`, JSON.stringify(notes))
+    check(
+      notes.every((n) => n.text.includes(mustText)),
+      `lag=${lag}：文案包含「${mustText}」`,
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+    check(
+      notes.every((n) => (tone === 'alert' ? n.alert && !n.neutral : tone === 'neutral' ? n.neutral && !n.alert : true)),
+      `lag=${lag}：呈现为 ${{ alert: '告警', neutral: '中性', none: '无样式' }[tone]}`,
+      JSON.stringify(notes),
+    )
+  }
+
+  // 空库：daily 全空 + board.date 回落成今天（lag=0）→ 必须是「近一年没有」，不是 T+2。
+  // 两处（KPI + 趋势图）都换成告警文案：趋势图那边 3.5 被 !dailyNever 排除掉了。
+  dailyLagOverride = 'never'
+  await remountMarket()
+  expectDaily(0, '库里近一年没有日频指标', 'alert', 2)
+  check(
+    !dailyNotes().some((n) => n.text.includes('T+2 才发布')),
+    '空库：不能写「实时 T+2 才发布」（空库不是 T+2）',
+    JSON.stringify(dailyNotes().map((n) => n.text)),
+  )
+  check(
+    !(doc.body.textContent ?? '').includes('该区间无数据'),
+    '空库：趋势图不再并列一句中性的「该区间无数据」（两句互相抵消）',
+  )
+
+  // T+2 内：官方还没发，等就行 → 中性（趋势图仍走 3.5「该区间无数据」）
+  dailyLagOverride = 1
+  await remountMarket()
+  expectDaily(1, '该日无数据', 'neutral')
+
+  // 3~7 天：超出预期，要留意 → 中性偏提醒（不是红色）
+  dailyLagOverride = 3
+  await remountMarket()
+  expectDaily(3, '采集滞后', 'neutral')
+  check(
+    !dailyNotes().some((n) => n.text.includes('请检查采集是否在跑')),
+    '3~7 天：用「已超出预期」，不用「请检查采集」（还没到那个程度）',
+    JSON.stringify(dailyNotes().map((n) => n.text)),
+  )
+
+  // >7 天：采集多半停了 → 告警 + 去查采集
+  dailyLagOverride = 10
+  await remountMarket()
+  expectDaily(10, '采集已落后', 'alert')
+  check(
+    dailyNotes().every((n) => n.text.includes('请检查采集是否在跑')),
+    '>7 天：明确叫用户去查采集，而不是接着等',
+    JSON.stringify(dailyNotes().map((n) => n.text)),
+  )
+
+  dailyLagOverride = null
+  await remountMarket()
+  check(doc.querySelectorAll('[data-daily-state]').length === 0, '有数据时不渲染任何日频空态')
+}
+
+// ---- 三档判定与首个可配对日的纯函数级断言（分支逻辑，不是纯文案）----
+console.log('\n== 空态分级与首个可配对日（分支逻辑）==')
+{
+  const { dailyTier } = await vite.ssrLoadModule(resolve(root, 'src/utils/dailyLag.ts'))
+  check(dailyTier(0, true) === 'never', '空库 + lag=0 → never（board.date 回落不能当 T+2）')
+  check(dailyTier(0, false) === 't2', '有数据 + lag=0 → t2')
+  check(dailyTier(2, true) === 't2', 'lag=2 → t2（官方 T+2 是正常节奏）')
+  check(dailyTier(3, true) === 'lag', 'lag=3 → lag（超出 T+2）')
+  check(dailyTier(7, true) === 'lag', 'lag=7 → lag（档位边界包含 7）')
+  check(dailyTier(8, true) === 'stop', 'lag=8 → stop（超过 7 天）')
+  check(dailyTier(-1, true) === 'unknown', '日期解析不出（-1）→ unknown，不硬归到某一档')
+
+  const { firstPairDate } = await vite.ssrLoadModule(resolve(root, 'src/utils/firstPairDate.ts'))
+  check(firstPairDate('2026-11-13') === '2026-11-16', '首个可配对日 = 启用日 + 3（11-13 → 11-16）', firstPairDate('2026-11-13'))
+  check(firstPairDate('2026-11-29') === '2026-12-02', '跨月进位正确（11-29 → 12-02）', firstPairDate('2026-11-29'))
+  check(firstPairDate('2026-12-30') === '2027-01-02', '跨年进位正确（12-30 → 01-02）', firstPairDate('2026-12-30'))
+  check(firstPairDate('') === '' && firstPairDate(null) === '', '没生成日 → 空串（模板回落「—」，不印 NaN-NaN-NaN）')
+  check(firstPairDate('not-a-date') === '', '格式不对 → 空串', firstPairDate('not-a-date'))
 }
 
 console.log('\n== 市场数据 · 信息披露（官方直采数据，图表确实画出了数据）==')
@@ -3018,6 +3141,25 @@ console.log('\n== 预测复盘页 ==')
   check(bodyHas('as-of'), '口径说明写明 as-of 语义')
   check(bodyHas('当时预测') && bodyHas('当前模型重跑'), '口径说明写明两条腿的区别')
   check(bodyHas('占位不入曲线'), '口径说明写明 999 占位不当基准')
+
+  // ---- 留痕空态（§7 / §8.1）：两句话各自堵住一种错误处置 ----
+  // 这一节在同一个页面里把 pairs 清空（留痕全部没出实际值）→ 走空态分支。
+  console.log('\n== 预测复盘页 · 留痕空态（永久缺失 vs 还没到）==')
+  recordedNoActual = true
+  await clickTo('分析预测', '长周期电价预测')
+  await clickTo('分析预测', '预测复盘')
+  await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
+  {
+    // §7：「也补不回来」不能省 —— 否则用户以为再等几天数据就齐了
+    check(bodyHas('也补不回来'), '留痕空态写明「也补不回来」（留痕是永久缺失，不是等一等就有）')
+    // §7：「首个可配对交易日」必须算出来（生成日 + 3）
+    //   夹具首条留痕生成日 = 2026-09-19 → 首个可配对日 = 2026-09-22
+    check(bodyHas('首个可配对交易日约在 2026-09-22'), '留痕空态给出首个可配对交易日（生成日 + 3）', doc.querySelector('.empty')?.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+    check(!/NaN-NaN-NaN/.test(doc.body.textContent ?? ''), '日期算不出来时不许印 NaN-NaN-NaN')
+    // §8.1：「（官方 T+2）」5 个字不能省 —— 否则分不清「在等源站」和「系统坏了」
+    check(bodyHas('条留痕的实际值还没出（官方 T+2）'), '留痕实际值未出时标注「（官方 T+2）」', doc.body.textContent?.match(/另有[^。]*。?/)?.[0] ?? '')
+  }
+  recordedNoActual = false
 }
 
 console.log('\n== 策略反演页（已停用）==')

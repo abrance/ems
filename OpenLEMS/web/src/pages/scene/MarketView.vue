@@ -23,6 +23,7 @@ import {
   type NodePriceDay,
 } from '@/api/homemarket'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
+import { dailyTier } from '@/utils/dailyLag'
 
 /**
  * 场景 · 市场总览 —— 一屏看三个不同滞后的批次。
@@ -181,6 +182,38 @@ const aheadMin = computed(() => pick(DATASET.ahead, '加权最低电价'))
 const priceUnit = computed(() => aheadAvg.value?.unit || '元/兆瓦时')
 const volUnit = computed(() => aheadVolGen.value?.unit || 'MWh')
 const dailyEmpty = computed(() => !loadingDaily.value && dailySeries.value.length === 0)
+/**
+ * 日频空态分级。三档比一句话多的那点代码，换来的是「采集停了」不再被说成「T+2 还没发」。
+ * 见 utils/dailyLag.ts 的 tier 语义。
+ */
+const dailyLag = computed(() => lagOf(daily.value?.date))
+const dailyTierNow = computed(() => dailyTier(dailyLag.value, dailyEmpty.value))
+/** 库里近一年没有日频指标：空库时 board.date 回落成今天，lag 恒为 0，不能拿去说 T+2 */
+const dailyNever = computed(() => dailyTierNow.value === 'never')
+
+const dailyEmptyText = computed(() => {
+  const latest = daily.value?.date || '—'
+  switch (dailyTierNow.value) {
+    case 'never':
+      // 写「近一年」不写「从未」：latestDate 回看 456 天，只有一年前的老数据也落进这里，
+      // 那同样是「采集早停了」，告警一样成立
+      return '库里近一年没有日频指标。日频来自披露接口直采，请检查采集是否在跑。'
+    case 'lag':
+      return `采集滞后：库里最新运行日 ${latest}（${dailyLag.value} 天前），官方正常 T+2，已超出预期`
+    case 'stop':
+      return `采集已落后：库里最新运行日 ${latest}（${dailyLag.value} 天前），请检查采集是否在跑`
+    default:
+      return `该日无数据：披露接口还没有这一天的指标（实时 T+2 才发布）。库里最新运行日 ${latest}。`
+  }
+})
+/** 空库与「超出 T+2」都要告警；3~7 天只是中性偏提醒，红绿不混 */
+const dailyEmptyTone = computed(() =>
+  dailyTierNow.value === 'never' || dailyTierNow.value === 'stop'
+    ? 'is-alert'
+    : dailyTierNow.value === 'unknown'
+      ? ''
+      : 'is-neutral',
+)
 
 /* ---------- 图 1：日频趋势 ---------- */
 
@@ -461,8 +494,8 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       <template #actions>
         <StatusTag tone="blue">{{ DAILY_SOURCE }}</StatusTag>
       </template>
-      <div v-if="dailyEmpty" class="empty">
-        该日无数据：披露接口还没有这一天的指标（实时 T+2 才发布）。库里最新运行日 {{ daily?.date || '—' }}。
+      <div v-if="dailyEmpty" class="empty" :class="dailyEmptyTone" data-daily-state>
+        {{ dailyEmptyText }}
       </div>
       <div v-else class="kpis">
         <KpiCard
@@ -515,7 +548,10 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       <template #actions>
         <StatusTag tone="blue">{{ DAILY_SOURCE }}</StatusTag>
       </template>
-      <div v-if="dailyEmpty" class="empty">该区间无数据（披露接口还没有落库）。</div>
+      <!-- 空库时趋势图同样是空的：不加 !dailyNever，红色告警旁边会再写一句中性的
+           「该区间无数据」，两句互相抵消 -->
+      <div v-if="dailyEmpty && !dailyNever" class="empty">该区间无数据（披露接口还没有落库）。</div>
+      <div v-else-if="dailyNever" class="empty is-alert" data-daily-state>{{ dailyEmptyText }}</div>
       <div v-else ref="trendEl" class="chart" />
     </PanelBox>
 

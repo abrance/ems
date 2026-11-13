@@ -22,6 +22,7 @@ import {
   type SegmentRange,
 } from '@/metrics/forecast'
 import { anchorEndDate, lagDaysFrom, rangeEndingAt } from '@/utils/latestRange'
+import { firstPairDate as firstPairDateOf } from '@/utils/firstPairDate'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
 /**
@@ -179,6 +180,9 @@ const overviewSub = computed(
   () => `${MODE_LABEL[source.value]} · ${rangeLabel.value} · ${pairs.value.length} 个对比点 · ${days.value.length} 天`,
 )
 const chartSub = computed(() => `${MODE_LABEL[source.value]} · ${rangeLabel.value}`)
+
+/** 首个可配对交易日 = 首条留痕生成日 + 3（generated_on 当天、target_time 次日、真值 T+2） */
+const firstPairDate = computed(() => firstPairDateOf(recordedMeta.value?.generatedDates[0]))
 
 /** 图上的水印：重跑腿常驻，历史存档额外再标一次 */
 const chartWatermark = computed(() => {
@@ -752,12 +756,12 @@ onMounted(async () => {
         <template v-if="source === 'recorded'">
           <div class="empty-title">还没有可复盘的当时预测</div>
           <div>
-            预测记录从 {{ recordedMeta?.generatedDates[0] || '—' }} 起，目前 {{ days.length }} 天。
-            发过预测、且对应日期的实际出清价入库后，这里才会出现对比。
+            预测留痕自 {{ recordedMeta?.generatedDates[0] || '—' }} 起积累，之前的日子没有记录，也补不回来。
+            官方实际值 T+2 才发布，首个可配对交易日约在 {{ firstPairDate || '—' }}。
           </div>
           <div v-if="recordedMeta?.unavailable" class="muted">{{ recordedMeta.unavailable }}</div>
           <div v-else-if="recordedMeta?.actualMissing" class="muted">
-            另有 {{ recordedMeta.actualMissing }} 条留痕的实际值还没出。
+            另有 {{ recordedMeta.actualMissing }} 条留痕的实际值还没出（官方 T+2）。
           </div>
           <button class="btn" type="button" @click="switchToBacktest">先看当前模型重跑</button>
         </template>

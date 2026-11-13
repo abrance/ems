@@ -102,7 +102,7 @@ onMounted(load)
           </tbody>
         </table>
         <div v-if="status && !status.ocr.every((i) => i.configured)" class="tip">
-          未配置 OCR 时，日报可以正常采集归档，但**不能解析成结构化数据** ——
+          未配置 OCR 时，日报可以正常采集归档，但<strong>不能解析成结构化数据</strong> ——
           「管理 · 采集管理」里的解析会报错。
         </div>
       </section>
