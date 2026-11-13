@@ -166,9 +166,14 @@ python3 gdpm_report_gap.py --db /tmp/db.sqlite3 --links links.tsv --apply \
 `/api/gd-metric*`（第三方 CSV）仍在，但只服务「96 点分时序列」相关的页面
 （复盘 / 策略反演 / 分时预测）；官方披露接口没有分时曲线，这条读路径暂时无法替代。
 
-## 每周更新（手动执行一次）
+## 采集方式
 
-用户每周手动跑一次，**没有定时任务**：
+有两条路径，共用同一套抓取与入库代码：
+
+| 路径 | 何时用 |
+| --- | --- |
+| `gdpm_daily.py`（容器，见下节） | 日常增量，失败自动留痕 |
+| 下面这两行手动命令 | 首次全量回填、或排查时手动跑 |
 
 ```bash
 cd <repo> && python3 OpenLEMS/tools/gdpm/gdpm_dataset.py \
@@ -184,6 +189,35 @@ cd <repo> && python3 OpenLEMS/tools/gdpm/gdpm_dataset.py \
   第二周再跑一次，上周的价格会补齐。
 - `--apply` 之前想先看会写什么：去掉 `--apply` 加 `--report`，就是 dry-run（只算不写）。
 - 生产库务必先拷副本验证（`kubectl cp` 出来跑 dry-run + apply），确认行数再动真库。
+- 手动这条路径抓失败时**什么都不写**（失败留痕只在 `gdpm_daily.py` 里）；定时链路一律走容器。
+
+## 每日自动采集（容器 + 定时任务）
+
+`gdpm_daily.py` 把原来手动的两行串成一次采集，并让失败在库里看得见。
+
+```bash
+docker build -t ems-gdpm tools/gdpm
+docker run --rm -v <宿主目录>:/app/out \
+  -e HTTPS_PROXY=<代理> -e HTTP_PROXY=<代理> \
+  ems-gdpm
+```
+
+| 结果 | 库里的表现 | 退出码 |
+| --- | --- | --- |
+| 抓取成功 | 写 `gd_spot_metric` + `gd_pm_fetch_run` 每天一行 `status='ok'` | 0 |
+| 抓取失败 / 产出 0 行 / 入库失败 | **不写任何指标**，只补一行 `gd_pm_fetch_run` `status='failed'`、`dataset='fetch'`、`target_date=当天`，异常类型与 traceback 前 2000 字写进 `warnings` | 1 |
+
+失败的几个约定：
+
+- **失败不写指标**是有意的：抓失败时手上没有可信数值，写半份比不写更糟 —— 下游会当成正常更新推进 `dataAsOf`。
+- 留痕行同样按 `(target_date, dataset, extractor_version)` 唯一，同一天重跑只更新不堆行。
+- 留痕**本身**写不进去（库打不开、只读挂载）时只报错不抛异常，退出码仍然是 1 —— 靠退出码 + stderr 兜底，不让 `sqlite3.OperationalError` 把进程炸掉。
+- 抓到 0 行算失败：源站整站不可用时它会返回 200 和空表，这比连接异常更该报警。
+- `target_date` 固定按 `Asia/Shanghai` 算，不跟容器时区走（镜像默认 UTC，北京时间 08:00 前跑会记成前一天）。
+
+出口代理只读 `HTTPS_PROXY` / `HTTP_PROXY`（`urllib` 原生支持），代码里不写死地址。
+
+调度本身不在本仓库：k8s CronJob 与白名单代理由 cloud3 侧维护，这份代码只提供镜像与失败可见。
 
 ## 怎么停用 / 恢复 gdmetric 第三方 CSV
 
@@ -205,7 +239,7 @@ VM 里的 `gdpm_*` 若要留作镜像就双写，查询一律走 `gd_spot_metric
 
 ```bash
 cd tools/gdpm
-python3 -m unittest test_gdpm_import test_gdpm_sqlite -v
+python3 -m unittest test_gdpm_import test_gdpm_sqlite test_gdpm_daily -v
 
 # 官方数据驱动的 7 天电价预测（需要可达的 TimesFM 服务）
 cd ../../OpenLEMS/application
