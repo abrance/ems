@@ -181,14 +181,39 @@ const FIXTURES = {
       predicted: 300 + ((i * 7) % 150), actual: 310 + ((i * 11) % 140), q10: 260, q50: 300, q90: 420,
     })),
   },
+  // 复盘页默认腿 = 当时预测（日频留痕）：真值由后端按官方日均价配好（actual），
+  // 一天一条才能和官方日均价 1:1 配对 —— 也给「实际 vs 预测」这条图提供可画的点。
   '/api/forecast/recorded': {
-    generatedDates: ['2026-08-31'],
-    points: Array.from({ length: 96 }, (_, i) => ({
-      generatedOn: '2026-08-31',
-      targetTime: `2026-08-31 ${String(Math.floor((i * 15) / 60)).padStart(2, '0')}:${String((i * 15) % 60).padStart(2, '0')}`,
-      point: 300 + ((i * 17) % 160), q10: 260, q50: 300, q90: 420,
-      model: 'timesfm-3.0', unit: '元/兆瓦时', source: 'gd_metric.csv',
-    })),
+    generatedDates: ['2026-08-29', '2026-08-30'],
+    dataAsOf: '2026-08-31',
+    lagDays: 2,
+    stale: false,
+    truthSource: 'gd_spot_metric（官方直采，发电侧加权平均电价）',
+    backfilled: 0,
+    actualMissing: 0,
+    points: [
+      { generatedOn: '2026-08-29', targetTime: '2026-08-30', point: 392, q10: 370, q50: 392, q90: 415, model: 'timesfm-3.0', unit: '元/兆瓦时', source: 'day_ahead_trade', actual: 380 },
+      { generatedOn: '2026-08-30', targetTime: '2026-08-31', point: 402, q10: 380, q50: 402, q90: 425, model: 'timesfm-3.0', unit: '元/兆瓦时', source: 'day_ahead_trade', actual: 400.5 },
+    ],
+  },
+  // 官方指标看板：复盘页用它取「实际值最新日」（按市场），决定区间锚点与陈旧档位
+  '/api/spot-market/board': {
+    date: '2026-08-31',
+    from: '2026-06-03',
+    to: '2026-08-31',
+    days: 90,
+    daily: [],
+    periodic: [],
+    aheadRealtimeSpread: [],
+    spreadPeak: 0,
+    spreadValley: 0,
+    spreadMean: 0,
+    coverage: [
+      { dataset: 'day_ahead_trade', from: '2026-06-03', to: '2026-08-31', periods: 90, missing: [], lastDate: '2026-08-31' },
+      { dataset: 'realtime_trade', from: '2026-06-03', to: '2026-08-29', periods: 88, missing: [], lastDate: '2026-08-29' },
+    ],
+    source: 'pm.gd.csg.cn',
+    updatedAt: '2026-08-31T10:00:00+08:00',
   },
   // 注意外壳：真实响应是 { forecast: {...} }（api/forecast.ts 会拆包），
   // 桩少一层外壳 → 页面读出 undefined.timeMs → 组件 setup 抛异常、整页空白。

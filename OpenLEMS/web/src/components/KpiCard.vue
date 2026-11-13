@@ -6,12 +6,16 @@ defineProps<{
   hint?: string
   /** 环比方向：涨（红）/ 跌（绿），不传则中性 */
   dir?: 'up' | 'down'
+  /** 角标：例如历史存档视图上的「历史」，提醒这不是当前数据 */
+  badge?: string
 }>()
 </script>
 
 <template>
   <div class="kpi">
-    <div class="label">{{ label }}</div>
+    <div class="label">
+      {{ label }}<span v-if="badge" class="badge">{{ badge }}</span>
+    </div>
     <div class="value" :class="dir">
       {{ value }}<small v-if="unit">{{ unit }}</small>
     </div>
@@ -31,6 +35,14 @@ defineProps<{
   border-radius: var(--r-md);
 }
 .label { font-size: var(--fs-12); color: var(--text-3); }
+.badge {
+  margin-left: var(--s2);
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
+  background: var(--gray-soft);
+  color: var(--gray-ink);
+  font-size: var(--fs-12);
+}
 .value {
   font-size: var(--fs-22);
   font-weight: 700;

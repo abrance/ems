@@ -15,6 +15,9 @@ import (
 )
 
 // GetRecordedForecast 读取预测留痕。复盘的第一条腿：**当时**发出去的预测。
+//
+// 真值走官方日频（与日频回测同一口径，见 LoadDailyActuals）：页面不能一边说
+// 「实际值截至 2026-11-11」（回测腿）、一边说「截至 2026-10-02」（留痕腿）。
 func (c *ControllerV1) GetRecordedForecast(ctx context.Context, req *v1.GetRecordedForecastReq) (res *v1.GetRecordedForecastRes, err error) {
 	market := strings.ToLower(strings.TrimSpace(req.Market))
 	if market == "" {
@@ -33,9 +36,37 @@ func (c *ControllerV1) GetRecordedForecast(ctx context.Context, req *v1.GetRecor
 	if err != nil {
 		dates = nil // 辅助信息，拿不到不影响主体
 	}
+
+	res = &v1.GetRecordedForecastRes{GeneratedDates: dates}
+
+	// 真值：只有日频留痕能与官方日均价 1:1 配对。
+	// 96 点留痕没有官方分时真值（公开披露只有日频），配对不成立，宁可不给。
+	var actualByDate map[string]float64
+	if grain == s_db_model.ForecastGrainDay {
+		if series, aerr := forecastlogic.LoadDailyActuals(ctx, market, fromDate(req.From), req.To); aerr != nil {
+			// 真值读不到不是致命错误：留痕本身还在，页面要说「没有可配对的实际值」。
+			res.ActualUnavailable = aerr.Error()
+		} else {
+			actualByDate = series.ByDate
+			res.DataAsOf = series.DataAsOf
+			res.LagDays = series.LagDays
+			res.Stale = series.Stale
+			res.TruthSource = series.TruthSource
+		}
+	} else {
+		res.ActualUnavailable = "96 点留痕没有官方分时真值可配对（官方披露只有日频）"
+	}
+
 	out := make([]*v1.RecordedForecastPoint, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &v1.RecordedForecastPoint{
+		targetDate := fromDate(r.TargetTime)
+		// 生成日晚于目标日 = 事后回填的历史值，不是「当时发出去的预测」。
+		// 拿它冒充留痕，等于把「当前模型重跑」贴上「当时预测」的标签。
+		if r.GeneratedOn > targetDate {
+			res.Backfilled++
+			continue
+		}
+		point := &v1.RecordedForecastPoint{
 			GeneratedOn: r.GeneratedOn,
 			TargetTime:  r.TargetTime,
 			Point:       r.Point,
@@ -45,9 +76,25 @@ func (c *ControllerV1) GetRecordedForecast(ctx context.Context, req *v1.GetRecor
 			Model:       r.Model,
 			Unit:        r.Unit,
 			Source:      r.Source,
-		})
+		}
+		if v, ok := actualByDate[targetDate]; ok {
+			point.Actual = &v
+		} else {
+			res.ActualMissing++
+		}
+		out = append(out, point)
 	}
-	return &v1.GetRecordedForecastRes{Points: out, GeneratedDates: dates}, nil
+	res.Points = out
+	return res, nil
+}
+
+// fromDate 取 YYYY-MM-DD 部分（目标时刻/目标日两种格式都能用）
+func fromDate(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > len("2006-01-02") {
+		return strings.TrimSpace(s[:len("2006-01-02")])
+	}
+	return s
 }
 
 // GetPriceBacktest 回测：用当前模型在历史数据上重跑。

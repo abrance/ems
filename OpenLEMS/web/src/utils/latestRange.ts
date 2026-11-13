@@ -33,16 +33,17 @@ export function rangeEndingAt(end: Date, days: number): { from: string; to: stri
 }
 
 /**
- * 数据最新日距今天几天（自然日，按本地时区算）。
+ * 数据最新日距今天几天（自然日，按 Asia/Shanghai 算）。
  *
- * 为什么要单独一个函数：别用 `(now - parsed)/86400000` —— 那是「毫秒差 / 一天」，
- * 早上 09:00 算昨天的数据会得到 1.37 天，四舍五入后时对时错；而且跨时区会漂一天。
- * 复盘页用它说「实际值滞后 N 天」，这个数字必须稳定。
+ * 为什么固定时区：复盘页的「实际值截至 X · 滞后 N 天」是给广东现货市场看的，
+ * 用浏览器本地时区算会在跨时区（或 UTC 容器里的无头浏览器）漂一天，
+ * 同一个数据在两个地方显示成 2 天和 3 天。
+ * 算法：都把「日期」换成上海时区的自然日序号再相减，不做毫秒除法。
  */
 export function lagDaysFrom(latestDate: string, today: Date = new Date()): number {
-  const parsed = new Date(`${latestDate}T00:00:00`)
-  if (Number.isNaN(parsed.getTime())) return -1
-  const a = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
-  const b = Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
-  return Math.round((a - b) / 86400000)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(latestDate).trim())
+  if (!m) return -1
+  const dataDay = Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000)
+  const todayDay = Math.floor((today.getTime() + 8 * 3600_000) / 86400000)
+  return todayDay - dataDay
 }

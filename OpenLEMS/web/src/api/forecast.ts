@@ -33,6 +33,7 @@ export interface PriceForecastPoint {
 /** 预测留痕：复盘的第一条腿 —— **当时**发出去的预测 */
 export interface RecordedForecastPoint {
   generatedOn: string
+  /** day 粒度是 YYYY-MM-DD，intraday 是 YYYY-MM-DD HH:MM */
   targetTime: string
   point: number
   q10: number
@@ -41,11 +42,24 @@ export interface RecordedForecastPoint {
   model: string
   unit: string
   source: string
+  /** 官方日均实际值（与日频回测同一口径）；没有实际值时为 null */
+  actual?: number | null
 }
 
 export interface RecordedForecast {
   points: RecordedForecastPoint[]
   generatedDates: string[]
+  /** 真值口径与日频回测腿一致：官方直采最新实际值日 / 滞后天数 / 是否陈旧 */
+  dataAsOf?: string
+  lagDays?: number
+  stale?: boolean
+  truthSource?: string
+  /** 生成日晚于目标日、按「事后回填」剔除的条数（那不是当时发出的预测） */
+  backfilled?: number
+  /** 有留痕但官方实际值还没出的点数 */
+  actualMissing?: number
+  /** 真值读不到 / 不可配对的原因（96 点没有官方分时真值） */
+  actualUnavailable?: string
 }
 
 /** 回测：用**当前模型**在历史数据上重跑（≠ 当时预测，页面必须讲清） */

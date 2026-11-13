@@ -25,18 +25,32 @@ type RecordedForecastPoint struct {
 	Model       string  `json:"model"`
 	Unit        string  `json:"unit"`
 	Source      string  `json:"source"`
+	// Actual 该目标日的官方实际日均价（gd_spot_metric，发电侧加权平均电价）。
+	// 指针：0 元/MWh 是合法电价，不能拿 0 当「没有」；没有实际值时为 null。
+	Actual *float64 `json:"actual" dc:"官方日均实际值，没有则为 null"`
 }
 
 // GetRecordedForecastRes 留痕列表
 type GetRecordedForecastRes struct {
 	Points         []*RecordedForecastPoint `json:"points" dc:"按目标时刻升序"`
 	GeneratedDates []string                 `json:"generatedDates" dc:"有哪些生成日，前端据此提示留痕从哪天开始"`
+	// 真值口径：与日频回测腿同一个来源，页面才不会出现两个「实际值截至」
+	DataAsOf    string `json:"dataAsOf" dc:"官方实际值最新日期 YYYY-MM-DD"`
+	LagDays     int    `json:"lagDays" dc:"实际值滞后天数；-1 表示拿不到"`
+	Stale       bool   `json:"stale" dc:"滞后超过阈值"`
+	TruthSource string `json:"truthSource" dc:"真值来源说明，页面原样展示"`
+	// Backfilled 生成日晚于目标日、按「事后回填」剔除的条数（那不是当时发出的预测）
+	Backfilled int `json:"backfilled"`
+	// ActualMissing 有留痕但官方实际值还没出的点数
+	ActualMissing int `json:"actualMissing"`
+	// ActualUnavailable 真值读不到/不可配对的原因；空字符串表示正常
+	ActualUnavailable string `json:"actualUnavailable" dc:"真值不可用的原因，页面原样展示"`
 }
 
 // GetPriceBacktestReq 电价预测回测
 type GetPriceBacktestReq struct {
-	g.Meta       `path:"/forecast/backtest" method:"get" tags:"电价预测" summary:"电价预测回测（用当前模型在历史数据上重跑）" role:"user"`
-	Market       string `json:"market" dc:"ahead（默认）/ real"`
+	g.Meta `path:"/forecast/backtest" method:"get" tags:"电价预测" summary:"电价预测回测（用当前模型在历史数据上重跑）" role:"user"`
+	Market string `json:"market" dc:"ahead（默认）/ real"`
 	// Grain day（默认，官方日频日均价）/ intraday（96 点，真值来自已停更的第三方 CSV，仅历史演示）
 	Grain        string `json:"grain" dc:"day（默认）/ intraday"`
 	From         string `json:"from" v:"required" dc:"目标日起点 YYYY-MM-DD"`
