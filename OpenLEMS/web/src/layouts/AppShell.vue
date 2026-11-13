@@ -5,6 +5,7 @@ import AppBar from '@/components/AppBar.vue'
 import TabBar from '@/components/TabBar.vue'
 import SideNav from '@/components/SideNav.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { NAV } from '@/nav'
 import { useAppStore } from '@/stores/app'
 import { setUnauthorizedHandler } from '@/api/client'
 import { signOut } from '@/auth/session'
@@ -29,7 +30,7 @@ onBeforeUnmount(() => setUnauthorizedHandler(null))
 const route = useRoute()
 const app = useAppStore()
 
-const tabKey = computed(() => String(route.meta.tab ?? 'scene'))
+const tabKey = computed(() => String(route.meta.tab ?? NAV[0].key))
 const pageKey = computed(() => String(route.meta.page ?? ''))
 </script>
 
