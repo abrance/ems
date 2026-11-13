@@ -71,6 +71,14 @@ export const NAV: NavTab[] = [
         path: '/scene/disclosure',
         status: 'ready',
       },
+      {
+        key: 'reportReconcile',
+        title: '日报核对',
+        path: '/scene/report-reconcile',
+        status: 'ready',
+        note:
+          '左日报原值（OCR）右官网直采（pm-api），只在同口径 2 行上算差值；分电源与申报结构官网没有，只并排对照',
+      },
       { key: 'clearing', title: '市场出清', path: '/scene/clearing', status: 'ready' },
       { key: 'history', title: '历史信息', path: '/scene/history', status: 'ready' },
       {

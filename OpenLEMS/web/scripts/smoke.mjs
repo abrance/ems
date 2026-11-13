@@ -685,6 +685,54 @@ const FAKE_INTRADAY_RESEARCH = {
   available: ['2026-09-28', '2026-09-29', '2026-10-01', '2026-10-02'],
 }
 
+
+// ===== 日报核对（/api/report-daily/reconcile）=====
+// 夹具覆盖三条口径：
+//   - 11-11 有日报：日前/实时两行 compare=diff（真同义），申报均价 compare=caliber，燃煤/申报结构 official_missing
+//   - 11-12 / 11-13 缺日报：reportValue=null（**不是 0**）、missingReport=true，右列照常
+// 空态另由 reportDailyEmpty 开关驱动（整段 days=[]）。
+const FAKE_REPORT_RECONCILE = {
+  asOfReport: '2026-11-11',
+  asOfOfficial: '2026-11-13',
+  officialOrigin: 'pm-api',
+  from: '2026-11-10',
+  to: '2026-11-13',
+  days: [
+    {
+      runDate: '2026-11-11',
+      reportDate: '2026-11-11',
+      missingReport: false,
+      items: [
+        { dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', unit: '元/兆瓦时', source: '表1(二)',
+          reportValue: 463.27, officialValue: 463.25, diff: 0.02, diffPct: 0, compare: 'diff', note: '' },
+        { dataset: 'realtime_trade', scope: '发电侧', metric: '平均电价', unit: '元/兆瓦时', source: '表2(二)',
+          reportValue: 470.1, officialValue: 462.9, diff: 7.2, diffPct: 1.56, compare: 'diff', note: '' },
+        { dataset: 'day_ahead_decl', scope: '发电侧', metric: '平均电价', unit: '元/兆瓦时', source: '表1(一)',
+          reportValue: 420, officialValue: 400, diff: null, diffPct: null, compare: 'caliber', note: '简单均价 vs 加权均价' },
+        { dataset: 'day_ahead_trade', scope: '燃煤', metric: '平均电价', unit: '元/兆瓦时', source: '表1(二)',
+          reportValue: 412, officialValue: null, diff: null, diffPct: null, compare: 'official_missing', note: '' },
+        { dataset: 'day_ahead_decl', scope: '报价600以上', metric: '申报容量', unit: 'MW', source: '表1(一)',
+          reportValue: 98000, officialValue: null, diff: null, diffPct: null, compare: 'official_missing', note: '' },
+      ],
+    },
+    {
+      runDate: '2026-11-12', reportDate: '', missingReport: true,
+      items: [
+        { dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', unit: '元/兆瓦时', source: '',
+          reportValue: null, officialValue: 470, diff: null, diffPct: null, compare: 'diff', note: '' },
+      ],
+    },
+    {
+      runDate: '2026-11-13', reportDate: '', missingReport: true,
+      items: [
+        { dataset: 'day_ahead_trade', scope: '发电侧', metric: '平均电价', unit: '元/兆瓦时', source: '',
+          reportValue: null, officialValue: 468.5, diff: null, diffPct: null, compare: 'diff', note: '' },
+      ],
+    },
+  ],
+  warnings: [],
+}
+
 // ===== 官方电力市场指标看板（/api/spot-market/board）=====
 // 日前 3 天、实时 2 天（T+2 发布），这样「日前-实时价差」只有 2 个点 ——
 // 顺带守住「不许拿别的日期的实时价来配」这条口径。
@@ -900,6 +948,8 @@ let cleaned = false
 let manualEnabled = true
 /** 分时研究页的空态开关：true 时后端返回 0 天（验证空态不画 0 线） */
 let intradayEmpty = false
+/** 日报核对页的空态开关：true 时后端返回 0 天（验证空态不画 0 线） */
+let reportDailyEmpty = false
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -1112,6 +1162,10 @@ globalThis.fetch = async (url, init) => {
     // 夹具：滞后 42 天（stale）、区间内 09-30 未入库、asOf 钉在 2026-10-02
     // 空态分支另由 intradayEmpty 开关驱动
     return json(intradayEmpty ? { ...FAKE_INTRADAY_RESEARCH, days: [], missing: ['2026-10-01', '2026-10-02'] } : FAKE_INTRADAY_RESEARCH)
+  }
+  if (u.includes('/api/report-daily/reconcile')) {
+    // 空态分支由 reportDailyEmpty 开关驱动（整段无数据 → days: []，页面走空态）
+    return json(reportDailyEmpty ? { ...FAKE_REPORT_RECONCILE, days: [], asOfReport: '', asOfOfficial: '' } : FAKE_REPORT_RECONCILE)
   }
   if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
   // 注意顺序：这两个也以 /api/gd-metric 开头，必须排在下面的 gd-metric 兜底之前，
@@ -2366,9 +2420,8 @@ console.log('\n== 日志级别页 ==')
 
 console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
-// 当前 27 = 29 - 「数据保留」- 「时间与时区」
-//   两者都是「后端接口挂在别的功能下」：保留→存储管理，时间→系统操作，不留两个入口
-const EXPECTED_PAGES = 33
+// 当前 34 = 33 + 「日报核对」（市场数据 Tab，左日报原值 / 右官网直采）
+const EXPECTED_PAGES = 34
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 5, `Tab 数量 = ${tabEls.length}（期望 5）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(
@@ -2379,7 +2432,7 @@ check(
 // 按 key 找而不是按序号：Tab 顺序变过一次（加了运行监控），序号断言会跟着一起错
 const marketTab = NAV.find((t) => t.key === 'market')
 const analysisTab = NAV.find((t) => t.key === 'analysis')
-check(marketTab?.pages.length === 5, `市场数据页 5 个（实际 ${marketTab?.pages.length}）`)
+check(marketTab?.pages.length === 6, `市场数据页 6 个（实际 ${marketTab?.pages.length}）`)
 check(analysisTab?.pages.length === 4, `分析预测页 4 个（实际 ${analysisTab?.pages.length}）`)
 check(!NAV.some((t) => t.key === 'scene'), '原「场景」Tab 已拆掉，不留空壳')
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
@@ -2528,6 +2581,72 @@ console.log('\n== 分时研究页（第三方 · 非官方，只读）==')
   dateInputs[1].dispatchEvent(new window.Event('change', { bubbles: true }))
   await waitFor(() => !!doc.querySelector('.chart'), 2000)
   check(!!doc.querySelector('.chart'), '切回有数据的区间后图重新出现')
+}
+
+console.log('\n== 日报核对页（只读，左日报原值 / 右官网直采）==')
+{
+  await clickTo('市场数据', '日报核对')
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('日报 OCR'), 2000)
+
+  // 页头：两列来源与各自的 asOf 必须常驻（E1 契约：一图一源一 asOf，两边分别标）
+  check((doc.querySelector('[data-asof-report]')?.textContent ?? '').includes('2026-11-11'), '左列 asOf = 日报最新 2026-11-11', doc.querySelector('[data-asof-report]')?.textContent ?? '')
+  check((doc.querySelector('[data-asof-official]')?.textContent ?? '').includes('2026-11-13'), '右列 asOf = 官网最新 2026-11-13', doc.querySelector('[data-asof-official]')?.textContent ?? '')
+  check(bodyHas('pm-api'), '右列标明来源 pm-api')
+
+  // 只读：没有写回 / 确认 / 覆盖按钮，也没有「以官网为准」
+  const btns = [...doc.querySelectorAll('button')].map((b) => b.textContent.trim())
+  check(!btns.some((t) => /确认|写回|覆盖|以官网为准|采集|解析|刷新/.test(t)), '核对页没有任何写入口', btns.join('|'))
+  check(!!doc.querySelector('[data-no-writeback]'), '页头明写「不覆盖、不合并、不写回」')
+
+  // 三列并排：日报原值 / 官网直采 / 差值
+  check(bodyHas('日报原值') && bodyHas('官网直采') && bodyHas('差值'), '三列表头齐全')
+
+  // 差值只在真同义的行上出现：11-11 的日前/实时两行有 data-diff，其余行没有
+  const diffCells = [...doc.querySelectorAll('[data-diff]')]
+  check(diffCells.length === 2, `差值只出现在 2 行（日前 + 实时），实际 ${diffCells.length}`, diffCells.map((e) => e.dataset.diff).join('/'))
+  check(Number(diffCells[0]?.dataset.diff) === 0.02, '日前均价差值 = 0.02（日报 − 官网）', String(diffCells[0]?.dataset.diff))
+  check(Number(diffCells[1]?.dataset.diff) === 7.2, '实时均价差值 = 7.2', String(diffCells[1]?.dataset.diff))
+  check(diffCells[1]?.className.includes('warn'), '|Δ%| > 1% 的行黄色高亮（1.56%）', diffCells[1]?.className ?? '')
+  check(diffCells[0]?.className.includes('calm'), '|Δ%| ≤ 1% 的行中性灰', diffCells[0]?.className ?? '')
+
+  // 口径不同只并排：申报均价一行显「口径不同」，且不参与差值
+  const caliber = [...doc.querySelectorAll('[data-compare="caliber"]')]
+  check(caliber.length === 1, `「口径不同」只出现 1 行（申报均价），实际 ${caliber.length}`)
+  check((caliber[0]?.getAttribute('title') ?? '').includes('简单均价'), '「口径不同」带口径说明（hover）', caliber[0]?.getAttribute('title') ?? '')
+
+  // 官网无此口径：燃煤均价 + 申报结构 2 行，官网列显「官网无此口径」
+  const offMissing = [...doc.querySelectorAll('[data-official-missing]')]
+  check(offMissing.length === 2, `「官网无此口径」出现 2 行（燃煤均价 + 申报容量），实际 ${offMissing.length}`)
+
+  // 缺日空态：11-12 / 11-13 的 reportValue 必须是 null（不是 0），官网列照常
+  const missingRows = [...doc.querySelectorAll('[data-missing-report="1"]')]
+  check(missingRows.length === 2, `缺日报的日数 = 2（11-12 / 11-13），实际 ${missingRows.length}`)
+  const nullReport = [...doc.querySelectorAll('[data-report-value="null"]')]
+  check(nullReport.length === 2, `缺日报时 reportValue=null 的行数 = 2，实际 ${nullReport.length}`)
+  const zeroReport = [...doc.querySelectorAll('[data-report-value="0"]')]
+  check(zeroReport.length === 0, '缺日报时没有把 0 当「没有」写进左列', String(zeroReport.length))
+  check(bodyHas('当日无日报'), '缺日报的行标「当日无日报（采集缺口）」')
+  check(missingRows.some((r) => r.querySelector('[data-official-value]')), '缺日报时官网列照常显示')
+
+  // 没有「通过/不通过」结论（口径没定阈值，页面不许自己判）。
+  // 只查本页容器内的文案：其它页面（如 ESS 参数）的 toast 文案会残留在 doc 上，
+  // 拿整页 body 判会误报。
+  // 查的是**数据区**（表格）里有没有判定词：页头的说明文字本身写着「不给通过/不通过结论」，
+  // 那是口径声明，不是判定结论，拿整页文本判会把它自己也判成违规。
+  const tableText = doc.querySelector('.table')?.textContent ?? ''
+  check(!/通过|超标|合格|不合格/.test(tableText), '表格里不给通过/不通过结论', tableText.match(/通过|超标|合格/)?.[0] ?? '')
+
+  // 空态：后端 0 天时整页说「无数据」，不画 0 行
+  reportDailyEmpty = true
+  const dateInputs = [...doc.querySelectorAll('.controls input[type=date]')]
+  check(dateInputs.length === 2, '有起 / 止两个日期输入', String(dateInputs.length))
+  dateInputs[0].value = '2026-01-01'
+  dateInputs[0].dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => !!doc.querySelector('[data-empty]'), 2000)
+  check(!!doc.querySelector('[data-empty]'), '没有数据时走空态（不是空白页、不是报错）')
+  check(!doc.querySelector('[data-report-value]'), '空态不渲染任何数据行（不画 0 行）')
+  reportDailyEmpty = false
 }
 
 console.log('\n== 预测复盘页 ==')

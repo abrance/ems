@@ -16,6 +16,7 @@ import (
 	"application/internal/controller/price"
 	"application/internal/controller/protocol"
 	"application/internal/controller/remote"
+	"application/internal/controller/reportdaily"
 	"application/internal/controller/research"
 	"application/internal/controller/setting"
 	"application/internal/controller/spotreport"
@@ -150,6 +151,8 @@ func setupAPIRoutes(s *ghttp.Server) {
 		group.Bind(forecast.NewV1())
 		// 分时研究（第三方 · 非官方）：只读冻结快照，不采集、不进复盘 MAE
 		group.Bind(research.NewV1())
+		// 日报核对：OCR 落独立表 gd_report_daily，右列读官方 pm-api，两边不覆盖不合并
+		group.Bind(reportdaily.NewV1())
 	})
 }
 

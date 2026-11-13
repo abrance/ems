@@ -72,3 +72,8 @@ func GetSpotExtractService() s_db_basic.ISpotExtractService {
 func GetHomeMarketService() s_db_basic.IHomeMarketService {
 	return impl.GetHomeMarketService()
 }
+
+// GetReportDailyService 获取日报核对左列（OCR 日报原值）service 对象
+func GetReportDailyService() s_db_basic.IReportDailyService {
+	return impl.GetReportDailyService()
+}

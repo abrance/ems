@@ -241,3 +241,50 @@ type IHomeMarketService interface {
 	// LatestNodePriceDate 最近一个有数据的运行日
 	LatestNodePriceDate(ctx context.Context) (string, error)
 }
+
+// IReportDailyService 日报核对左列（OCR 日报原值）的读写。
+//
+// 口径（用户拍板）：OCR 落独立表 gd_report_daily，**绝不写 gd_spot_metric**。
+// 这张表里只有 ocr / manual 两种 origin，官方值永远在 gd_spot_metric（pm-api），
+// 核对页右列另取一路；两边不覆盖、不合并、无 fallback。
+type IReportDailyService interface {
+	// UpsertBatch 按唯一键 (run_date, dataset, scope, metric) 覆盖写；force=false 时保留 manual 行。
+	// 返回写入条数与被保留（manual 未覆盖）条数。
+	UpsertBatch(ctx context.Context, rows []*s_db_model.SReportDailyModel, force bool) (ReportDailyWriteResult, error)
+	// ListByRunDateRange 取 [from, to] 区间内的日报原值行（按 run_date、dataset、scope、metric 升序）
+	ListByRunDateRange(ctx context.Context, from, to string) ([]*s_db_model.SReportDailyModel, error)
+	// LatestRunDate 最近一个有日报原值的运行日；空串表示一条都没有
+	LatestRunDate(ctx context.Context) (string, error)
+	// ListOfficialDaily 读官方直采（origin=pm-api）的日频电价与申报均价，供核对页右列使用。
+	// 只读；核对页的右列永远来自这里，不来自 gd_report_daily。
+	ListOfficialDaily(ctx context.Context, from, to string) ([]ReportDailyOfficialRow, error)
+	// BackfillFromSpotMetric 从 gd_spot_metric 一次性回填历史 OCR 行（只读那张表，单向、幂等）。
+	// 返回插入行数、跳过的 void 行数与同 run_date 多份日报的冲突计数。
+	BackfillFromSpotMetric(ctx context.Context) (ReportDailyBackfillResult, error)
+}
+
+// ReportDailyWriteResult 一次写入的结果
+type ReportDailyWriteResult struct {
+	Written   int // 实际写入（插入 + 覆盖）
+	Preserved int // 因 origin=manual 而被保留、未被本次覆盖的行数
+}
+
+// ReportDailyBackfillResult 历史回填结果
+type ReportDailyBackfillResult struct {
+	Inserted int // 新插入行数
+	Skipped  int // origin=void（已被官方取代）而跳过的行数
+	Conflict int // 同一 run_date 有多份日报产出同一指标、按「报告日最接近运行日」只留一行时计一次
+}
+
+// ReportDailyOfficialRow 官方直采（pm-api）的一行日频指标，供核对页右列使用。
+//
+// 刻意不暴露 SSpotMetricModel：核对页只该看到「运行日 + 指标名 + 值」，
+// 不该能顺着模型去写那张表。读路径也因此只有一个入口。
+type ReportDailyOfficialRow struct {
+	RunDate string
+	Dataset string
+	Scope   string
+	Metric  string // 官方指标原名，例如「发电侧日前加权平均电价」
+	Value   float64
+	Unit    string
+}

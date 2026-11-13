@@ -14,6 +14,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   alarms: () => import('./monitor/AlarmsView.vue'),
   market: () => import('./scene/MarketView.vue'),
   disclosure: () => import('./scene/DisclosureView.vue'),
+  reportReconcile: () => import('./scene/ReportReconcileView.vue'),
   history: () => import('./scene/HistoryView.vue'),
   intradayResearch: () => import('./scene/IntradayResearchView.vue'),
   decision: () => import('./scene/DecisionView.vue'),

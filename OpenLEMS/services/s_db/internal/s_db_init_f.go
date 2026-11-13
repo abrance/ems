@@ -443,6 +443,44 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	// 日报核对用的「日报原值」表（OCR 链路 D 的落库目标）。
+	//
+	// 独立于 gd_spot_metric：那张表按「一份日报」成行（唯一键含 report_date），同一运行日
+	// 会被表1(二) 与滞后的表2(一) 各写一行；核对页要与官网 1 天 1 行对齐，所以这里唯一键
+	// 不含 report_date（report_date 只留痕）。
+	//
+	// 唯一键为什么含 dataset：核对页要算差值的两行（日前均价 / 实时均价）run_date、scope、
+	// metric 完全相同，只有 dataset 不同；不含 dataset 它们会互相覆盖，差值恒为一行。
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_report_daily (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			run_date VARCHAR(10) NOT NULL,
+			report_date VARCHAR(10) NOT NULL,
+			dataset VARCHAR(32) NOT NULL,
+			scope VARCHAR(16) NOT NULL,
+			metric VARCHAR(16) NOT NULL,
+			value REAL NOT NULL,
+			unit VARCHAR(16) NOT NULL,
+			source VARCHAR(16) NOT NULL,
+			origin VARCHAR(8) NOT NULL DEFAULT 'ocr',
+			extractor_version VARCHAR(16) NOT NULL DEFAULT '',
+			report_title VARCHAR(255) NOT NULL DEFAULT '',
+			collected_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (run_date, dataset, scope, metric)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+	_, err = g.DB().Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_report_daily_run_date ON gd_report_daily (run_date)`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	c_log.Info(ctx, "Database tables created successfully")
 
 	// 初始化系统设置数据
