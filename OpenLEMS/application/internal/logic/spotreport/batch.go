@@ -52,7 +52,7 @@ var batchJobs = &batchRegistry{jobs: map[string]*batchJob{}}
 // 默认跳过「已全部人工复核」的日报：批量重跑的本意是解析器升级后回填历史，
 // 顺手清掉别人已复核的状态是意外副作用（实测发生过：一次批量重置了 24 项确认，
 // 值虽未变但复核状态丢失）。需要覆盖时显式传 IncludeConfirmed——它同时也是
-// 单篇解析的 force：只有它才允许覆盖已确认值。
+// 单篇解析的 force：只对 ocr/cv 生效，官方直采与人工确认值不会被覆盖。
 func StartBatchExtract(ctx context.Context, from, to string, includeConfirmed, dryRun bool) (*v1.BatchExtractRes, error) {
 	all, err := collectedDatesInRange(ctx, from, to)
 	if err != nil {
@@ -72,7 +72,7 @@ func StartBatchExtract(ctx context.Context, from, to string, includeConfirmed, d
 		}, nil
 	}
 	if len(dates) == 0 {
-		return nil, fmt.Errorf("区间内 %d 篇日报都已人工复核；如需强制覆盖请勾选「包含已复核」", len(skipped))
+		return nil, fmt.Errorf("区间内 %d 篇日报都已人工复核，无需重跑；已复核值不会被覆盖", len(skipped))
 	}
 
 	batchJobs.mu.Lock()
