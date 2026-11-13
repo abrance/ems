@@ -6,6 +6,7 @@ import KpiCard from '@/components/KpiCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { fetchIntradayResearch, type IntradayResearch, type IntradayResearchDay } from '@/api/research'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
+import { missingSummary } from '@/utils/missingRanges'
 
 /**
  * 市场数据 · 分时研究（第三方 · 非官方）。
@@ -61,6 +62,11 @@ const lagDays = computed(() => data.value?.lagDays ?? -1)
 const stale = computed(() => data.value?.stale === true)
 const days = computed<IntradayResearchDay[]>(() => data.value?.days ?? [])
 const missing = computed<string[]>(() => data.value?.missing ?? [])
+/**
+ * 未入库日期的一句话。缺几十天时逐个列会把版面铺满（默认窗口就 39 天），
+ * 所以按连续区间折叠；空列表给空串，模板按 falsy 判断不渲染。
+ */
+const missingText = computed(() => missingSummary(missing.value))
 
 /** 截至日与滞后：数据日缺失时不给「今天」，直接说未入库 */
 const asOfText = computed(() => {
@@ -198,7 +204,7 @@ function num(v: number, digits = 2): string {
           这个区间没有第三方分时数据。本页<strong>只读</strong>已有快照，不做采集，也不补数 ——
           空态就是空态，不画 0 线。
         </p>
-        <p v-if="missing.length" class="muted" data-missing>区间内未入库：{{ missing.join('、') }}</p>
+        <p v-if="missingText" class="muted" data-missing>{{ missingText }}</p>
         <p v-if="data?.available?.length" class="muted">
           本地快照覆盖：{{ data.available[0] }} ~ {{ data.available[data.available.length - 1] }}
         </p>
@@ -271,7 +277,7 @@ function num(v: number, digits = 2): string {
           sub="空态，不补数"
           foot="截至日之外或本地快照没覆盖的日期"
         >
-          <div class="missing" data-missing>{{ missing.join('、') }}</div>
+          <div class="missing" data-missing>{{ missingText }}</div>
           <p class="muted">
             这些日子没有数据：不画 0 线、不把缺口连成直线。要补齐需要显式采集（本页不做）。
           </p>

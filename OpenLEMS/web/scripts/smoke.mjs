@@ -982,14 +982,18 @@ function marketStatusFixture() {
   const build = (dataset, okLag, rowsExpected) => {
     const st = marketStatusState ?? 'ok'
     const noData = noDataState()
+    // stopped 的真实形态是「源站停发、asOf 冻结在旧日子」，不是空库：
+    // status.go 里 stopped 的前置条件正是 lagDays 越过 expectedLag（24 点=8、地市=2），
+    // 所以 asOf 必须非空、lagDays 必须真越过阈值，否则测不到文案里的天数从哪来。
+    const stoppedLag = dataset === 'home24h' ? 9 : 3
     return {
       dataset,
       state: st,
       // lagging 是「有数据但旧」，asOf 必须非空——空字符串会变成「从未入库」
-      asOf: noData ? '' : st === 'lagging' ? '2026-11-02' : '2026-11-13',
+      asOf: st === 'stopped' ? (dataset === 'home24h' ? '2026-11-04' : '2026-11-10') : noData ? '' : st === 'lagging' ? '2026-11-02' : '2026-11-13',
       // failed 文案要带「最近一次成功是 X」，所以给一个真实时间而不是空
       fetchedAt: noData && st !== 'never' && st !== 'failed' ? '' : st === 'failed' ? '2026-11-10 09:12:00' : '2026-11-13 09:12:00',
-      lagDays: noData ? -1 : st === 'lagging' ? 11 : okLag,
+      lagDays: st === 'stopped' ? stoppedLag : noData ? -1 : st === 'lagging' ? 11 : okLag,
       rows: noData ? 0 : rowsExpected,
       rowsExpected,
       lastError: st === 'failed' ? 'status 400 blocked by waf' : '',
@@ -1011,6 +1015,8 @@ let cleaned = false
 let manualEnabled = true
 /** 分时研究页的空态开关：true 时后端返回 0 天（验证空态不画 0 线） */
 let intradayEmpty = false
+/** 分时研究的未入库长列表：true 时返回 39 天连续缺口（验折叠，不铺满版面） */
+let intradayLongMissing = false
 /** 日报核对页的空态开关：true 时后端返回 0 天（验证空态不画 0 线） */
 let reportDailyEmpty = false
 /** 24 点缺点日开关：true 时后端只给 17/24 点且不下发峰谷（验证页脚说清原因） */
@@ -1240,6 +1246,14 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/research/intraday')) {
     // 夹具：滞后 42 天（stale）、区间内 09-30 未入库、asOf 钉在 2026-10-02
     // 空态分支另由 intradayEmpty 开关驱动
+    if (intradayLongMissing) {
+      // 真实场景：日前腿止于 2026-10-02，默认窗口打开就是 39 天连续缺口
+      const miss = Array.from({ length: 39 }, (_, i) => {
+        const d = new Date(Date.UTC(2026, 9, 3 + i))
+        return d.toISOString().slice(0, 10)
+      })
+      return json({ ...FAKE_INTRADAY_RESEARCH, missing: miss })
+    }
     return json(intradayEmpty ? { ...FAKE_INTRADAY_RESEARCH, days: [], missing: ['2026-10-01', '2026-10-02'] } : FAKE_INTRADAY_RESEARCH)
   }
   if (u.includes('/api/report-daily/reconcile')) {
@@ -1636,7 +1650,37 @@ async function remountMarket() {
 
   marketStatusState = 'stopped'
   await remountMarket()
-  expectAlert('stopped', ['源站已连续 3 次返回空数据，疑似停更或页面改版'])
+  // 判据是「滞后越过预期上限」，不是「连续 3 次空」：24 点第 9 天、地市第 3 天才转 stopped。
+  // 文案必须用 lagDays 说话，且两路各自的真实取值都要读得通。
+  {
+    const notes = readStateNotes().filter((n) => n.state === 'stopped')
+    check(notes.length >= 2, `stopped：两路都渲染出提示（实际 ${notes.length} 条）`, JSON.stringify(readStateNotes()))
+    check(
+      notes.every((n) => n.alert && !n.neutral),
+      'stopped：带告警样式 is-alert',
+      JSON.stringify(notes),
+    )
+    check(
+      notes.every((n) => !/连续 3 次返回空/.test(n.text)),
+      'stopped：不再写「连续 3 次返回空」（那不是判据）',
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+    check(
+      notes.every((n) => /源站已 \d+ 天没有发布新数据（截至 \d{4}-\d{2}-\d{2}）/.test(n.text)),
+      'stopped：用「已 N 天没有发布新数据（截至 X）」说话',
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+    check(
+      notes.some((n) => n.text.includes('源站已 9 天没有发布新数据（截至 2026-11-04）')),
+      'stopped：24 点读作「9 天」（lagDays 来自后端，不写死）',
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+    check(
+      notes.some((n) => n.text.includes('源站已 3 天没有发布新数据（截至 2026-11-10）')),
+      'stopped：地市读作「3 天」（两路阈值不同，各说各的天数）',
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+  }
 
   // 状态接口自己挂了：退回「该日无数据」，不许把整页带白
   marketStatusState = 'never'
@@ -1744,6 +1788,83 @@ console.log('\n== 空态分级与首个可配对日（分支逻辑）==')
   check(firstPairDate('2026-12-30') === '2027-01-02', '跨年进位正确（12-30 → 01-02）', firstPairDate('2026-12-30'))
   check(firstPairDate('') === '' && firstPairDate(null) === '', '没生成日 → 空串（模板回落「—」，不印 NaN-NaN-NaN）')
   check(firstPairDate('not-a-date') === '', '格式不对 → 空串', firstPairDate('not-a-date'))
+}
+
+// ---- 未入库日期折叠（缺几十天不许铺满版面）----
+//
+// 默认窗口打开就是 39 个日期用顿号连成一行，手选 2020 年起是 712 天。
+// 这四边界对应 brief 点名要覆盖的四种情形。
+console.log('\n== 未入库日期折叠（≤ 3 天逐个列，> 3 天按区间折）==')
+{
+  const { missingRanges, missingSummary } = await vite.ssrLoadModule(
+    resolve(root, 'src/utils/missingRanges.ts'),
+  )
+
+  // 边界 1：≤ 3 天不折叠，逐个列
+  const two = missingSummary(['2026-10-01', '2026-10-02'])
+  check(two === '区间内未入库：2026-10-01、2026-10-02', '2 天：逐个列，不折叠', two)
+  const three = missingSummary(['2026-09-30', '2026-10-01', '2026-10-02'])
+  check(three === '区间内未入库：2026-09-30、2026-10-01、2026-10-02', '3 天（边界）：仍逐个列', three)
+
+  // 边界 2：4 天就折（门槛另一侧）
+  const four = missingSummary(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'])
+  check(
+    four === '区间内未入库 4 天：2026-10-01 ~ 2026-10-04（连续）',
+    '4 天（边界）：开始折叠成单区间',
+    four,
+  )
+
+  // 边界 3：单段长区间（真实场景：默认窗口 39 天）
+  const long39 = Array.from({ length: 39 }, (_, i) =>
+    new Date(Date.UTC(2026, 9, 3 + i)).toISOString().slice(0, 10),
+  )
+  const one = missingSummary(long39)
+  check(
+    one === '区间内未入库 39 天：2026-10-03 ~ 2026-11-10（连续）',
+    '单段 39 天：折成一段，不列 39 个日期',
+    one,
+  )
+  check(!one.includes('、'), '单段长区间：一个顿号都不出现', one)
+
+  // 边界 4：多段（2020-01-01~2021-10-31 共 670 天 + 2026-10-03~2026-11-13 共 42 天）
+  const twoSeg = missingSummary([
+    ...Array.from({ length: 670 }, (_, i) =>
+      new Date(Date.UTC(2020, 0, 1 + i)).toISOString().slice(0, 10),
+    ),
+    ...Array.from({ length: 42 }, (_, i) =>
+      new Date(Date.UTC(2026, 9, 3 + i)).toISOString().slice(0, 10),
+    ),
+  ])
+  check(
+    twoSeg ===
+      '区间内未入库 712 天：2020-01-01 ~ 2021-10-31（连续 670 天）、2026-10-03 ~ 2026-11-13（连续 42 天）',
+    '多段：两段各自带天数',
+    twoSeg,
+  )
+
+  // 超过 3 段：只列 3 段，其余写「等 N 段」（不无限铺开）
+  const fiveSeg = missingSummary([
+    '2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04',
+    '2026-02-01', '2026-02-02', '2026-02-03', '2026-02-04',
+    '2026-03-01', '2026-03-02', '2026-03-03', '2026-03-04',
+    '2026-04-01', '2026-04-02', '2026-04-03', '2026-04-04',
+    '2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04',
+  ])
+  check(fiveSeg.includes('等 2 段'), '5 段：只列 3 段，其余写「等 2 段」', fiveSeg)
+  check(fiveSeg.startsWith('区间内未入库 20 天：'), '5 段：总天数照实说（20 天）', fiveSeg)
+
+  // 区间聚合本身：乱序输入要去重并升序
+  const r = missingRanges(['2026-10-03', '2026-10-01', '2026-10-02', '2026-10-03'])
+  check(
+    r.length === 1 && r[0].from === '2026-10-01' && r[0].to === '2026-10-03' && r[0].days === 3,
+    '区间聚合：乱序 + 重复输入 → 一段 3 天',
+    JSON.stringify(r),
+  )
+
+  // 不吞日期：解析不了就退回逐个列，不能默默少报一天
+  const bad = missingSummary(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', 'oops'])
+  check(bad.includes('oops'), '日期解析不了：退回逐个列，不静默吞掉', bad)
+  check(missingSummary([]) === '', '空列表 → 空串（模板不渲染）', JSON.stringify(missingSummary([])))
 }
 
 console.log('\n== 市场数据 · 信息披露（官方直采数据，图表确实画出了数据）==')
@@ -2941,6 +3062,38 @@ console.log('\n== 分时研究页（第三方 · 非官方，只读）==')
   dateInputs[1].dispatchEvent(new window.Event('change', { bubbles: true }))
   await waitFor(() => !!doc.querySelector('.chart'), 2000)
   check(!!doc.querySelector('.chart'), '切回有数据的区间后图重新出现')
+
+  // 长列表折叠：真实场景（日前腿止于 10-02，默认窗口 39 天）不许铺满版面。
+  // 放在最后跑，不改动上面「空态 → 有数据」那条既有流程。
+  intradayLongMissing = true
+  const dates2 = [...doc.querySelectorAll('.controls input[type=date]')]
+  dates2[1].value = '2026-11-10'
+  dates2[1].dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => (doc.querySelector('[data-missing]')?.textContent ?? '').includes('39 天'), 2000)
+  {
+    const missText = [...doc.querySelectorAll('[data-missing]')].map((el) => el.textContent.trim())
+    check(missText.length > 0, '长列表：未入库提示仍渲染', JSON.stringify(missText))
+    check(
+      missText.every((t) => t.includes('区间内未入库 39 天：2026-10-03 ~ 2026-11-10（连续）')),
+      '长列表：39 天折成一段（不逐个列 39 个日期）',
+      JSON.stringify(missText),
+    )
+    check(
+      missText.every((t) => !/、/.test(t)),
+      '长列表：一个顿号都不出现（旧文案是 39 个日期连成一行）',
+      JSON.stringify(missText),
+    )
+    // 不画 0 线、不连直线的说明必须保留（折叠只改日期列表，不改口径）
+    check(
+      (doc.querySelector('.missing')?.parentElement?.textContent ?? '').includes('不画 0 线'),
+      '长列表：「不画 0 线、不把缺口连成直线」仍在',
+      doc.querySelector('.missing')?.parentElement?.textContent ?? '',
+    )
+    // 不加「展开全部」：折叠是为了不铺满，加个展开按钮等于把问题搬个位置
+    const allBtns = [...doc.querySelectorAll('button')].map((b) => b.textContent.trim())
+    check(!allBtns.some((t) => /展开|全部/.test(t)), '长列表：没有「展开全部」按钮', allBtns.join('|'))
+  }
+  intradayLongMissing = false
 }
 
 console.log('\n== 日报核对页（只读，左日报原值 / 右官网直采）==')
