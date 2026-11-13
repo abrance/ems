@@ -111,13 +111,20 @@ function buildZip(files) {
   return Buffer.concat([...local, cdBuf, eocd])
 }
 
+// 停用但按规范保留 .vue 文件的页面：不登记 loader、不产 chunk。
+//
+// 名单只允许「已停用」的页面进；名单外的 View 文件必须登记到 pages/index.ts 或
+// router/routes.ts，否则数量比对会红 —— 「加了页面忘了登记」正是这个守卫要守的。
+// smoke.mjs 的 PAUSED_WITHOUT_VIEW 是同一件事，改这里要同步改那里。
+const PAUSED_WITHOUT_VIEW = new Set(['InferenceView'])
+
 function countSourcePages() {
   const pagesDir = join(webDir, 'src/pages')
   let n = 0
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (e.isDirectory()) walk(join(dir, e.name))
-      else if (e.name.endsWith('View.vue')) n++
+      else if (e.name.endsWith('View.vue') && !PAUSED_WITHOUT_VIEW.has(e.name.slice(0, -'.vue'.length))) n++
     }
   }
   walk(pagesDir)
