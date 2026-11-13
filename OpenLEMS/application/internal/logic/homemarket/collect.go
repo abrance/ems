@@ -240,6 +240,7 @@ func FetchNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceM
 //
 // 从今天往回探：主页 24 点滞后 6 天左右，硬取今天会永远拿到空。
 // 找到第一个有数的日子就采完停手（不批量补历史 —— 那是 backfill 的事）。
+// 每探一天都写一条 run 记录（成功/空/失败），失败的日子一行数据都不写。
 func CollectHome24h(ctx context.Context, today time.Time) (string, int, error) {
 	base := today.In(time.Local)
 	errCount, emptyDays := 0, 0
@@ -252,16 +253,24 @@ func CollectHome24h(ctx context.Context, today time.Time) (string, int, error) {
 			errCount++
 			lastErr = err
 			c_log.Warningf(ctx, "采集 24 点分时 %s 失败[%s]：%+v", date, classifyErr(err), err)
+			recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusFailed,
+				classifyErr(err), 0, rowsExpectedHome24h, err)
 			continue
 		}
 		if len(rows) == 0 {
 			emptyDays++
+			recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusEmpty,
+				"", 0, rowsExpectedHome24h, nil)
 			continue
 		}
 		n, err := s_db.GetHomeMarketService().UpsertHome24h(ctx, rows)
 		if err != nil {
+			recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusFailed,
+				"", 0, rowsExpectedHome24h, err)
 			return date, n, err
 		}
+		recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusOK,
+			"", n, rowsExpectedHome24h, nil)
 		return date, n, nil
 	}
 	// 有失败就不能返回 nil：nil 会在调度器里被写成「最近 14 天都没有数据（源站未发布）」，
@@ -275,7 +284,7 @@ func CollectHome24h(ctx context.Context, today time.Time) (string, int, error) {
 	return "", 0, nil
 }
 
-// BackfillHome24h 按日期回补 24 点（指定区间，逐日；无数据的日子只记日志）。
+// BackfillHome24h 按日期回补 24 点（指定区间，逐日；无数据/失败的日子只记日志，不写数据表）。
 func BackfillHome24h(ctx context.Context, from, to time.Time) (map[string]int, error) {
 	out := map[string]int{}
 	for d := from.In(time.Local); !d.After(to.In(time.Local)); d = d.AddDate(0, 0, 1) {
@@ -283,15 +292,21 @@ func BackfillHome24h(ctx context.Context, from, to time.Time) (map[string]int, e
 		rows, err := FetchHome24h(ctx, date)
 		if err != nil {
 			c_log.Warningf(ctx, "回补 24 点分时 %s 失败：%+v", date, err)
+			recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusFailed,
+				classifyErr(err), 0, rowsExpectedHome24h, err)
 			continue
 		}
 		if len(rows) == 0 {
+			recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusEmpty,
+				"", 0, rowsExpectedHome24h, nil)
 			continue
 		}
 		n, err := s_db.GetHomeMarketService().UpsertHome24h(ctx, rows)
 		if err != nil {
 			return out, err
 		}
+		recordRun(ctx, s_db_model.DatasetHome24h, date, s_db_model.FetchStatusOK,
+			"", n, rowsExpectedHome24h, nil)
 		out[date] = n
 	}
 	return out, nil
@@ -301,12 +316,24 @@ func BackfillHome24h(ctx context.Context, from, to time.Time) (map[string]int, e
 func CollectNodePrice(ctx context.Context, date string) (int, error) {
 	rows, err := FetchNodePrice(ctx, date)
 	if err != nil {
+		recordRun(ctx, s_db_model.DatasetNodePrice, date, s_db_model.FetchStatusFailed,
+			classifyErr(err), 0, rowsExpectedNodePrice, err)
 		return 0, err
 	}
 	if len(rows) == 0 {
+		recordRun(ctx, s_db_model.DatasetNodePrice, date, s_db_model.FetchStatusEmpty,
+			"", 0, rowsExpectedNodePrice, nil)
 		return 0, nil
 	}
-	return s_db.GetHomeMarketService().UpsertNodePrice(ctx, rows)
+	n, err := s_db.GetHomeMarketService().UpsertNodePrice(ctx, rows)
+	if err != nil {
+		recordRun(ctx, s_db_model.DatasetNodePrice, date, s_db_model.FetchStatusFailed,
+			"", 0, rowsExpectedNodePrice, err)
+		return 0, err
+	}
+	recordRun(ctx, s_db_model.DatasetNodePrice, date, s_db_model.FetchStatusOK,
+		"", n, rowsExpectedNodePrice, nil)
+	return n, nil
 }
 
 // BackfillNodePrice 回补最近 N 天的地市节点价（T+0 口径，含当天）。
@@ -332,12 +359,26 @@ func BackfillNodePrice(ctx context.Context, today time.Time, days int) map[strin
 	return out
 }
 
-// sourceLabelOf 供页面角标用（数据行里已经存了 source，这里只是给默认值兜底）
-func sourceLabelOf(source string, fallback string) string {
-	if strings.TrimSpace(source) != "" {
-		return source
+// recordRun 把一次抓取尝试落进 run 表（该表只记「为什么没数」，不影响数据表）。
+//
+// 写失败只记日志、不向上抛：数据已经落库的情况下，因为观测表写不进去
+// 把整轮采集判成失败，是拿副表绑架主流程。
+func recordRun(ctx context.Context, dataset, date, status string, kind collectErrKind,
+	written, expected int, cause error) {
+	row := &s_db_model.SFetchRunModel{
+		TargetDate:   date,
+		Dataset:      dataset,
+		Status:       status,
+		ErrorKind:    string(kind),
+		RowsWritten:  written,
+		RowsExpected: expected,
 	}
-	return fallback
+	if cause != nil {
+		row.LastError = truncate(cause.Error(), maxLastErrorLen)
+	}
+	if _, err := s_db.GetHomeMarketService().RecordFetchRun(ctx, row); err != nil {
+		c_log.Warningf(ctx, "写采集运行记录失败（%s %s）：%+v", dataset, date, err)
+	}
 }
 
 // Home24hWindowDays 把调用方给的回补天数换算成 24 点的窗口。

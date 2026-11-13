@@ -150,6 +150,7 @@ func TestHourOfRejectsBadFormat(t *testing.T) {
 // 返回 nil 会被调度器写成「最近 14 天都没有数据（源站未发布）」，源站故障被记成没发布，
 // 建在这句日志上的告警全是假的。
 func TestCollectHome24hAllFailuresSurfaceClassifiedError(t *testing.T) {
+	newTestDB(t) // 现在每次尝试都会写 run 表
 	withStub(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "blocked", http.StatusBadRequest) // 动态防护的典型形态
 	})
@@ -171,6 +172,7 @@ func TestCollectHome24hAllFailuresSurfaceClassifiedError(t *testing.T) {
 
 // 请求成功且 payload 明确为空：这才是「源站未发布」，返回 nil 且不报错。
 func TestCollectHome24hEmptyPayloadIsNotError(t *testing.T) {
+	newTestDB(t)
 	withStub(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"code":200,"msg":"操作成功！","data":{"details":[]}}`)
 	})

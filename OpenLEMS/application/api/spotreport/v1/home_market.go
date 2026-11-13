@@ -46,3 +46,16 @@ type BackfillHomeMarketRes struct {
 	Home24h     map[string]int `json:"home24h" dc:"24 点：日期 → 写入点数（无数据的日子不出现）"`
 	NodePrice   map[string]int `json:"nodePrice" dc:"地市：日期 → 写入条数"`
 }
+
+// GetHomeMarketStatusReq 两路采集的**状态**（不返回任何数值）。
+//
+// 与 /api/health 分开：一路采集滞后不代表进程不健康，塞进健康检查会让你
+// 因为「源站晚发了一天」而重启一个本来好好的服务。这里给运维页面看
+// 「最新到哪天、滞后几天、上次失败是什么类别」。
+type GetHomeMarketStatusReq struct {
+	g.Meta `path:"/gd-metric/home-market/status" method:"get" tags:"电力市场" summary:"官网主页两路采集状态（滞后/失败/停更/从未入库）" role:"user"`
+}
+
+type GetHomeMarketStatusRes struct {
+	*homemarket.MarketStatus
+}

@@ -48,6 +48,8 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		// 官网主页两路市场数据（24 点分时 / 21 地市节点价），与上面两条都不是一路
 		"GET /api/gd-metric/home-24h",
 		"GET /api/gd-metric/node-price",
+		// 两路采集状态（滞后/失败/停更），只讲能不能用、不给数值；不进 /api/health
+		"GET /api/gd-metric/home-market/status",
 		// 运维补洞：按窗口重跑两路回补（首次启动的自动回补补不了「某天采集失败」的洞）
 		"POST /api/gd-metric/home-market/backfill",
 		// 分时研究（第三方 · 非官方，只读冻结快照）

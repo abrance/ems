@@ -49,6 +49,23 @@ func newTestDB(t *testing.T) *sql.DB {
 			UNIQUE (run_date, city, period_type))`); err != nil {
 		t.Fatalf("建 gd_node_price 失败: %v", err)
 	}
+	// run 表：采集状态用。建表语句与 s_db 的 DDL 保持一致（唯一键只有 target_date+dataset，
+	// 不带 extractor_version —— 这是 C2 与 gd_pm_fetch_run 的关键差别）。
+	if _, err := db.Exec(`
+		CREATE TABLE gd_home_market_fetch_run (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_date VARCHAR(10) NOT NULL, dataset VARCHAR(16) NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT '', error_kind VARCHAR(16) NOT NULL DEFAULT '',
+			rows_written INTEGER NOT NULL DEFAULT 0, rows_expected INTEGER NOT NULL DEFAULT 0,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			consecutive_empties INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP, last_ok_at DATETIME,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (target_date, dataset))`); err != nil {
+		t.Fatalf("建 gd_home_market_fetch_run 失败: %v", err)
+	}
 	db.Close()
 
 	gdb.SetConfig(gdb.Config{

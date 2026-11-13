@@ -59,3 +59,39 @@ type SNodePriceModel struct {
 	Source     string      `json:"source" orm:"source"`
 	UpdatedAt  *gtime.Time `json:"updatedAt" orm:"updated_at,updated_at"`
 }
+
+const (
+	TableFetchRun = "gd_home_market_fetch_run"
+	// DatasetHome24h / DatasetNodePrice 两路的 dataset 名（run 表的键之一）
+	DatasetHome24h   = "home24h"
+	DatasetNodePrice = "nodeprice"
+	// FetchStatusOK 有数并已落库 / FetchStatusEmpty 请求成功但 payload 明确为空 / FetchStatusFailed 请求失败
+	FetchStatusOK     = "ok"
+	FetchStatusEmpty  = "empty"
+	FetchStatusFailed = "failed"
+)
+
+// SFetchRunModel 一次采集尝试（按 target_date + dataset 覆盖，不追加）。
+//
+// 与 gd_home_24h / gd_node_price 分开：数据表是「有没有数」，这张表是「为什么没数」。
+// 失败不写数据表，只写这里 —— 页面显示「暂无数据」，状态端点显示「采集失败[blocked]」。
+//
+// ConsecutiveFailures / ConsecutiveEmpties 是**同一 target_date 的连续次数**（不是全局）。
+// 24 点每轮会探 14 个日期各一次，全局计数在这种探法下没有意义。
+type SFetchRunModel struct {
+	g.Meta              `orm:"table:gd_home_market_fetch_run"`
+	ID                  int64       `json:"id" orm:"id"`
+	TargetDate          string      `json:"targetDate" orm:"target_date"`
+	Dataset             string      `json:"dataset" orm:"dataset"`
+	Status              string      `json:"status" orm:"status"`
+	ErrorKind           string      `json:"errorKind" orm:"error_kind"`
+	RowsWritten         int         `json:"rowsWritten" orm:"rows_written"`
+	RowsExpected        int         `json:"rowsExpected" orm:"rows_expected"`
+	AttemptCount        int         `json:"attemptCount" orm:"attempt_count"`
+	ConsecutiveFailures int         `json:"consecutiveFailures" orm:"consecutive_failures"`
+	ConsecutiveEmpties  int         `json:"consecutiveEmpties" orm:"consecutive_empties"`
+	LastError           string      `json:"lastError" orm:"last_error"`
+	FirstSeenAt         *gtime.Time `json:"firstSeenAt" orm:"first_seen_at"`
+	LastOkAt            *gtime.Time `json:"lastOkAt" orm:"last_ok_at"`
+	UpdatedAt           *gtime.Time `json:"updatedAt" orm:"updated_at,updated_at"`
+}

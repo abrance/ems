@@ -41,7 +41,19 @@ func setupHomeMarketDB(t *testing.T) {
 			run_date VARCHAR(10) NOT NULL, city VARCHAR(32) NOT NULL,
 			period_type INTEGER NOT NULL DEFAULT 1, price REAL NOT NULL DEFAULT 0,
 			source VARCHAR(64) NOT NULL DEFAULT '',
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE (run_date, city, period_type))`} {
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE (run_date, city, period_type))`, `
+		CREATE TABLE gd_home_market_fetch_run (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_date VARCHAR(10) NOT NULL, dataset VARCHAR(16) NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT '', error_kind VARCHAR(16) NOT NULL DEFAULT '',
+			rows_written INTEGER NOT NULL DEFAULT 0, rows_expected INTEGER NOT NULL DEFAULT 0,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			consecutive_empties INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP, last_ok_at DATETIME,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (target_date, dataset))`} {
 		if _, err := g.DB().Exec(ctx, ddl); err != nil {
 			t.Fatalf("建表失败: %v", err)
 		}
@@ -215,5 +227,54 @@ func TestGetHome24hPartialDayOmitsAllDayStats(t *testing.T) {
 		if v, ok := got[k]; ok {
 			t.Fatalf("%s 不该下发（17 点不是全天），实际 %v", k, v)
 		}
+	}
+}
+
+// 状态端点：前端 status 卡片读的字段一个都不能少，且**不能带数值**。
+//
+// 为什么专测「不许带数值」：这个端点的用途是「源站挂了别让页面以为价格是 0」，
+// 一旦有人顺手把 points/price 塞进来，页面就有机会在失败时画出 0 元的曲线。
+func TestGetHomeMarketStatusShape(t *testing.T) {
+	setupHomeMarketDB(t)
+	c := &ControllerV1{}
+	res, err := c.GetHomeMarketStatus(context.Background(), &v1.GetHomeMarketStatusReq{})
+	if err != nil {
+		t.Fatalf("GetHomeMarketStatus 失败: %v", err)
+	}
+	got := jsonShape(t, res)
+
+	for _, ds := range []string{"home24h", "nodePrice"} {
+		raw, ok := got[ds].(map[string]any)
+		if !ok {
+			t.Fatalf("响应缺 %q 段：%v", ds, got)
+		}
+		for _, k := range []string{"dataset", "state", "asOf", "fetchedAt", "lagDays", "rows", "rowsExpected", "lastError", "errorKind"} {
+			if _, ok := raw[k]; !ok {
+				t.Fatalf("%s 缺字段 %q：%v", ds, k, raw)
+			}
+		}
+		// 状态端点只讲「能不能用」，不许出现任何数值字段
+		for _, banned := range []string{"points", "price", "aheadPrice", "realtimePrice"} {
+			if _, ok := raw[banned]; ok {
+				t.Fatalf("%s 不该带数值字段 %q（失败时页面会画出 0）", ds, banned)
+			}
+		}
+	}
+
+	// 这个库里的数据是「有数、没跑过采集」：状态是 ok（滞后在预期内），
+	// 但 fetchedAt 为空、errorKind/error 也为空 —— 与「跑过且成功」区分开。
+	home := got["home24h"].(map[string]any)
+	if home["state"] != "ok" {
+		t.Fatalf("home24h state = %v，期望 ok（24 点齐、滞后在预期内）", home["state"])
+	}
+	if home["dataset"] != "home24h" || home["rows"] != float64(24) || home["rowsExpected"] != float64(24) {
+		t.Fatalf("home24h dataset/rows 错: %v", home)
+	}
+	if home["kind"] != nil {
+		t.Fatalf("多余字段: %v", home)
+	}
+	node := got["nodePrice"].(map[string]any)
+	if node["rows"] != float64(42) || node["rowsExpected"] != float64(42) {
+		t.Fatalf("nodePrice rows = %v/%v，期望 42/42", node["rows"], node["rowsExpected"])
 	}
 }

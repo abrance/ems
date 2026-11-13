@@ -443,6 +443,37 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	// 官网主页两路的采集运行表：接口口径，一天一条路径，所以唯一键只有 (target_date, dataset)。
+	//
+	// 为什么不复用 gd_pm_fetch_run：那张表的唯一键带 extractor_version（OCR 日报口径，
+	// 同一份日报换模型会重跑一行），这里没有「提取器版本」这回事，带上它会退化成
+	// 每次改代码就多一组行，状态判定（最近一次尝试是哪条）立刻失效。
+	//
+	// 失败只写本表、不写数据表：源站挂了页面宁可显示「暂无数据」，也不要写 0 或复制前一日。
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_home_market_fetch_run (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_date VARCHAR(10) NOT NULL,
+			dataset VARCHAR(16) NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT '',
+			error_kind VARCHAR(16) NOT NULL DEFAULT '',
+			rows_written INTEGER NOT NULL DEFAULT 0,
+			rows_expected INTEGER NOT NULL DEFAULT 0,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			consecutive_empties INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_ok_at DATETIME,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (target_date, dataset)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	// 日报核对用的「日报原值」表（OCR 链路 D 的落库目标）。
 	//
 	// 独立于 gd_spot_metric：那张表按「一份日报」成行（唯一键含 report_date），同一运行日
