@@ -1,10 +1,16 @@
 package forecast
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"s_db/s_db_model"
+
+	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 func TestParseGrain(t *testing.T) {
@@ -120,5 +126,180 @@ func TestQuantileAt(t *testing.T) {
 	}
 	if got := quantileAt(nil, "0.1", 0); got != 0 {
 		t.Errorf("nil map 应返回 0，实际 %v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 留痕只写「目标日在生成日之后」的点
+//
+// 线上形态（2026-11-13 快照）：官方日频 T+2，历史止于今天-2，nextDates 从最后一条
+// 历史日 +1 起算 → 前几个预测日的 target_time ≤ generated_on。这些行会被复盘页的
+// IsBackfilledForecast 全部剔除，等于白写；更糟的是它们混在留痕里，让「当时预测」
+// 与「事后补算」两种语义在同一张表里分不开。
+// ---------------------------------------------------------------------------
+
+// 建一张空的 gd_price_forecast，供留痕用例共用。
+func setupForecastTable(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "price-forecast.sqlite3")
+	gdb.SetConfig(gdb.Config{
+		"default": gdb.ConfigGroup{{Type: "sqlite", Link: "sqlite::@file(" + path + ")"}},
+	})
+	t.Cleanup(func() { gdb.SetConfig(gdb.Config{}) })
+
+	if _, err := g.DB().Exec(context.Background(), `
+		CREATE TABLE gd_price_forecast (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			generated_on TEXT NOT NULL,
+			market TEXT NOT NULL,
+			grain TEXT NOT NULL,
+			target_time TEXT NOT NULL,
+			point REAL NOT NULL DEFAULT 0,
+			q10 REAL NOT NULL DEFAULT 0,
+			q50 REAL NOT NULL DEFAULT 0,
+			q90 REAL NOT NULL DEFAULT 0,
+			model TEXT NOT NULL DEFAULT '',
+			unit TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (generated_on, market, grain, target_time)
+		)`); err != nil {
+		t.Fatalf("建表: %v", err)
+	}
+}
+
+// 读回留痕的 (generated_on, target_time) 对，按 target_time 升序。
+func readForecastRows(t *testing.T) [][2]string {
+	t.Helper()
+	rows, err := g.DB().GetAll(context.Background(),
+		`SELECT generated_on, target_time FROM gd_price_forecast ORDER BY target_time`)
+	if err != nil {
+		t.Fatalf("读取留痕: %v", err)
+	}
+	out := make([][2]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, [2]string{r["generated_on"].String(), r["target_time"].String()})
+	}
+	return out
+}
+
+// 线上真实形态：历史止于今天-2（官方 T+2 滞后），day 粒度预测从今天-1 起算。
+// 前两个点（今天-1、今天）的 target ≤ generated_on，必须被跳过；
+// 剩下的每一条都要能被复盘页当「当时预测」用（IsBackfilledForecast == false）。
+func TestRecordForecastPointsSkipsTargetsNotAfterGeneratedOn(t *testing.T) {
+	setupForecastTable(t)
+	ctx := context.Background()
+
+	// generated_on = 2026-11-13，历史止于 2026-11-11
+	generatedOn := "2026-11-13"
+	res := &TPriceForecastResult{
+		Market:      "ahead",
+		Grain:       s_db_model.ForecastGrainDay,
+		Model:       "timesfm-3.0",
+		Unit:        "元/MWh",
+		GeneratedOn: generatedOn,
+		Points: []TPriceForecastPoint{
+			{TargetTime: parseDayTarget("2026-11-12"), Point: 380.1}, // 昨天，剔除
+			{TargetTime: parseDayTarget("2026-11-13"), Point: 385.2}, // 今天，剔除
+			{TargetTime: parseDayTarget("2026-11-14"), Point: 401.3},
+			{TargetTime: parseDayTarget("2026-11-15"), Point: 412.7},
+		},
+	}
+
+	n := recordForecastPoints(ctx, res)
+	if n != 2 {
+		t.Errorf("写入条数 = %d，want 2（只写 target > generated_on 的点）", n)
+	}
+
+	rows := readForecastRows(t)
+	if len(rows) != 2 {
+		t.Fatalf("库里行数 = %d，want 2；实际 %v", len(rows), rows)
+	}
+	for _, r := range rows {
+		generatedOnRow, target := r[0], r[1]
+		if target <= generatedOnRow {
+			t.Errorf("写入了 target_time=%s ≤ generated_on=%s 的留痕行", target, generatedOnRow)
+		}
+		if IsBackfilledForecast(generatedOnRow, target) {
+			t.Errorf("留痕会被复盘剔除: generated_on=%s target_time=%s", generatedOnRow, target)
+		}
+	}
+	// 顺序与内容都要对：剔除的是前两条，留下的正是 11-14 / 11-15
+	if rows[0][1] != "2026-11-14" || rows[1][1] != "2026-11-15" {
+		t.Errorf("留下的目标日 = %v，want [2026-11-14 2026-11-15]", rows)
+	}
+}
+
+// 反向守卫：历史止于今天（预测日全在未来）时一条都不能少。
+// 这条防「过滤写反方向」——把 > 写成 <、或按 >= 过滤未来点。
+func TestRecordForecastPointsKeepsAllFutureTargets(t *testing.T) {
+	setupForecastTable(t)
+	ctx := context.Background()
+
+	generatedOn := "2026-11-13"
+	res := &TPriceForecastResult{
+		Market:      "ahead",
+		Grain:       s_db_model.ForecastGrainDay,
+		Model:       "timesfm-3.0",
+		Unit:        "元/MWh",
+		GeneratedOn: generatedOn,
+		Points: []TPriceForecastPoint{
+			{TargetTime: parseDayTarget("2026-11-14"), Point: 401.3},
+			{TargetTime: parseDayTarget("2026-11-15"), Point: 412.7},
+			{TargetTime: parseDayTarget("2026-11-16"), Point: 398.4},
+		},
+	}
+
+	if n := recordForecastPoints(ctx, res); n != 3 {
+		t.Errorf("写入条数 = %d，want 3（全在未来，不应被过滤）", n)
+	}
+	rows := readForecastRows(t)
+	if len(rows) != 3 {
+		t.Fatalf("库里行数 = %d，want 3；实际 %v", len(rows), rows)
+	}
+	want := []string{"2026-11-14", "2026-11-15", "2026-11-16"}
+	for i, w := range want {
+		if rows[i][1] != w {
+			t.Errorf("第 %d 条 target = %s，want %s", i, rows[i][1], w)
+		}
+	}
+}
+
+// intraday 的目标时刻带时分，但 generated_on 只有日期精度（当天生成不记录时刻），
+// 所以判据和 day 粒度一样只比日期部分，与复盘页 IsBackfilledForecast 同源。
+// 后果：当天生成的 intraday 点即使时分已过，也仍算「当时预测」留痕 —— 复盘页同样不剔它。
+// 要做到分钟级过滤，generated_on 必须带时间戳（新列），不在本次范围。
+func TestRecordForecastPointsIntradayKeepsSameDayButDropsStaleDays(t *testing.T) {
+	setupForecastTable(t)
+	ctx := context.Background()
+
+	loc := priceLocation()
+	generatedOn := "2026-11-13"
+	res := &TPriceForecastResult{
+		Market:      "real",
+		Grain:       s_db_model.ForecastGrainIntraday,
+		Model:       "timesfm-3.0",
+		Unit:        "元/MWh",
+		GeneratedOn: generatedOn,
+		Points: []TPriceForecastPoint{
+			{TargetTime: time.Date(2026, 11, 11, 23, 45, 0, 0, loc), Point: 1}, // 早于生成日，剔
+			{TargetTime: time.Date(2026, 11, 13, 0, 15, 0, 0, loc), Point: 2},  // 当日，留
+			{TargetTime: time.Date(2026, 11, 13, 23, 45, 0, 0, loc), Point: 3}, // 当日，留
+			{TargetTime: time.Date(2026, 11, 14, 0, 0, 0, 0, loc), Point: 4},   // 次日，留
+		},
+	}
+
+	if n := recordForecastPoints(ctx, res); n != 3 {
+		t.Errorf("写入条数 = %d，want 3（仅剔除早于生成日的那条）", n)
+	}
+	rows := readForecastRows(t)
+	if len(rows) != 3 {
+		t.Fatalf("留痕 = %v，want 3 条", rows)
+	}
+	for _, r := range rows {
+		if IsBackfilledForecast(r[0], r[1]) {
+			t.Errorf("留痕会被复盘剔除: generated_on=%s target_time=%s", r[0], r[1])
+		}
 	}
 }
