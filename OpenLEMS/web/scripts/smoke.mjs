@@ -567,6 +567,38 @@ const FAKE_BACKTEST_RESULT = {
     { targetTime: '2026-09-21 18:00', predicted: 100, actual: 200, q10: 90, q50: 100, q90: 110 },
   ],
 }
+// 日频回测（官方直采真值）：一天一个点。实际 [300,320,340,360,380,400]、
+// 预测 [310,310,350,350,390,380] → 误差 10,10,10,10,10,20
+//   MAE = 70/6 = 11.67 元/MWh
+//   MAPE = (10/300+10/320+10/340+10/360+10/380+20/400)/6 = 3.3015% → 3.30%
+// 真值日期钉在官方 board 的最新运行日 09-21：页面必须报「实际值截至 2026-09-21」。
+const FAKE_BACKTEST_DAY = {
+  market: 'ahead',
+  grain: 'day',
+  unit: '元/兆瓦时',
+  model: 'timesfm-3.0',
+  from: '2026-09-16',
+  to: '2026-09-21',
+  sampleDays: 1,
+  historyDays: 60,
+  targetDates: ['2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20', '2026-09-21'],
+  skipped: null,
+  actualMissing: 0,
+  timeMs: 3120,
+  dataAsOf: '2026-09-21',
+  lagDays: 2,
+  stale: false,
+  truthSource: 'gd_spot_metric（官方直采，发电侧加权平均电价）',
+  points: [
+    { targetTime: '2026-09-16', predicted: 310, actual: 300, q10: 290, q50: 310, q90: 330 },
+    { targetTime: '2026-09-17', predicted: 310, actual: 320, q10: 290, q50: 310, q90: 330 },
+    { targetTime: '2026-09-18', predicted: 350, actual: 340, q10: 330, q50: 350, q90: 370 },
+    { targetTime: '2026-09-19', predicted: 350, actual: 360, q10: 330, q50: 350, q90: 370 },
+    { targetTime: '2026-09-20', predicted: 390, actual: 380, q10: 370, q50: 390, q90: 410 },
+    { targetTime: '2026-09-21', predicted: 380, actual: 400, q10: 360, q50: 380, q90: 400 },
+  ],
+}
+
 // 留痕：只有预测这一条腿，实际值由 /api/gd-metric/series 配对
 const FAKE_RECORDED = {
   generatedDates: ['2026-09-19', '2026-09-20'],
@@ -994,7 +1026,10 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/forecast/recorded')) {
     return json(u.includes('grain=day') ? FAKE_RECORDED_DAY : FAKE_RECORDED)
   }
-  if (u.includes('/api/forecast/backtest')) return json(FAKE_BACKTEST_RESULT)
+  if (u.includes('/api/forecast/backtest')) {
+    // 粒度决定返回哪个夹具：日频一天一点，96 点是分时
+    return json(u.includes('grain=day') ? FAKE_BACKTEST_DAY : FAKE_BACKTEST_RESULT)
+  }
   if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
   if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
@@ -2278,20 +2313,43 @@ await clickTo('场景', '预测复盘')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('事后回测'))
-  check(bodyHas('回测：用') || bodyHas('用**当前模型**在历史数据上重跑'), '回测模式显式声明「不是当时预测」')
 
-  // 默认区间必须锚到「数据最新日」（夹具里 gd-metric 的 latestDate=2026-09-21），
-  // 否则「今天往前 7 天」整段落在数据之外 → 线上就是这么报
-  // 「区间 ... 内没有完整（96 点）的日前电价数据」的。
-  const btCall = requests.filter((r) => r.url.includes('/api/forecast/backtest')).pop()
+  // 默认腿 = 官方日频（2026-11-13 定）：请求带 grain=day，区间锚到官方 board 最新运行日，
+  // 且不带 allowStale —— 新鲜数据不该无脑穿透陈旧阈值，阈值是给「真值断了」用的。
+  const dayCall = requests.filter((r) => r.url.includes('/api/forecast/backtest')).pop()
+  check(dayCall?.url.includes('grain=day'), '默认走后端日频回测（grain=day）', dayCall?.url ?? '没发请求')
   check(
-    btCall?.url.includes('from=2026-09-15') && btCall?.url.includes('to=2026-09-21'),
-    '回测请求带上锚定后的区间（09-15~09-21，7 天档）',
-    btCall?.url ?? '没发请求',
+    dayCall?.url.includes('from=2026-09-15') && dayCall?.url.includes('to=2026-09-21'),
+    '区间锚到官方最新运行日（09-15~09-21，7 天档）',
+    dayCall?.url ?? '没发请求',
   )
+  check(!dayCall?.url.includes('allowStale'), '新鲜真值不带 allowStale')
 
-  await waitFor(() => bodyHas('对比点数'))
-  // 等数据真的加载完再断言 —— 否则看到的是加载前的占位文案，断言会因为错的原因通过
+  // 诚实性三件套：真值到哪天 / 滞后多少天 / 来源是什么
+  await waitFor(() => bodyHas('实际值截至'))
+  check(bodyHas('实际值截至 2026-09-21'), '写明实际值截至哪天')
+  check(bodyHas('滞后'), '写明滞后天数')
+  check(bodyHas('官方直采'), '写明真值来源是官方直采')
+
+  // 日频一天一个点：KPI 用 MAE/MAPE/天数，不摆 Spearman/峰平谷
+  await waitFor(() => bodyHas('平均绝对百分比误差'))
+  check(bodyHas('对比天数'), '日频给对比天数')
+  check(bodyHas('11.7'), 'MAE = 11.7 元/MWh（手算 70/6）')
+  check(bodyHas('3.30'), 'MAPE = 3.30%（手算）')
+  check(!bodyHas('峰平谷平均离散度'), '日频不显示峰平谷矩阵（一天一个点没有时段可分组）')
+
+  // 96 点那条腿必须显式切换，切了还要自己说「通道已停更」
+  const frozenBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim().includes('96 点'))
+  check(!!frozenBtn, '有「96 点 · 冻结」显式入口')
+  frozenBtn.click()
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/forecast/backtest')).pop()?.url.includes('grain=intraday'))
+  const intradayCall = requests.filter((r) => r.url.includes('/api/forecast/backtest')).pop()
+  check(intradayCall.url.includes('grain=intraday'), '切到 96 点带 grain=intraday', intradayCall.url)
+  check(intradayCall.url.includes('allowStale=true'), '96 点冻结通道显式 allowStale=true', intradayCall.url)
+  await waitFor(() => bodyHas('已停更'))
+  check(bodyHas('已停更'), '96 点腿显示「真值通道已停更」')
+  check(bodyHas('第三方 · 非官方'), '96 点腿打「第三方 · 非官方」角标（过渡态不许冒充官方）')
+
   await waitFor(() => /对比点数[\s\S]{0,80}>?\s*4/.test(doc.body.textContent ?? ''))
   check(bodyHas('4'), '对比点数 4')
   check(bodyHas('2 天') || bodyHas('2 个自然日'), '覆盖 2 个自然日')
@@ -2301,10 +2359,6 @@ await clickTo('场景', '预测复盘')
   //   实际 [100,100,200,200] → 秩 [1.5, 1.5, 3.5, 3.5]
   //   num = 3, dx = 4.5, dy = 4 → ρ = 3 / √18 = 0.7071
   await waitFor(() => bodyHas('0.707'))
-  // 时段来自电价夹具：00-08 谷 / 08-13 峰 / 13-20 平 / 20-24 谷
-  //   四个点 → 谷×2（09-20 00:00、06:00）、峰×1（09-21 12:00）、平×1（09-21 18:00）
-  //   三个分段都 <3 点 → ρ 必须是「—样本不足」，不能是 0（0 会被读成「不相关」）
-  //   全天 4 点 → 手算 ρ = 3/√18 = 0.707
   const rhoMatrix = [...doc.querySelectorAll('.matrix')][0]
   const rhoRow = [...rhoMatrix.querySelectorAll('.num')].slice(0, 4).map((c) => c.textContent.replace(/\s+/g, '').trim())
   check(rhoRow.slice(0, 3).every((t) => t === '—样本不足'), '分段样本 <3 时 ρ 显示「—」并说明样本不足', JSON.stringify(rhoRow))
@@ -2314,30 +2368,12 @@ await clickTo('场景', '预测复盘')
   // |100-100|/100=0, |90-100|/100=0.1, |110-200|/200=0.45, |100-200|/200=0.5 → 平均 0.2625
   const pctCells = [...doc.querySelectorAll('.matrix')][1].querySelectorAll('.num')
   const allPct = [...pctCells].map((c) => c.textContent.trim()).find((t) => t.startsWith('0.26'))
-  check(!!allPct, `全天平均离散度 = 0.2625（分母为当日均价）`, [...pctCells].map((c) => c.textContent.trim()).join('|'))
-  // MAE: (0+10+90+100)/4 = 50
+  check(!!allPct, '全天平均离散度 = 0.2625（分母为当日均价）', [...pctCells].map((c) => c.textContent.trim()).join('|'))
   check([...pctCells].some((c) => c.textContent.trim() === '50.0'), '全天 MAE = 50.0 元/MWh')
-  // 分段离散度（分母都是当日均价）：
-  //   谷（09-20 00:00、06:00，当日均价 100）→ mean(0, 0.1) = 0.05
-  //   峰（09-21 12:00，当日均价 200）→ 0.45
-  //   平（09-21 18:00，当日均价 200）→ 0.5
   const pctRow = [...pctCells].slice(0, 4).map((c) => c.textContent.trim())
   check(pctRow[0] === '0.450', '峰平均离散度 = 0.450', JSON.stringify(pctRow))
   check(pctRow[1] === '0.500', '平平均离散度 = 0.500', JSON.stringify(pctRow))
   check(pctRow[2] === '0.050', '谷平均离散度 = 0.050', JSON.stringify(pctRow))
-
-  // 切到留痕模式：走 /recorded + /gd-metric/series 配对
-  const recBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '留痕对账')
-  recBtn.click()
-  await waitFor(() => requests.some((r) => r.url.includes('/api/forecast/recorded')))
-  check(requests.some((r) => r.url.includes('/api/forecast/recorded')), '留痕模式请求 /forecast/recorded')
-  await waitFor(() => requests.some((r) => r.url.includes('/api/gd-metric/series')))
-  const seriesCall = requests.filter((r) => r.url.includes('/api/gd-metric/series')).pop()
-  check(seriesCall.url.includes('kind=dayAhead'), '实际值按市场选 kind', seriesCall.url)
-  // 等**文本**而不是等请求：sourceNote 是在那次请求 resolve 之后才赋值的，
-  // 只等「请求已发出」会在状态更新前就断言（之前通过属于运气好）。
-  await waitFor(() => bodyHas('留痕：'), 800)
-  check(bodyHas('留痕：'), '留痕模式显式声明「当时发出的预测」')
 
   // 逐点离散度切标幺/数值
   const absBtn = [...doc.querySelectorAll('.panel-head .radio-group button')].find((b) => b.textContent.trim() === '数值')
@@ -2346,9 +2382,37 @@ await clickTo('场景', '预测复盘')
   await tick()
   check(bodyHas('数值（元/MWh）'), '切到数值模式')
 
-  // 口径说明必须在页面上，公式不藏在代码里
+  // 切到留痕模式：留痕只有预测这条腿，实际值来自冻结通道 → 请求必须显式 allowFrozen
+  // 注意：这一页之前可能已经有别的页面发过 /gd-metric/series，所以按「新增请求数」等，
+  // 不能用「列表里出现过」当条件（会立刻成立，然后在页面还 loading 时就断言）。
+  const seriesBefore = requests.filter((r) => r.url.includes('/api/gd-metric/series')).length
+  const recordedBefore = requests.filter((r) => r.url.includes('/api/forecast/recorded')).length
+  const recBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '留痕对账')
+  recBtn.click()
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/forecast/recorded')).length > recordedBefore)
+  check(requests.filter((r) => r.url.includes('/api/forecast/recorded')).length > recordedBefore, '留痕模式请求 /forecast/recorded')
+  await waitFor(() => requests.filter((r) => r.url.includes('/api/gd-metric/series')).length > seriesBefore)
+  const seriesCalls = requests.filter((r) => r.url.includes('/api/gd-metric/series')).slice(seriesBefore)
+  const seriesCall = seriesCalls[seriesCalls.length - 1] ?? { url: '没发请求' }
+  check(seriesCall.url.includes('kind=dayAhead'), '实际值按市场选 kind', seriesCall.url)
+  // 留痕腿的实际值只存在于冻结通道：请求必须显式 allowFrozen，不能靠后端「猜到」
+  check(
+    seriesCalls.some((r) => r.url.includes('allowFrozen=true')),
+    '实际值来自冻结通道时显式 allowFrozen=true',
+    seriesCalls.map((r) => r.url).join(' | '),
+  )
+  // 等页面真的算完：loading 文案消失、样本数出现在页面上
+  await waitFor(() => bodyHas('样本') && !bodyHas('计算中…'))
+  check(bodyHas('样本 2 个点'), '留痕写明样本点数', (doc.body.textContent ?? '').slice(0, 0))
+  check(bodyHas('2026-09-20'), '留痕写明覆盖的目标时刻')
+  await waitFor(() => bodyHas('留痕：'), 1500)
+  check(bodyHas('留痕：'), '留痕模式显式声明「当时发出的预测」')
+
+  // 口径说明必须在页面上，公式与来源不藏在代码里
   check(bodyHas('Spearman'), '口径说明写明用 Spearman')
   check(bodyHas('当日出清均价'), '口径说明写明分母')
+  check(bodyHas('真值来源'), '口径说明写明真值来源（官方/已停更通道）')
+  check(bodyHas('as-of'), '口径说明写明 as-of 语义')
 }
 
 console.log('\n== 策略反演页 ==')

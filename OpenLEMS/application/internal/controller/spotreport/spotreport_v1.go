@@ -219,8 +219,16 @@ func (c *ControllerV1) GetGdMetric(ctx context.Context, req *v1.GetGdMetricReq) 
 			return nil, gerror.NewCode(gcode.CodeInvalidParameter, "日期格式无效")
 		}
 	}
+	// 这个快照接口读的是已停更的第三方通道：日频一律走官方（/api/spot-market/board），
+	// 只有显式 allowFrozen 才返回冻结的历史演示数据。
 	snap, err := gdmetric.GetSnapshot(ctx, req.From, req.To, req.Date)
+	if gdmetric.IsChannelRetired(err) && req.AllowFrozen {
+		snap, err = gdmetric.GetFrozenSnapshot(ctx, req.From, req.To, req.Date)
+	}
 	if err != nil {
+		if gdmetric.IsChannelRetired(err) {
+			return nil, gerror.NewCode(gcode.CodeInternalError, err.Error())
+		}
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "加载电网日指标失败")
 	}
 	return &v1.GetGdMetricRes{Snapshot: snap}, nil

@@ -72,6 +72,15 @@ qiniu:
 # 只有日频与月频年频，没有 96 点分时。默认 true（历史行为）。
 gd_metric:
   enabled: false
+  # 过渡开关（2026-11-13）：这个通道已经**不是**市场数据的权威来源，官方日频走
+  # gd_spot_metric（origin=pm-api）。但 96 点分时是实时电价预测的输入（实时价+日前价+负荷
+  # 三通道），官方披露没有这个粒度，所以代码与数据都保留。
+  #
+  # false（当前）= 默认入口一律拒绝（logic/gdmetric 的守卫），页面/接口会明确报
+  #   「第三方分时通道已停更，实际值止于 2026-10-02」，不会静默返回旧区间。
+  # true = 允许默认入口读本地缓存（不联网、不补齐），页面必须带「第三方 · 非官方」角标。
+  #   恢复采集另需抓取脚本与免登录 check（tools/gd-spot），见 docs/data-source-matrix.md。
+  serve_frozen: false
   url: "https://file.xiaoyxq.top/gd_metric.csv"
   cache_path: "out/gd_metric.csv"
   refresh_hours: 6

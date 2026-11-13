@@ -1,6 +1,9 @@
 package v1
 
-import "github.com/gogf/gf/v2/frame/g"
+import (
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/frame/g"
+)
 
 // GetRecordedForecastReq 读取预测留痕
 type GetRecordedForecastReq struct {
@@ -34,10 +37,15 @@ type GetRecordedForecastRes struct {
 type GetPriceBacktestReq struct {
 	g.Meta       `path:"/forecast/backtest" method:"get" tags:"电价预测" summary:"电价预测回测（用当前模型在历史数据上重跑）" role:"user"`
 	Market       string `json:"market" dc:"ahead（默认）/ real"`
+	// Grain day（默认，官方日频日均价）/ intraday（96 点，真值来自已停更的第三方 CSV，仅历史演示）
+	Grain        string `json:"grain" dc:"day（默认）/ intraday"`
 	From         string `json:"from" v:"required" dc:"目标日起点 YYYY-MM-DD"`
 	To           string `json:"to" v:"required" dc:"目标日终点 YYYY-MM-DD"`
 	SampleDays   int    `json:"sampleDays" dc:"抽样间隔天数，默认 3"`
 	ForceRefresh bool   `json:"forceRefresh" dc:"跳过缓存，手动刷新用"`
+	// AllowStale 实际值滞后超过阈值时仍要结果。不传就报错（带明确滞后天数），
+	// 避免页面/脚本拿几周前的真值算出一个看着像「最近表现」的数字。
+	AllowStale bool `json:"allowStale" dc:"实际值滞后超阈值时仍返回历史区间结果"`
 }
 
 // BacktestPoint 一个目标时刻的预实对比
@@ -62,7 +70,20 @@ type GetPriceBacktestRes struct {
 	TargetDates []string         `json:"targetDates" dc:"实际参与回测的目标日"`
 	Skipped     []string         `json:"skipped" dc:"因数据不足跳过的日期"`
 	Points      []*BacktestPoint `json:"points"`
+	// HistoryDays 每次 as-of 预测送入模型的历史天数（day 粒度有意义）
+	HistoryDays int `json:"historyDays"`
 	// ActualMissing 因该时刻没有实际值而丢弃的预测点数（按时间戳配对配不上的）
 	ActualMissing int     `json:"actualMissing"`
 	TimeMs        float64 `json:"timeMs" dc:"推理总耗时（毫秒）"`
+	// DataAsOf 本次用到的实际值最新日期；LagDays 该日期距今天数；
+	// Stale=true 表示滞后超阈值，结果只能代表历史，页面必须明确告知。
+	DataAsOf    string `json:"dataAsOf" dc:"实际值最新日期 YYYY-MM-DD"`
+	LagDays     int    `json:"lagDays" dc:"实际值滞后天数"`
+	Stale       bool   `json:"stale" dc:"实际值滞后超过阈值"`
+	TruthSource string `json:"truthSource" dc:"真值来源说明，页面原样展示"`
 }
+
+// CodePriceTruthStale 回测真值滞后超阈值（服务端不静默返回旧区间）。
+//
+// 单独一个码，前端据此区分「数据陈旧，要不要看历史区间」和普通失败（不必按文本猜）。
+var CodePriceTruthStale = gcode.New(6001, "电价数据陈旧", nil)

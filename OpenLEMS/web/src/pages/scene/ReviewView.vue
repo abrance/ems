@@ -3,13 +3,15 @@ import { computed, onMounted, ref } from 'vue'
 import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
 import KpiCard from '@/components/KpiCard.vue'
+import { ApiError } from '@/api/client'
 import {
   fetchPriceBacktest,
   fetchRecordedForecast,
   type BacktestPoint,
   type RecordedForecastPoint,
 } from '@/api/forecast'
-import { fetchGdMetric, fetchMetricSeries, isRealSource } from '@/api/gdmetric'
+import { fetchMetricSeries, isRealSource } from '@/api/gdmetric'
+import { fetchSpotMarketBoard } from '@/api/spotmarket'
 import { fetchCurrentPrice } from '@/api/price'
 import {
   buildSegmentLookup,
@@ -21,7 +23,7 @@ import {
   type Segment,
   type SegmentRange,
 } from '@/metrics/forecast'
-import { anchorEndDate, rangeEndingAt } from '@/utils/latestRange'
+import { anchorEndDate, lagDaysFrom, rangeEndingAt } from '@/utils/latestRange'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
 /**
@@ -32,9 +34,15 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  *   事后回测 —— **用现在的模型**在历史数据上重跑 vs 实际。立刻能看，
  *               但模型或历史数据一变数字就变，不等于当时预测。
  *
+ * 数据源（2026-11-13 定）：真值一律走官方直采（gd_spot_metric，日均加权价）。
+ * 96 点分时只存在于已停更的第三方 CSV，默认不展示；要看得显式切到「96 点（冻结）」，
+ * 并自己承担「数据止于 2026-10-02」这件事 —— 页面会把日期写在脸上。
+ *
  * 指标口径见 metrics/forecast.ts：Spearman ρ、离散度分母=当日均价、峰平谷取自电价管理。
  */
 type Source = 'recorded' | 'backtest'
+/** day = 官方日频日均价（默认）；intraday = 冻结的 96 点（历史演示） */
+type Grain = 'day' | 'intraday'
 
 const PRESETS = [
   { v: '7', t: '近 7 天', days: 6 },
@@ -42,20 +50,47 @@ const PRESETS = [
   { v: '30', t: '近 30 天', days: 29 },
 ]
 
+/** 后端停更错误码（api/forecast/v1.CodePriceTruthStale） */
+const CODE_STALE = 6001
+
 const source = ref<Source>('backtest')
+const grain = ref<Grain>('day')
 const market = ref('ahead')
 const preset = ref('7')
 const from = ref('')
 const to = ref('')
 
+/** 官方真值最新运行日（GET /api/spot-market/board 的 lastDate） */
+const officialLastDate = ref<string | null>(null)
+/** 冻结的 96 点通道实际值止于哪天（后端停更错误里给，取不到用现场核对值） */
+const frozenAsOf = ref('2026-10-02')
+
 const pairs = ref<PairedPoint[]>([])
 const loading = ref(false)
 const error = ref('')
+/** 真值滞后超阈值时后端返回的原文（6001），页面据此给出「仍要查看」 */
+const staleNotice = ref('')
+const staleBlocked = ref(false)
+const forceStale = ref(false)
 const sourceNote = ref('')
-const backtestMeta = ref<{ model: string; sampleDays: number; targetDates: string[]; skipped: string[]; actualMissing: number; timeMs: number } | null>(null)
-const recordedMeta = ref<{ generatedDates: string[] } | null>(null)
+const backtestMeta = ref<{
+  model: string
+  grain: string
+  sampleDays: number
+  targetDates: string[]
+  skipped: string[]
+  actualMissing: number
+  timeMs: number
+  dataAsOf: string
+  lagDays: number
+  stale: boolean
+  truthSource: string
+  historyDays: number
+} | null>(null)
+const recordedMeta = ref<{ generatedDates: string[]; from: string; to: string; count: number } | null>(null)
+/** 留痕腿取实际值失败的原因（通常是 96 点通道停更） */
+const recordedActualUnavailable = ref('')
 
-/** CSV 里的 sourceId：999 = 电查查预测占位（该时刻实际值还没出），9 = 广东电力交易中心实际值 */
 /** 区间内被剔掉的占位/来源不明点数（留痕那条腿按时间戳取实际值时统计） */
 const placeholderDropped = ref(0)
 
@@ -63,15 +98,20 @@ const placeholderDropped = ref(0)
 const lookup = ref<(m: number) => Segment | null>(() => null)
 const segmentConfigured = ref(false)
 
-/** 数据最新日：优先用**有实际值**的那天（latestDate 之后往往只有电查查预测占位） */
-const latestDataDate = ref<string | null>(null)
-/** CSV 最新日（可能只有预测占位），用来提示「实际值缺到哪天」 */
-const latestAnyDate = ref<string | null>(null)
+/** 日频回测：1 个点/天，峰平谷矩阵与逐点离散度都失去意义，改用 MAE/MAPE */
+const isDayGrain = computed(() => source.value === 'backtest' && grain.value === 'day')
+
+/** 页面上要显示的「真值截至哪天」 */
+const truthAsOf = computed(() => {
+  if (isDayGrain.value) return backtestMeta.value?.dataAsOf || officialLastDate.value || ''
+  return backtestMeta.value?.dataAsOf || frozenAsOf.value
+})
+const lagDays = computed(() => (truthAsOf.value ? lagDaysFrom(truthAsOf.value) : null))
 
 function applyPreset() {
-  // 右端锚到「数据最新日」而不是今天：数据常滞后一个多月，
-  // 今天往前 7 天的区间会整段落在数据之外 → 回测直接报「没有完整 96 点数据」
-  const end = anchorEndDate(latestDataDate.value)
+  // 右端锚到「真值最新日」而不是今天：数据滞后时，「今天往前 7 天」会整段落在数据之外。
+  // 日频用官方最新运行日；96 点用冻结通道的最后一天（它不会再有新数据）。
+  const end = isDayGrain.value ? anchorEndDate(officialLastDate.value) : anchorEndDate(frozenAsOf.value)
   const days = PRESETS.find((p) => p.v === preset.value)?.days ?? 6
   const r = rangeEndingAt(end, days)
   from.value = r.from
@@ -101,38 +141,114 @@ async function loadSegments() {
 /**
  * 留痕 -> 与同区间的实际 96 点序列配对。
  * 只有时刻能对上的点才进入指标计算 —— 对不上就丢弃，不硬凑（硬凑出来的 ρ 没有意义）。
+ *
+ * 实际值来自冻结通道：请求必然带 allowFrozen，并且失败时把原因说出来，
+ * 而不是显示「0 个点」让人以为「本来就没有」。
  */
 async function pairRecordedWithActual(points: RecordedForecastPoint[]): Promise<PairedPoint[]> {
   if (!points.length) return []
   const days = [...new Set(points.map((p) => p.targetTime.slice(0, 10)))].sort()
-  const series = await fetchMetricSeries({
-    from: days[0],
-    to: days[days.length - 1],
-    kind: market.value === 'real' ? 'realtime' : 'dayAhead',
-  })
-  // 电查查预测占位（999）与来源不明（0）都不是实际值，拿它当基准比出来的是「两个模型差多少」→ 剔除
-  const real = series.points.filter((s) => isRealSource(s.sourceId))
-  placeholderDropped.value = series.points.length - real.length
-  // 实际值按 "YYYY-MM-DD HH:MM" 建索引；CSV 的 24:00 归次日 00:00，与目标时刻的生成口径一致
-  const byKey = new Map<string, number>()
-  for (const s of real) {
-    const clock = s.time === '24:00' ? '00:00' : s.time
-    const day = s.time === '24:00' ? nextDay(s.date) : s.date
-    byKey.set(`${day} ${clock}`, s.value)
+  try {
+    const series = await fetchMetricSeries({
+      from: days[0],
+      to: days[days.length - 1],
+      kind: market.value === 'real' ? 'realtime' : 'dayAhead',
+      allowFrozen: true,
+    })
+    // 电查查预测占位（999）与来源不明（0）都不是实际值，拿它当基准比出来的是「两个模型差多少」→ 剔除
+    const real = series.points.filter((s) => isRealSource(s.sourceId))
+    placeholderDropped.value = series.points.length - real.length
+    const byKey = new Map<string, number>()
+    for (const s of real) {
+      const clock = s.time === '24:00' ? '00:00' : s.time
+      const day = s.time === '24:00' ? nextDay(s.date) : s.date
+      byKey.set(`${day} ${clock}`, s.value)
+    }
+    return points
+      .map((p) => ({
+        targetTime: p.targetTime,
+        predicted: p.point,
+        actual: byKey.get(p.targetTime) ?? NaN,
+      }))
+      .filter((p) => Number.isFinite(p.actual))
+  } catch (err) {
+    recordedActualUnavailable.value = err instanceof Error ? err.message : '实际值读取失败'
+    return []
   }
-  return points
-    .map((p) => ({
-      targetTime: p.targetTime,
-      predicted: p.point,
-      actual: byKey.get(p.targetTime) ?? NaN,
-    }))
-    .filter((p) => Number.isFinite(p.actual))
 }
 
 function nextDay(date: string): string {
   const d = new Date(`${date}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + 1)
   return d.toISOString().slice(0, 10)
+}
+
+async function loadBacktest() {
+  const day = isDayGrain.value
+  try {
+    const bt = await fetchPriceBacktest({
+      market: market.value,
+      grain: day ? 'day' : 'intraday',
+      from: from.value,
+      to: to.value,
+      // 日频：一天一点，抽满 7 天也只要 7 次推理；96 点：每点一天 96 次配对，间隔抽样
+      sampleDays: day ? 1 : 3,
+      allowStale: day ? forceStale.value || undefined : true,
+    })
+    pairs.value = bt.points.map((p: BacktestPoint) => ({
+      targetTime: p.targetTime,
+      predicted: p.predicted,
+      actual: p.actual,
+    }))
+    backtestMeta.value = {
+      model: bt.model,
+      grain: bt.grain,
+      sampleDays: bt.sampleDays,
+      targetDates: bt.targetDates,
+      skipped: bt.skipped,
+      actualMissing: bt.actualMissing ?? 0,
+      timeMs: bt.timeMs,
+      dataAsOf: bt.dataAsOf ?? '',
+      lagDays: bt.lagDays ?? -1,
+      stale: bt.stale ?? false,
+      truthSource: bt.truthSource ?? '',
+      historyDays: bt.historyDays ?? 0,
+    }
+    staleNotice.value = ''
+    staleBlocked.value = false
+    sourceNote.value = day
+      ? '回测：用**当前模型**、只用目标日之前的历史，在官方日均价上重跑。模型或历史数据一变，数字就变。'
+      : '分时回测（历史演示）：真值来自已停更的第三方通道，只会给出 2026-10-02 之前的区间。'
+  } catch (err) {
+    // 真值滞后超阈值：后端拒绝在旧区间上算数字。这里不是「失败」，是「要不要看历史」的选择。
+    if (err instanceof ApiError && err.code === CODE_STALE) {
+      staleNotice.value = err.message
+      staleBlocked.value = !forceStale.value
+      pairs.value = []
+      backtestMeta.value = null
+      return
+    }
+    throw err
+  }
+}
+
+async function loadRecorded() {
+  const rec = await fetchRecordedForecast({
+    market: market.value,
+    grain: 'intraday',
+    from: `${from.value} 00:00`,
+    to: `${to.value} 23:59`,
+  })
+  pairs.value = await pairRecordedWithActual(rec.points)
+  const times = rec.points.map((p) => p.targetTime).sort()
+  recordedMeta.value = {
+    generatedDates: rec.generatedDates,
+    from: times[0] ?? '',
+    to: times[times.length - 1] ?? '',
+    count: rec.points.length,
+  }
+  sourceNote.value =
+    '留痕：**当时**发出去的预测。这是真复盘，但留痕从启用之日起才开始积累。'
 }
 
 async function load() {
@@ -142,41 +258,13 @@ async function load() {
   sourceNote.value = ''
   backtestMeta.value = null
   recordedMeta.value = null
+  staleNotice.value = ''
+  staleBlocked.value = false
   placeholderDropped.value = 0
+  recordedActualUnavailable.value = ''
   try {
-    if (source.value === 'backtest') {
-      // 回测按「目标日」抽样，区间用日期
-      const bt = await fetchPriceBacktest({ market: market.value, from: from.value, to: to.value, sampleDays: 3 })
-      pairs.value = bt.points.map((p: BacktestPoint) => ({
-        targetTime: p.targetTime,
-        predicted: p.predicted,
-        actual: p.actual,
-      }))
-      backtestMeta.value = {
-        model: bt.model,
-        sampleDays: bt.sampleDays,
-        targetDates: bt.targetDates,
-        skipped: bt.skipped,
-        actualMissing: bt.actualMissing ?? 0,
-        timeMs: bt.timeMs,
-      }
-      sourceNote.value =
-        '回测：用**当前模型**在历史数据上重跑，不是当时发出去的预测。模型或历史数据一变，数字就变。'
-    } else {
-      // 留痕按目标时刻，intraday 要带时间
-      const rec = await fetchRecordedForecast({
-        market: market.value,
-        grain: 'intraday',
-        from: `${from.value} 00:00`,
-        to: `${to.value} 23:59`,
-      })
-      // 留痕只有预测这一条腿。实际值要按同样时刻去取 96 点序列才能配对——
-      // 这条路径在下面 loadActualForRecorded() 里补，配对不上的点不计入指标。
-      pairs.value = await pairRecordedWithActual(rec.points)
-      recordedMeta.value = { generatedDates: rec.generatedDates }
-      sourceNote.value =
-        '留痕：**当时**发出去的预测。这是真复盘，但留痕从启用之日起才开始积累。'
-    }
+    if (source.value === 'backtest') await loadBacktest()
+    else await loadRecorded()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
   } finally {
@@ -184,10 +272,41 @@ async function load() {
   }
 }
 
+/** 用户明确要看陈旧区间（服务端 6001 之后的自选动作） */
+async function viewStaleAnyway() {
+  forceStale.value = true
+  await load()
+}
+
+function switchGrain(next: Grain) {
+  grain.value = next
+  forceStale.value = false
+  applyPreset()
+  void load()
+}
+
 const disp = computed(() => dispersion(pairs.value.filter((p) => Number.isFinite(p.actual)), lookup.value))
 const stats = computed(() => segmentStats(pairs.value.filter((p) => Number.isFinite(p.actual)), disp.value))
 const overall = computed(() => stats.value.find((s) => s.segment === 'all'))
 const days = computed(() => [...new Set(pairs.value.map((p) => String(p.targetTime).slice(0, 10)))].sort())
+
+/** 日频回测的误差：一天一个点，MAE 与「占当日实际值的比例」才是可比的量 */
+const dayStats = computed(() => {
+  const pts = pairs.value.filter((p) => Number.isFinite(p.actual))
+  if (!pts.length) return { n: 0, mae: NaN, mape: NaN }
+  let abs = 0
+  let pct = 0
+  let pctN = 0
+  for (const p of pts) {
+    const e = Math.abs(p.predicted - p.actual)
+    abs += e
+    if (p.actual !== 0) {
+      pct += e / Math.abs(p.actual)
+      pctN += 1
+    }
+  }
+  return { n: pts.length, mae: abs / pts.length, mape: pctN ? (pct / pctN) * 100 : NaN }
+})
 
 function fmtNum(v: number | null | undefined, digits = 3): string {
   return v == null || !Number.isFinite(v) ? '—' : v.toFixed(digits)
@@ -277,16 +396,12 @@ useECharts(
 )
 
 onMounted(async () => {
-  // 先问一次数据最新到哪天，再定默认区间（拿不到就按今天，不影响可用性）
+  // 先问官方最新运行日，再定默认区间（拿不到就按今天，不影响可用性）
   try {
-    const snap = await fetchGdMetric({})
-    latestAnyDate.value = snap.latestDate ?? null
-    // 区间右端锚到「有实际值的那天」：latestDate 之后常常只有电查查预测占位，
-    // 拿它当右端会得到一个整段算不出准确度的区间
-    latestDataDate.value = snap.latestRealDate || snap.latestDate || null
+    const board = await fetchSpotMarketBoard({ days: 30 })
+    officialLastDate.value = board.date || null
   } catch {
-    latestAnyDate.value = null
-    latestDataDate.value = null
+    officialLastDate.value = null
   }
   applyPreset()
   await loadSegments()
@@ -318,6 +433,14 @@ onMounted(async () => {
             <option value="real">实时</option>
           </select>
         </label>
+        <span v-if="source === 'backtest'" class="radio-group">
+          <button type="button" :class="{ on: grain === 'day' }" @click="switchGrain('day')">
+            日频 · 官方
+          </button>
+          <button type="button" :class="{ on: grain === 'intraday' }" @click="switchGrain('intraday')">
+            96 点 · 冻结
+          </button>
+        </span>
         <span class="radio-group">
           <button
             v-for="p in PRESETS"
@@ -344,37 +467,61 @@ onMounted(async () => {
           <span>　用**当时**发出去的预测与实际比 —— 这才是复盘。但留痕从功能上线之日起才开始积累。</span>
           <template v-if="recordedMeta">
             <span class="muted">
-              （已有生成日 {{ recordedMeta.generatedDates.length }} 天{{
-                recordedMeta.generatedDates.length ? `：${recordedMeta.generatedDates.slice(-3).join('、')}` : ''
+              （样本 {{ recordedMeta.count }} 个点，覆盖 {{ recordedMeta.from || '—' }} ~ {{ recordedMeta.to || '—' }}；
+              生成日 {{ recordedMeta.generatedDates.length }} 天{{
+                recordedMeta.generatedDates.length ? `：${recordedMeta.generatedDates.slice(-3).join('、')}` : '，还没开始积累'
               }}）
             </span>
           </template>
         </template>
-        <template v-else>
-          <strong>事后回测</strong>
+        <template v-else-if="isDayGrain">
+          <strong>事后回测 · 官方日频</strong>
           <span>
-            　用**当前模型**在历史数据上重跑，立刻能看；但模型或历史数据一变数字就变，
-            <strong>不等于当时发出去的预测</strong>。真正复盘请用「留痕对账」。
+            　真值 = 官方直采的<b>发电侧加权平均电价</b>（一天一个价），预测 = 当前模型只用目标日之前的历史重跑。
+            数字会随模型/历史变化，<strong>不等于当时发出去的预测</strong>。
+          </span>
+        </template>
+        <template v-else>
+          <strong>事后回测 · 96 点（冻结）</strong>
+          <span>
+            　这条腿的真值来自<b>已停更</b>的第三方通道，官方披露没有 96 点分时口径。仅供历史演示，
+            不要把这里的数字当成近期表现；要近期数据请切回「日频 · 官方」。
           </span>
         </template>
       </div>
 
-      <div v-if="!segmentConfigured" class="warn">
+      <!-- 诚实性：真值到哪天、滞后多少天，永远显示，不靠用户自己算 -->
+      <div v-if="truthAsOf" class="warn">
+        <strong>实际值截至 {{ truthAsOf }}（滞后 {{ lagDays }} 天）</strong>
+        <span>
+          　来源：{{ backtestMeta?.truthSource || (isDayGrain ? '官方直采（gd_spot_metric）' : '第三方通道（电查查 · 非官方 · T-7）') }}<template
+            v-if="!isDayGrain"
+          >　<span class="badge">第三方 · 非官方</span></template>。
+          区间右端已锚到真值最新那天，所以「近 7 天」指的是 {{ truthAsOf }} 往前 7 天，不是今天往前 7 天。
+        </span>
+      </div>
+
+      <div v-if="staleNotice" class="warn">
+        <strong>真值滞后超出阈值，已拒绝默认回测</strong>
+        <span>　{{ staleNotice }}</span>
+        <button v-if="staleBlocked" class="btn" type="button" @click="viewStaleAnyway">
+          仍要查看该历史区间（不代表近期）
+        </button>
+      </div>
+
+      <div v-if="!segmentConfigured && !isDayGrain" class="warn">
         <strong>峰平谷时段未取到</strong>
         <span>　「管理 · 电价管理」里没有当前生效的时段配置，所有点都归入「全天」。设好时段后回来重看。</span>
       </div>
 
-      <div v-if="latestAnyDate && latestDataDate && latestDataDate < latestAnyDate" class="warn">
-        <strong>实际值只到 {{ latestDataDate }}</strong>
-        <span>
-          　CSV 里 {{ latestDataDate }} 之后（到 {{ latestAnyDate }}）只有<strong>电查查的预测占位</strong>，
-          不是实际出清价 —— 拿它当基准比出来的只是「两个模型差多少」。区间右端已锚到实际值最新那天。
-        </span>
-      </div>
-
       <div v-if="placeholderDropped" class="warn">
         <strong>剔除了 {{ placeholderDropped }} 个无实际值的点</strong>
-        <span>　这些时刻的实际值还没出（CSV 里是电查查预测占位），不计入下面的指标。</span>
+        <span>　这些时刻的实际值还没出（冻结通道里是电查查预测占位），不计入下面的指标。</span>
+      </div>
+
+      <div v-if="recordedActualUnavailable" class="warn">
+        <strong>留痕与实际值配不上</strong>
+        <span>　{{ recordedActualUnavailable }} —— 留痕本身还在，但没有可配对的实际值就不算指标（不硬凑）。</span>
       </div>
     </PanelBox>
 
@@ -386,6 +533,13 @@ onMounted(async () => {
       :foot="backtestMeta ? `模型 ${backtestMeta.model} · 抽样间隔 ${backtestMeta.sampleDays} 天 · 参与回测 ${backtestMeta.targetDates.length} 天${backtestMeta.skipped.length ? ` · 跳过 ${backtestMeta.skipped.length} 天` : ''}${backtestMeta.actualMissing ? ` · ${backtestMeta.actualMissing} 点无实际值已跳过` : ''} · 推理 ${backtestMeta.timeMs.toFixed(0)}ms` : sourceNote || '数据来源：留痕 / 回测'"
     >
       <div class="kpis">
+        <template v-if="isDayGrain">
+          <KpiCard label="平均绝对误差" :value="fmtNum(dayStats.mae, 1)" unit="元/MWh" hint="|预测 − 实际| 的均值（日均价）" />
+          <KpiCard label="平均绝对百分比误差" :value="fmtNum(dayStats.mape, 2)" unit="%" hint="÷ 当日实际均价，负电价日按绝对值取分母" />
+          <KpiCard label="对比天数" :value="dayStats.n" :hint="`目标日 ${backtestMeta?.targetDates.join('、') || '—'}`" />
+          <KpiCard label="真值截至" :value="truthAsOf || '—'" :hint="`滞后 ${lagDays} 天 · ${backtestMeta?.truthSource || '官方直采'}`" />
+        </template>
+        <template v-else>
         <KpiCard
           label="趋势相关度（全天）"
           :value="fmtNum(overall?.rho)"
@@ -399,10 +553,25 @@ onMounted(async () => {
         />
         <KpiCard label="平均绝对误差" :value="fmtNum(overall?.mae, 1)" unit="元/MWh" hint="|预测 − 实际| 的均值" />
         <KpiCard label="对比点数" :value="pairs.length" :hint="`覆盖 ${days.length} 个自然日`" />
+        </template>
       </div>
     </PanelBox>
 
     <PanelBox
+      v-if="isDayGrain"
+      title="为什么没有峰平谷 / 逐点离散度"
+      :span="12"
+      :foot="false"
+    >
+      <div class="empty" style="padding: var(--s4)">
+        官方披露只有<b>日均价</b>（加权平均/最高/最低/申报均价/成交量），没有 96 点分时口径，
+        所以日频回测一天只有一个点：峰平谷分组、逐点离散度、Spearman ρ 在这里没有意义。
+        按月/季看分时形态请用「信息披露」页的官方日频序列；96 点形态只能看冻结的历史演示。
+      </div>
+    </PanelBox>
+
+    <PanelBox
+      v-if="!isDayGrain"
       title="趋势相关度"
       sub="Spearman ρ · 峰 / 平 / 谷 / 全天"
       :span="6"
@@ -425,6 +594,7 @@ onMounted(async () => {
     </PanelBox>
 
     <PanelBox
+      v-if="!isDayGrain"
       title="峰平谷平均离散度"
       sub="|预测 − 实际| ÷ 当日出清均价"
       :span="6"
@@ -445,21 +615,30 @@ onMounted(async () => {
 
     <PanelBox
       title="实际 vs 预测"
-      sub="实际出清价（实线） / 预测（虚线）"
+      :sub="isDayGrain ? '实际日均价（实线） / 预测日均价（虚线）· 一天一个点' : '实际出清价（实线） / 预测（虚线）'"
       :span="12"
       :loading="loading"
-      foot="两条曲线都来自 15 分钟序列；时间轴按目标时刻"
+      :foot="isDayGrain ? '真值 = 官方直采的发电侧加权平均电价；预测 = 目标日之前的历史送入模型的输出' : '两条曲线都来自 15 分钟序列；时间轴按目标时刻'"
     >
       <div v-if="pairs.length" ref="chartEl" class="chart" />
       <div v-else-if="!loading" class="empty">
         <template v-if="source === 'recorded'">
           该区间没有留痕数据。留痕从功能上线之日起记录 —— 今天生成过预测后，明天起这里就有东西可看。
         </template>
-        <template v-else>回测没有产出对比点。可能区间内没有完整（96 点）的实际数据，换个区间再试。</template>
+        <template v-else-if="staleBlocked">
+          真值滞后超出阈值，这里不给数字 —— 上面点「仍要查看该历史区间」才显示。
+        </template>
+        <template v-else-if="isDayGrain">
+          日频回测没有产出对比点。多半是区间内没有官方已确认的实际值（真值截至 {{ truthAsOf || '未知' }}），换个区间再试。
+        </template>
+        <template v-else>
+          回测没有产出对比点。96 点真值只到 {{ frozenAsOf }}，区间落在这之后就没有可配对的实际值。
+        </template>
       </div>
     </PanelBox>
 
     <PanelBox
+      v-if="!isDayGrain"
       title="逐点离散度"
       :sub="dispMode === 'pct' ? '标幺（÷ 当日均价）' : '数值（元/MWh）'"
       :span="12"
@@ -483,6 +662,15 @@ onMounted(async () => {
         <li>
           <strong>峰 / 平 / 谷</strong>：取自「管理 · 电价管理」的时段配置 —— 峰=Peak+Sharp，平=Flat，谷=Valley+DeepValley。
           当前{{ segmentConfigured ? '已取到' : '未取到（全部归入全天）' }}。
+        </li>
+        <li>
+          <strong>真值来源</strong>：日频 = 官方直采（pm.gd.csg.cn 披露接口，
+          <code>gd_spot_metric</code> 的「发电侧日前/实时加权平均电价」）；96 点 = 第三方 CSV，
+          <b>已停更</b>，实际值止于 2026-10-02，只作历史演示。
+        </li>
+        <li>
+          <strong>as-of 回测</strong>：预测目标日 D 时，只把 D-1 及以前的历史送进模型，不用「今天才知道的数据」，
+          这样「当时能拿到的信息 + 现在的模型」才是回测，而不是事后诸葛亮。
         </li>
         <li><strong>回测 ≠ 当时预测</strong>：回测用当前模型重跑历史，数字会随后续模型/数据变化；留痕才是当时真实发出的预测。</li>
         <li>

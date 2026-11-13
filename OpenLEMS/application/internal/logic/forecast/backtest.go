@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"application/internal/logic/gdmetric"
@@ -26,6 +27,15 @@ const (
 	maxBacktestSampleDays     = 30
 	// maxBacktestPoints 回测目标日上限：6 天 ≈ 6 次推理 ≈ 12s，是同步请求能接受的量级
 	maxBacktestPoints = 6
+	// MaxBacktestLagDays 实际值允许的最大滞后天数。
+	//
+	// 为什么要有：真值只有一个来源（gd_metric.csv 第三方快照），它一停更，
+	// 回测就会在几周前的区间上算出一个很漂亮的数字，页面上看不出这是最近几周的，
+	// 读的人自然以为「当前模型最近表现」。超过这个天数就不再默认给结果，
+	// 让调用方显式 opt-in（或改用别的数据源），不静默返回旧区间。
+	MaxBacktestLagDays = 7
+	// priceTruthSourceGD 回测真值的来源标识，随结果下发，页面必须显示它。
+	priceTruthSourceGD = "gd_metric.csv（第三方快照，实际值 sourceId=9）"
 )
 
 // SPriceBacktestPoint 一个目标时刻的「预测 vs 实际」
@@ -53,6 +63,50 @@ type SPriceBacktest struct {
 	// ActualMissing 因该时刻没有实际值而丢弃的预测点数（按时间戳配对配不上的）
 	ActualMissing int
 	TimeMs        float64
+	// DataAsOf 本次回测实际用到的**实际值**最新日期（YYYY-MM-DD）。
+	// 与 To（抽到的目标日）不是一回事：目标日可能比真值还早，真值断了才是关键信息。
+	DataAsOf string
+	// LagDays 实际值最新日期距今的天数（>=0）
+	LagDays int
+	// Stale 滞后超过 MaxBacktestLagDays —— 数字只能代表历史，不代表近期
+	Stale bool
+	// TruthSource 真值来源说明，页面原样显示，避免「数据从哪来的」考猜
+	TruthSource string
+}
+
+// truthFreshness 由实际值最新日期算滞后天数与是否陈旧。
+//
+// 纯函数：单测不依赖网络与当前时钟。dataAsOf 为空 → 不知道有多旧，按陈旧处理
+// （宁可让调用方 opt-in，也不拿「不知道」当「新鲜」）。
+func truthFreshness(dataAsOf string, today time.Time, loc *time.Location) (int, bool) {
+	if strings.TrimSpace(dataAsOf) == "" {
+		return -1, true
+	}
+	asOf, err := time.ParseInLocation(priceDateLayout, dataAsOf, loc)
+	if err != nil {
+		return -1, true
+	}
+	d := today.In(loc)
+	y, m, dd := d.Date()
+	lag := int(time.Date(y, m, dd, 0, 0, 0, 0, loc).Sub(asOf).Hours() / 24)
+	if lag < 0 {
+		lag = 0
+	}
+	return lag, lag > MaxBacktestLagDays
+}
+
+// latestRealDate 实际序列里最新的日期（不是「96 点齐全」的最新日）。
+//
+// 用「有实际值」而不是「96 点齐全」：页面要告诉用户的是「实际出清价截到哪天」，
+// 最后一天少几个点（CSV 常见）不该把这句话说得更旧。
+func latestRealDate(series []gdmetric.TimedSample) string {
+	latest := ""
+	for _, s := range series {
+		if s.Date > latest {
+			latest = s.Date
+		}
+	}
+	return latest
 }
 
 // backtestGroundTruth 从区间序列里挑出「可以当基准真值」的东西：
@@ -150,7 +204,7 @@ func BacktestPriceIntraday(ctx context.Context, market, from, to string, sampleD
 	// 目标日必须真的有**实际值**，所以先拿实际序列来定候选日。
 	// 用 GetRealSeries 而不是 GetSeries：CSV 里最近几天往往只有电查查预测占位（999），
 	// 拿它当基准真值去算准确度，算出来的是「两个模型差多少」，与预测准不准无关。
-	series, err := gdmetric.GetRealSeries(ctx, from, to, kind)
+	series, err := gdmetric.GetFrozenRealSeries(ctx, from, to, kind)
 	if err != nil {
 		return nil, errors.Wrap(err, "读取实际序列失败")
 	}
@@ -175,12 +229,19 @@ func BacktestPriceIntraday(ctx context.Context, market, from, to string, sampleD
 		return nil, errors.New("策略未配置预测服务地址")
 	}
 
+	dataAsOf := latestRealDate(series)
+	lagDays, stale := truthFreshness(dataAsOf, time.Now(), loc)
+
 	out := &SPriceBacktest{
 		Market:      spec.Market,
 		Grain:       "intraday",
 		Unit:        intradayPriceUnit,
 		SampleDays:  sampleDays,
 		TargetDates: sampled,
+		DataAsOf:    dataAsOf,
+		LagDays:     lagDays,
+		Stale:       stale,
+		TruthSource: priceTruthSourceGD,
 	}
 	var totalMs float64
 

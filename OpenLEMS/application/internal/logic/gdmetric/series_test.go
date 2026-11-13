@@ -34,14 +34,14 @@ func TestNormalizeKind(t *testing.T) {
 // 而不是静默返回空序列。
 func TestGetSeriesRejectsBadRange(t *testing.T) {
 	ctx := context.Background()
-	if _, err := GetSeries(ctx, "2026-09-21", "2026-09-01", KindDayAhead); err == nil {
+	if _, err := GetFrozenSeries(ctx, "2026-09-21", "2026-09-01", KindDayAhead); err == nil {
 		t.Error("起止颠倒应报错")
 	}
-	if _, err := GetSeries(ctx, "bad", "2026-09-01", KindDayAhead); err == nil {
+	if _, err := GetFrozenSeries(ctx, "bad", "2026-09-01", KindDayAhead); err == nil {
 		t.Error("起始日期非法应报错")
 	}
 	// 400 天上限：用 609 天（2025-01-01 → 2026-09-01）才越界
-	if _, err := GetSeries(ctx, "2025-01-01", "2026-09-01", KindDayAhead); err == nil {
+	if _, err := GetFrozenSeries(ctx, "2025-01-01", "2026-09-01", KindDayAhead); err == nil {
 		t.Error("超长区间应报错（> MaxSeriesDays）")
 	}
 }
@@ -57,7 +57,7 @@ func TestGetSeriesRealData(t *testing.T) {
 	if !global.localCSVReady() {
 		t.Skip("本地没有 gd_metric.csv 缓存，跳过（不要为跑用例去下载 37MB）")
 	}
-	series, err := GetSeries(ctx, "2026-08-01", "2026-08-03", KindDayAhead)
+	series, err := GetFrozenSeries(ctx, "2026-08-01", "2026-08-03", KindDayAhead)
 	if err != nil {
 		t.Skipf("电网日指标数据不可用，跳过: %v", err)
 	}

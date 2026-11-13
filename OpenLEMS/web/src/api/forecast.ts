@@ -72,6 +72,16 @@ export interface PriceBacktest {
   /** 因该时刻没有实际值而丢弃的预测点数（按时间戳配对配不上的） */
   actualMissing?: number
   timeMs: number
+  /** 每次 as-of 预测送入模型的历史天数（day 粒度） */
+  historyDays?: number
+  /** 本次用到的实际值最新日期（YYYY-MM-DD） */
+  dataAsOf?: string
+  /** 实际值滞后天数；-1 表示拿不到可用日期 */
+  lagDays?: number
+  /** 滞后超阈值：结果只代表历史，不代表近期 */
+  stale?: boolean
+  /** 真值来源说明（页面原样展示，别改写成营销话术） */
+  truthSource?: string
 }
 
 export interface PriceForecast {
@@ -154,7 +164,17 @@ export function fetchRecordedForecast(
 }
 
 export function fetchPriceBacktest(
-  params: { market?: string; from: string; to: string; sampleDays?: number; forceRefresh?: boolean },
+  params: {
+    market?: string
+    /** day（默认，官方日频日均价）/ intraday（96 点，第三方通道已停更，仅历史演示） */
+    grain?: 'day' | 'intraday'
+    from: string
+    to: string
+    sampleDays?: number
+    forceRefresh?: boolean
+    /** 真值滞后超阈值时仍要结果（只有 grain=intraday 的历史演示需要） */
+    allowStale?: boolean
+  },
   signal?: AbortSignal,
 ): Promise<PriceBacktest> {
   // 归一化数组字段：**Go 的 nil 切片序列化成 null**（不是 []），页面里 `.length` 会直接抛，

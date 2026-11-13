@@ -82,8 +82,10 @@ const MARKET_LABEL: Record<string, string> = { ahead: '日前', real: '实时' }
 export const DATASETS: Dataset[] = [
   {
     key: 'grid-metric',
-    title: '电网日指标（96 点）',
-    desc: '负荷或出清价的 15 分钟序列，按区间导出。',
+    title: '电网日指标（96 点 · 已停用）',
+    // 用户硬规则：官方没覆盖的能力不许拿 CSV 假装还能用。官方披露只有日频，
+    // 96 点只剩冻结的历史演示（2026-10-02 前），所以这里直接说明并指向官方导出。
+    desc: '已停用：官方披露没有 96 点分时口径，第三方通道实际值止于 2026-10-02。日频请导出「现货市场日指标」。',
     source: 'GET /api/gd-metric/series',
     params: [
       {
@@ -108,6 +110,7 @@ export const DATASETS: Dataset[] = [
       const kindLabel =
         p.kind === 'load' ? '系统负荷 MW' : p.kind === 'dayAhead' ? '日前出清价 元/MWh' : '实时出清价 元/MWh'
       const res = await fetchMetricSeries({ from: p.from, to: p.to, kind: p.kind })
+      // 关卡在后端：默认入口会返回「通道已停更」的错误，而不是空数组（空的会被读成「这几天没数据」）
       return {
         columns: ['日期', '时刻', '类别', '数值', '来源'],
         rows: res.points.map((s) => [

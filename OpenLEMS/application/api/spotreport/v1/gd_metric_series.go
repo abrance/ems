@@ -12,6 +12,8 @@ type GetGdMetricSeriesReq struct {
 	From   string `json:"from" v:"required" dc:"起始日期 YYYY-MM-DD"`
 	To     string `json:"to" v:"required" dc:"结束日期 YYYY-MM-DD"`
 	Kind   string `json:"kind" dc:"类别：dayAhead(默认) / realtime / load"`
+	// AllowFrozen 显式读取**已停更**的第三方通道（历史演示用）。不传一律报停更错误。
+	AllowFrozen bool `json:"allowFrozen" dc:"读已停更的第三方通道（历史演示）"`
 }
 
 // GetGdMetricSeriesRes 区间序列

@@ -18,7 +18,7 @@ func TestSimilarDaysRealData(t *testing.T) {
 		t.Skip("本地没有 gd_metric.csv 缓存，跳过")
 	}
 
-	res, err := SimilarDays(ctx, "2026-08-31", KindDayAhead, SimilarOptions{TopN: 5})
+	res, err := FrozenSimilarDays(ctx, "2026-08-31", KindDayAhead, SimilarOptions{TopN: 5})
 	if err != nil {
 		t.Fatalf("找相似日失败: %v", err)
 	}
@@ -45,15 +45,15 @@ func TestSimilarDaysRealData(t *testing.T) {
 	t.Logf("目标日 %s：候选 %d 天，%.0fms，TOP5 = %v", res.TargetDate, res.Candidates, res.TimeMs, similarBrief(res.Days))
 
 	// 换市场（实时价）与「只看负荷形态」也要能跑
-	if _, err := SimilarDays(ctx, "2026-08-31", KindRealtime, SimilarOptions{TopN: 3, WLoad: 1}); err != nil {
+	if _, err := FrozenSimilarDays(ctx, "2026-08-31", KindRealtime, SimilarOptions{TopN: 3, WLoad: 1}); err != nil {
 		t.Errorf("实时价 + 只看负荷失败: %v", err)
 	}
 	// 不给日期 = 最新**有实际值且 96 点齐全**的运行日（最新运行日往往只有电查查预测占位）
-	snap, snapErr := GetSnapshot(ctx, "", "", "")
+	snap, snapErr := GetFrozenSnapshot(ctx, "", "", "")
 	if snapErr != nil || snap == nil {
 		t.Fatalf("取快照失败: %v", snapErr)
 	}
-	latest, err := SimilarDays(ctx, "", KindDayAhead, SimilarOptions{TopN: 1})
+	latest, err := FrozenSimilarDays(ctx, "", KindDayAhead, SimilarOptions{TopN: 1})
 	if err != nil {
 		t.Errorf("不给日期应回落到最新有实际值的运行日: %v", err)
 	} else if latest.TargetDate == "" {

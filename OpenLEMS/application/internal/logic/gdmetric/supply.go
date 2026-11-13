@@ -405,7 +405,17 @@ func minMax(values []float64) (float64, float64) {
 }
 
 // GetSupplyCurve 拉取区间内的出清价与负荷，配对后反演。
+//
+// GetSupplyCurve 已停用：官方披露没有 96 点分时/负荷口径，本能力无法迁移，返回明确的停更错误而非旧数据。
 func GetSupplyCurve(ctx context.Context, from, to string, kind SeriesKind, opts SupplyOptions) (*SupplyCurve, error) {
+	if err := guard(ctx, "供给曲线"); err != nil {
+		return nil, err
+	}
+	return GetFrozenSupplyCurve(ctx, from, to, kind, opts)
+}
+
+// GetFrozenSupplyCurve 冻结通道版本（历史演示，名字里的 Frozen 就是提醒）。
+func GetFrozenSupplyCurve(ctx context.Context, from, to string, kind SeriesKind, opts SupplyOptions) (*SupplyCurve, error) {
 	priceKind := KindDayAhead
 	market := "ahead"
 	if kind == KindRealtime {
@@ -416,11 +426,11 @@ func GetSupplyCurve(ctx context.Context, from, to string, kind SeriesKind, opts 
 	// 用 GetRealSeries 而不是 GetSeries：反演拿的是「历史上每一对 (负荷, 出清价) 都是
 	// 供给曲线上的一个观测点」这个假设，而 999 是电查查的预测占位（实际值还没出）。
 	// 把预测当观测，反出来的曲线就不再有观测依据。
-	prices, err := GetRealSeries(ctx, from, to, priceKind)
+	prices, err := GetFrozenRealSeries(ctx, from, to, priceKind)
 	if err != nil {
 		return nil, errors.Wrap(err, "读取出清价失败")
 	}
-	loads, err := GetRealSeries(ctx, from, to, KindLoad)
+	loads, err := GetFrozenRealSeries(ctx, from, to, KindLoad)
 	if err != nil {
 		return nil, errors.Wrap(err, "读取负荷失败")
 	}

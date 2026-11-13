@@ -96,7 +96,17 @@ func (o SimilarOptions) normalize() SimilarOptions {
 }
 
 // SimilarDays 找 date 这个运行日的历史相似日。
+//
+// 已停用：官方披露没有 96 点分时/负荷口径，本能力无法迁移，返回明确的停更错误而非旧数据。
 func SimilarDays(ctx context.Context, date string, kind SeriesKind, opts SimilarOptions) (*SimilarDaysResult, error) {
+	if err := guard(ctx, "相似日分析"); err != nil {
+		return nil, err
+	}
+	return FrozenSimilarDays(ctx, date, kind, opts)
+}
+
+// FrozenSimilarDays 冻结通道版本（历史演示，名字里的 Frozen 就是提醒）。
+func FrozenSimilarDays(ctx context.Context, date string, kind SeriesKind, opts SimilarOptions) (*SimilarDaysResult, error) {
 	start := time.Now()
 	initGlobal(ctx)
 	if err := global.ensureFresh(ctx); err != nil {
