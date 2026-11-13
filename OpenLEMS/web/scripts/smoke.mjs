@@ -821,10 +821,28 @@ const FAKE_HOME_24H = {
     aheadPrice: 400 + h,
     realtimePrice: 500 + h,
   })),
+  pointCount: 24,
   meanAhead: 411.5,
   meanRealtime: 511.5,
   peakPowerMw: 62300,
   lowPowerMw: 60000,
+}
+
+// 缺点日（17/24）：后端只在满 24 点时下发 meanAhead/meanRealtime/peakPowerMw/lowPowerMw，
+// 所以这里刻意不给这四个字段 —— 页面必须靠 pointCount 说明「没算」，而不是显示「峰值 —」。
+const FAKE_HOME_24H_PARTIAL = {
+  date: '2026-11-06',
+  empty: false,
+  latestDate: '2026-11-06',
+  lagDays: 7,
+  source: '官网·24点',
+  points: Array.from({ length: 17 }, (_, h) => ({
+    hour: h,
+    powerMw: 60000 + h * 100,
+    aheadPrice: 400 + h,
+    realtimePrice: 500 + h,
+  })),
+  pointCount: 17,
 }
 
 const FAKE_NODE_PRICE = {
@@ -950,6 +968,8 @@ let manualEnabled = true
 let intradayEmpty = false
 /** 日报核对页的空态开关：true 时后端返回 0 天（验证空态不画 0 线） */
 let reportDailyEmpty = false
+/** 24 点缺点日开关：true 时后端只给 17/24 点且不下发峰谷（验证页脚说清原因） */
+let home24hPartial = false
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -1170,7 +1190,9 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
   // 注意顺序：这两个也以 /api/gd-metric 开头，必须排在下面的 gd-metric 兜底之前，
   // 否则会被兜底桩吞掉，页面拿到的是 96 点快照的形状
-  if (u.includes('/api/gd-metric/home-24h')) return json(FAKE_HOME_24H)
+  if (u.includes('/api/gd-metric/home-24h')) {
+    return json(home24hPartial ? FAKE_HOME_24H_PARTIAL : FAKE_HOME_24H)
+  }
   if (u.includes('/api/gd-metric/node-price')) return json(FAKE_NODE_PRICE)
   if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
@@ -1410,7 +1432,36 @@ await clickTo('市场数据', '市场总览')
   )
   // 三个批次各有独立空态，不会用一个 empty 盖住三块
   check((marketSrc.match(/该日无数据/g) ?? []).length >= 2, '24 点与地市各有自己的空态文案')
+
+  // 满 24 点：页脚照常给峰谷（这是下面缺点日断言的对照组）
+  const loadPanelFoot = () =>
+    [...doc.querySelectorAll('.panel')]
+      .find((el) => (el.querySelector('.panel-title')?.textContent ?? '').includes('24 点系统负荷'))
+      ?.querySelector('.panel-foot')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+  check(loadPanelFoot().includes('峰值 62,300 MW'), '满 24 点时页脚给峰谷', loadPanelFoot())
 }
+
+// 缺点日（17/24）：后端不下发峰谷，页脚必须说清「没算」而不是印「峰值 —」。
+// 只换夹具不够（页面须重新取数），所以离开这一页再回来，触发重新挂载。
+console.log('\n== 市场数据 · 市场总览：缺点日页脚说清原因（不冒充全天）==')
+home24hPartial = true
+await clickTo('市场数据', '信息披露')
+await clickTo('市场数据', '市场总览')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('24 点系统负荷'))
+  const foot =
+    [...doc.querySelectorAll('.panel')]
+      .find((el) => (el.querySelector('.panel-title')?.textContent ?? '').includes('24 点系统负荷'))
+      ?.querySelector('.panel-foot')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+  check(foot.includes('仅 17/24 点'), '缺点日页脚写明「仅 17/24 点」', foot)
+  check(foot.includes('均价与峰谷不计算'), '缺点日页脚写明均价与峰谷不计算', foot)
+  check(!foot.includes('峰值 —'), '缺点日页脚不出现「峰值 —」', foot)
+  // 缺点日的点仍然照画（17 个，不补 0、不凑 24）
+  const chartPts = [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
+  check(chartPts.includes(17), '缺点日负荷图仍画出实际 17 个点', JSON.stringify(chartPts))
+}
+home24hPartial = false
 
 console.log('\n== 市场数据 · 信息披露（官方直采数据，图表确实画出了数据）==')
 await clickTo('市场数据', '信息披露')

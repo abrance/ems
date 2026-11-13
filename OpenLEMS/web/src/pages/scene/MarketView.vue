@@ -213,6 +213,22 @@ useECharts(
 const home24hPoints = computed(() => home24h.value?.points ?? [])
 const home24hEmpty = computed(() => !loading24h.value && (home24h.value?.empty ?? true))
 
+/**
+ * 24 点负荷面板页脚。
+ *
+ * 后端只在满 24 点时下发峰谷（缺点日 omitempty），所以缺点日不能只印「峰值 — MW」，
+ * 读者会当成系统坏了。用 pointCount 说清「没算」这件事本身。
+ */
+const HOME24H_POINTS_PER_DAY = 24
+const home24hFoot = computed(() => {
+  const d = home24h.value
+  if (!d || home24hEmpty.value) return '负荷单独成图：与电价量纲差两个数量级，双 y 轴会看错拐点'
+  if (d.pointCount !== HOME24H_POINTS_PER_DAY) {
+    return `仅 ${d.pointCount}/${HOME24H_POINTS_PER_DAY} 点，均价与峰谷不计算（缺点日不冒充全天）`
+  }
+  return `峰值 ${fmtNum(d.peakPowerMw, 0)} MW · 谷值 ${fmtNum(d.lowPowerMw, 0)} MW`
+})
+
 const price24hEl = ref<HTMLElement>()
 useECharts(
   price24hEl,
@@ -480,7 +496,7 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
       sub="MW · 与上图同一运行日"
       :span="4"
       :loading="loading24h"
-      :foot="home24h && !home24hEmpty ? `峰值 ${fmtNum(home24h.peakPowerMw, 0)} MW · 谷值 ${fmtNum(home24h.lowPowerMw, 0)} MW` : '负荷单独成图：与电价量纲差两个数量级，双 y 轴会看错拐点'"
+      :foot="home24hFoot"
     >
       <template #actions>
         <StatusTag tone="brand">{{ HOME24H_SOURCE }}</StatusTag>
