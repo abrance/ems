@@ -23,8 +23,15 @@ const (
 	expectedLagHome24h = 8
 	// expectedLagNodePrice 地市 T+0 发布，允许 2 天（跨零点与重试）。
 	expectedLagNodePrice = 2
-	// stoppedEmptyRounds 连续多少次「HTTP 200 + 明确为空」判停更。
-	// 一两次可能是源站当天还没发，连续 K 次说明发布口径变了（或页面改版）。
+	// stoppedEmptyRounds 同一个 target_date 连续多少次「HTTP 200 + 明确为空」，
+	// 才认为最近这次是「源站没发」而不是偶发抖动。
+	//
+	// 注意它不是「全局连续几轮」：run 表的唯一键是 (target_date, dataset)，计数按日期累加，
+	// 而 24 点每轮从今天往回探 14 天、健康的 T-6 滞后每轮都有 6 个日期必然为空，
+	// 所以这个计数在完全正常的情况下也会涨到 3。停更判定必须叠加 lag 前置条件，
+	// 见 deriveStatus 里 stopped 那一段。
+	// shortcut: 没有「跨日期连续轮次」的计数（要做就得加表或加列，代价大于收益）；
+	// 源站是否真停更以 lagDays 为准，这个计数只负责「这次是空，不是失败」。
 	stoppedEmptyRounds = 3
 )
 
@@ -139,8 +146,16 @@ func deriveStatus(ctx context.Context, dataset, asOf string, rows int,
 		st.ErrorKind = last.ErrorKind
 	// stopped 必须排在 never 前面：全新环境（库里一条数都没有）碰上源站改版时，
 	// asOf 同样是空的，先说「从未采集成功，请检查采集配置」会把用户引去查配置。
+	//
+	// 但「最近一次探测为空」本身不等于停更：24 点每轮从今天往回探 14 天，健康的
+	// T-6 滞后每天都有 6 个日期必然返回空，跑满 3 轮就把今天那一行累加到 3。
+	// 没有 lag 前置条件时，任何正常滞后 6 天的采集在 90 分钟内都会被判成「源站停更」，
+	// 把用户引去查一个没坏的东西（线上 v1.0.70 就是这个形态）。
+	// 源站真停更时 asOf 会冻结、lagDays 必然越过 expectedLag，所以前置条件不会漏报；
+	// asOf 为空（LagDays = -1）单独放行，那是 #156 修过的全新环境形态。
 	case last != nil && last.Status == s_db_model.FetchStatusEmpty &&
-		last.ConsecutiveEmpties >= stoppedEmptyRounds:
+		last.ConsecutiveEmpties >= stoppedEmptyRounds &&
+		(asOf == "" || st.LagDays > expectedLag):
 		st.State = StateStopped
 	case asOf == "":
 		st.State = StateNever
