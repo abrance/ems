@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -255,10 +256,13 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 			},
 		},
 		{
+			// 真停更：源站从某天起不再发数，asOf 冻结、滞后越过 8 天上限。
+			// 这里用 20 天而不是 6 天：滞后 6 天时「空」是预期内的正常节奏，
+			// 判成 stopped 就是 v1.0.70 线上那个误报（见 TestHealthyLagNotReportedAsStopped）。
 			name: "stopped",
 			seed: func(t *testing.T) {
-				seed24h(t, fmtDate(6), 24)
-				// 连续 K 次「200 + 空」：源站停更/改版
+				seed24h(t, fmtDate(20), 24)
+				// 最近一次探测仍是「200 + 空」：源站停更/改版
 				for i := 0; i < stoppedEmptyRounds; i++ {
 					if _, err := s_db.GetHomeMarketService().RecordFetchRun(context.Background(), &s_db_model.SFetchRunModel{
 						TargetDate: fmtDate(0), Dataset: s_db_model.DatasetHome24h,
@@ -270,8 +274,8 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 			},
 			want: StateStopped,
 			check: func(t *testing.T, st DatasetStatus) {
-				if st.LagDays != 6 {
-					t.Errorf("lagDays = %d，期望 6（按今天算，不受查询参数影响）", st.LagDays)
+				if st.LagDays != 20 {
+					t.Errorf("lagDays = %d，期望 20（按今天算，不受查询参数影响）", st.LagDays)
 				}
 			},
 		},
@@ -293,6 +297,121 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 			}
 			c.check(t, st.Home24h)
 		})
+	}
+}
+
+// ⑥ 健康滞后 + 连续空：线上 v1.0.70 的误报形态，必须报 ok 而不是 stopped。
+//
+// 这条走真实调用路径（真 sqlite + 主页网关桩 + CollectHome24h），不复用「直接 seed
+// 一条 consecutive_empties=3 的 run 行」那种写法 —— 那种写法跳过了计数产生过程，
+// 抓不到「同一天被探了 3 次」这个真正的成因。
+//
+// 必须跨天推进：run 表的 id 是插入顺序，LatestFetchRun 取 id 最大的一行。只有让进程
+// 「连续跑几天」，今天那行才会是最后插入的；一次性跑 3 轮时最后插入的是 6 天前那条
+// 成功行，取不到线上那个形态（线上今天那行 consecutive_empties=3、status=empty）。
+func TestHealthyLagNotReportedAsStopped(t *testing.T) {
+	newTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	simToday := now
+	newSimLagStub(t, &simToday, stubLagDays)
+
+	// 连续 7 天各跑 1 轮，最后一天（今天）再补 2 轮 —— 调度器 30 分钟一轮，90 分钟 3 轮。
+	for d := now.AddDate(0, 0, -6); d.Before(now); d = d.AddDate(0, 0, 1) {
+		simToday = d
+		if _, _, err := CollectHome24h(ctx, d); err != nil {
+			t.Fatalf("%s 采集失败: %v", d.Format(dateLayout), err)
+		}
+	}
+	simToday = now
+	for i := 0; i < stoppedEmptyRounds; i++ {
+		date, n, err := CollectHome24h(ctx, now)
+		if err != nil {
+			t.Fatalf("今天第 %d 轮采集报错: %v", i+1, err)
+		}
+		if n != 24 || date != now.AddDate(0, 0, -stubLagDays).Format(dateLayout) {
+			t.Fatalf("今天第 %d 轮采到 %s（%d 点），期望 T-%d 的 24 点", i+1, date, n, stubLagDays)
+		}
+	}
+
+	// 先确认真的复现了线上形态：今天那一行被探了 3 次，consecutive_empties 到 3。
+	today := now.Format(dateLayout)
+	var todayRow *runRow
+	for _, r := range fetchRunRows(t, s_db_model.DatasetHome24h) {
+		if r.TargetDate == today {
+			r := r
+			todayRow = &r
+		}
+	}
+	if todayRow == nil {
+		t.Fatalf("run 表里没有 %s 的行，用例没复现出线上形态", today)
+	}
+	if todayRow.ConsecutiveEmpties < stoppedEmptyRounds {
+		t.Fatalf("consecutive_empties = %d，没到 %d，用例没复现出线上形态",
+			todayRow.ConsecutiveEmpties, stoppedEmptyRounds)
+	}
+	if todayRow.Status != s_db_model.FetchStatusEmpty {
+		t.Fatalf("今天的状态 = %q，期望 %q", todayRow.Status, s_db_model.FetchStatusEmpty)
+	}
+
+	st, err := LoadMarketStatus(ctx, now)
+	if err != nil {
+		t.Fatalf("LoadMarketStatus 失败: %v", err)
+	}
+	// 滞后 6 天 ≤ 预期上限 8 天：「空」是预期内，不该判停更。
+	if st.Home24h.State != StateOK {
+		t.Fatalf("健康滞后(6 天)+同一天探 3 次被判成 %q，期望 %q（%+v）",
+			st.Home24h.State, StateOK, st.Home24h)
+	}
+	if st.Home24h.LagDays != stubLagDays {
+		t.Errorf("lagDays = %d，期望 %d", st.Home24h.LagDays, stubLagDays)
+	}
+	if st.Home24h.AsOf != now.AddDate(0, 0, -stubLagDays).Format(dateLayout) {
+		t.Errorf("asOf = %q，期望 T-%d", st.Home24h.AsOf, stubLagDays)
+	}
+}
+
+// ⑦ 真停更仍然要报 stopped：asOf 冻结、源站从此全空，滞后越过预期上限后必须告警 ——
+// 上一条的 lag 前置条件不能把真停更一起放过。
+func TestStoppedStillReportedWhenLagExceedsExpected(t *testing.T) {
+	newTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	simToday := now
+	newSimLagStub(t, &simToday, stubLagDays)
+
+	for d := now.AddDate(0, 0, -6); d.Before(now); d = d.AddDate(0, 0, 1) {
+		simToday = d
+		if _, _, err := CollectHome24h(ctx, d); err != nil {
+			t.Fatalf("%s 采集失败: %v", d.Format(dateLayout), err)
+		}
+	}
+
+	// 今天起源站改版：每轮都回 200 + details=[]
+	emptyAll(t)
+	simToday = now
+	for i := 0; i < stoppedEmptyRounds; i++ {
+		if _, _, err := CollectHome24h(ctx, now); err != nil {
+			t.Fatalf("今天第 %d 轮空采集报错: %v", i+1, err)
+		}
+	}
+
+	// 当天：asOf 仍是 T-6，滞后在预期内 —— 仍报 ok（已知取舍，见 status.go 注释）。
+	if st, err := LoadMarketStatus(ctx, now); err != nil {
+		t.Fatalf("LoadMarketStatus 失败: %v", err)
+	} else if st.Home24h.State != StateOK {
+		t.Errorf("滞后 6 天时状态 = %q，期望 %q", st.Home24h.State, StateOK)
+	}
+
+	// 4 天后 asOf 冻结不动：滞后 10 天 > 上限 8 天，必须转 stopped。
+	later := now.AddDate(0, 0, 4)
+	st, err := LoadMarketStatus(ctx, later)
+	if err != nil {
+		t.Fatalf("LoadMarketStatus 失败: %v", err)
+	}
+	if st.Home24h.State != StateStopped {
+		t.Fatalf("源站冻结 4 天(滞后 %d 天) 状态 = %q，期望 %q",
+			st.Home24h.LagDays, st.Home24h.State, StateStopped)
 	}
 }
 
@@ -396,4 +515,46 @@ func TestRunBackfillRejectsConcurrentCall(t *testing.T) {
 	if _, _, err := RunBackfill(ctx, now, defaultBackfillDays); err != nil {
 		t.Fatalf("锁释放后回补失败: %v", err)
 	}
+}
+
+// newSimLagStub 与 newLagStub 同口径（24 点 T-lag 才发布、地市 T+0），
+// 但「今天」由调用方给的可变指针决定，用来模拟进程连续跑几天。
+// newLagStub 用 time.Since 算滞后，跨天推进时会一直落在同一个真实日期上。
+func newSimLagStub(t *testing.T, today *time.Time, lag int) {
+	t.Helper()
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		date := r.URL.Query().Get("date")
+		d, err := time.ParseInLocation(dateLayout, date, time.Local)
+		if err != nil {
+			http.Error(w, "bad date", http.StatusBadRequest)
+			return
+		}
+		base := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.Local)
+		daysAgo := int(base.Sub(time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.Local)).Hours() / 24)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/trade/tradeSituation"):
+			if daysAgo < lag {
+				fmt.Fprint(w, `{"code":200,"msg":"操作成功！","data":{"details":[]}}`)
+				return
+			}
+			fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+			for h := 0; h < 24; h++ {
+				if h > 0 {
+					fmt.Fprint(w, ",")
+				}
+				fmt.Fprintf(w, `{"powerNum":%d,"currentPrice":%d,"realTimePrice":%d,"dateTime":"%s %02d:00:00"}`,
+					60000+h, 400+h, 500+h, date, h)
+			}
+			fmt.Fprint(w, `]}}`)
+		case strings.HasSuffix(r.URL.Path, "/marketEntitiesNum"):
+			fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[`)
+			fmt.Fprint(w, `{"name":"广州市","value":610.5,"type":1},`)
+			fmt.Fprint(w, `{"name":"广州市","value":409.7,"type":2},`)
+			fmt.Fprint(w, `{"name":"深圳市","value":611.0,"type":1},`)
+			fmt.Fprint(w, `{"name":"深圳市","value":410.0,"type":2}`)
+			fmt.Fprint(w, `]}}`)
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	})
 }
