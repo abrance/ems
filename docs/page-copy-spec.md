@@ -242,7 +242,22 @@ Format("2006-01-02 15:04:05") -> "2006-01-02 15:04:05"   // 错误，且不报�
 
 影响面：§1.3 / §2.2 的 `最近一次成功是 ${fetchedAt}` 依赖这个字段。如果按错误建议改成 Go layout，页面会把字面的 `2006-01-02 15:04:05` 当成时间印出来，而且测试全绿（原断言只查非空）。
 
-现在的护栏：`homemarket/status_db_test.go` 断言 `fetchedAt` 不得等于任一格式串本身，改回 Go layout 会立刻红（PR #154）。**§1.3 / §2.2 的文案可以直接照抄，字段本身是对的。**
+现在的状况：**仓库里还没有针对这个格式的断言**（`*_test.go` 里 `2006-01-02 15:04:05` 与 `Y-m-d H:i:s` 全零命中，`status_db_test.go:220` 只断言 `fetchedAt != ""`）。也就是说，今天谁把 `Format("Y-m-d H:i:s")` 改成 Go layout，改动会一路绿着上线，页面把字面量 `2006-01-02 15:04:05` 当时间印出来。
+
+建议补的最小断言（已实测能拦住，把它改成 Go layout 立刻报 `fetchedAt 输出成了格式串本身`）：
+
+```go
+for _, layout := range []string{"2006-01-02 15:04:05", "Y-m-d H:i:s"} {
+    if st.FetchedAt == layout {
+        t.Errorf("fetchedAt 输出成了格式串本身 %q", st.FetchedAt)
+    }
+}
+if _, perr := time.ParseInLocation("2006-01-02 15:04:05", st.FetchedAt, time.Local); perr != nil {
+    t.Errorf("fetchedAt = %q 不是可解析的 YYYY-MM-DD HH:MM:SS: %v", st.FetchedAt, perr)
+}
+```
+
+**§1.3 / §2.2 的文案可以直接照抄，字段本身的输出是对的**（2026-11-13 实测：`gtime.NewFromTimeStamp(...).Format("Y-m-d H:i:s")` → `"2025-11-13 10:13:20"`，`Format("2006-01-02 15:04:05")` → 原样字面量）。
 
 ---
 
@@ -252,9 +267,9 @@ Format("2006-01-02 15:04:05") -> "2006-01-02 15:04:05"   // 错误，且不报�
 
 **库里有历史数** → 源站连续回 `200`+空：第 3 轮变 `stopped`，符合预期。
 
-**库是空的**（全新部署、或换了 DSN 还没采过数）→ 源站连续回 `200`+空：**5 轮之后仍然是 `never`**，`consecutiveEmpties` 已经涨到 5。
+**库是空的**（全新部署、或换了 DSN 还没采过数）→ 源站连续回 `200`+空：**5 轮之后仍然是 `never`**，`consecutiveEmpties` 已经涨到 5。（以上实测取自修复前的 `5228899` 之前版本；#156 之后下方标记为「现行顺序」的那张表为准。）
 
-原因在 `status.go` 的判定顺序：
+原因在 `status.go` 的判定顺序（下面是**修复前**的写法）：
 
 ```go
 case asOf == "":
@@ -265,23 +280,24 @@ case last.ConsecutiveEmpties >= stoppedEmptyRounds:
 
 `asOf == ""` 是「库里一条数都没有」，而 `ConsecutiveEmpties` 是「源站连续回了多少次空」——两件完全不同的事。全新环境里源站一旦改版，用户看到的是 §1.2 的「从未采集成功，请检查采集配置」，去查配置，而真实原因是源站改版。
 
-**改判定顺序**（后端，已落 PR #156）：
+**已修复**（PR #156，main 提交 `fd8d020`，2026-11-13 合入）。判定顺序改成：
 
-| 现状顺序 | 建议顺序 |
+| 现状顺序（修复前） | 现行顺序（#156 之后） |
 |---|---|
 | `failed` → `never` → `stopped` → `lagging` | `failed` → **`stopped`** → `never` → `lagging` |
 
 改完之后，全新环境第一次遇到源站改版会直接说 §1.5 的话，两句都成立时优先说信息量更大的那句。
+`status.go` 的 `deriveStatus` 里 `stopped` 那条 `case` 现在排在 `case asOf == ""` 之前，`§1.2` 的文案**照抄即可，不需要带计数的兜底变体**。
 
-**在这条改掉之前**，§1.2 的文案照抄时补一句兜底：
+下面这段是修复前的备选方案记录，**已作废，不要再实现**（保留是为了说明为什么没走 DTO 加字段那条路）：
 
-| 场景 | 触发 | 文案 |
+| 场景（作废） | 触发 | 文案 |
 |---|---|---|
 | 1.2' | `state === 'never'` 且 `consecutiveEmpties > 0`（前端拿不到这个字段时可不做） | `从未采集成功，源站最近连续 ${n} 次返回空数据 —— 优先确认源站是否改版，其次看采集配置` |
 
-**前端目前拿不到 `consecutiveEmpties`**：`DatasetStatus`（`homemarket/status.go` 的 DTO，前端 `api/homemarket.ts` 同构）只下发 `state / asOf / lagDays / rows / rowsExpected / fetchedAt / lastError / errorKind`，没有这个计数字段。所以 1.2' 现在做不了，实际可选只有两条：
+**前端拿不到 `consecutiveEmpties`**：`DatasetStatus`（`homemarket/status.go` 的 DTO，前端 `api/homemarket.ts` 同构）只下发 `state / asOf / lagDays / rows / rowsExpected / fetchedAt / lastError / errorKind`，没有这个计数字段。所以 1.2' 现在做不了，实际可选只有两条：
 
 - 后端把 `stopped` 判定提到 `never` 前面（推荐，一处顺序改动，前端零改动）；
 - 或者后端在 DTO 里加 `consecutiveEmpties`，前端再按 1.2' 分叉。
 
-PR #156 走的是第一条（只改顺序，前端零改动）。合入后 §1.2 恢复原样即可，不需要 1.2' 这种带计数的变体。
+PR #156 走的是第一条（只改顺序，前端零改动），后一条没有实施。§1.2 因此保持原样，没有 1.2' 这种带计数的变体。
