@@ -191,8 +191,27 @@ const dailyNever = dailyEmpty && lag === 0                     // ← 3.0
 | 场景 | 触发条件 | 文案原文 |
 |---|---|---|
 | 标题 | `pairs.length === 0 && source === 'recorded'` | `还没有可复盘的当时预测` |
-| 主体 | 同上 | `预测留痕自 ${recordedMeta.generatedDates[0] \| '—'} 起积累，之前的日子没有记录，也补不回来。${truthLagText}，首个可配对交易日约在 ${首个可配对日}。` |
+| 主体（未到） | 同上，且 `首个可配对日 >= 今天（Asia/Shanghai）` | `预测留痕自 ${recordedMeta.generatedDates[0] \| '—'} 起积累，之前的日子没有记录，也补不回来。${truthLagText}，首个可配对交易日约在 ${首个可配对日}。` |
+| 主体（已过） | 同上，且 `首个可配对日 < 今天` | `预测留痕自 ${recordedMeta.generatedDates[0] \| '—'} 起积累，之前的日子没有记录，也补不回来。首个可配对交易日 ${首个可配对日} 已过，实际值仍未入库。本地日频指标最后更新于 ${dataAsOf}（每周手动采集一次，不是源站没发）。` |
 | 次级 | 同上 | `另有 N 条留痕的实际值还没出（${truthLagNote}）。` |
+
+### 7.1 为什么必须有「已过」分支
+
+上面那组偏移只描述**源站发布节奏**。库里能不能配上对，还取决于本地采集有没有跑：
+`tools/gdpm/README.md:171` 写明「用户每周手动跑一次，没有定时任务」。采集停几天，
+`首个可配对日` 就会落在过去，而 `pairs` 仍为空 —— 此时若还印「约在 X」，
+读者看到的是「约在某个已经过去的日子」+「待入库」，只会判断成系统坏了，
+于是既不去查采集、也不去重跑（§0 原则 3 的反面）。
+
+| 判据 | 值 |
+|---|---|
+| `firstPairPassed` | `pairs.length === 0 && firstPairDate !== '' && firstPairDate < todayInShanghai()` |
+| `todayInShanghai` | `src/utils/latestRange.ts`，与后端 / `lagDaysFrom` 同为 Asia/Shanghai（容器里的无头浏览器是 UTC，用本地时区会在跨日前后差一天） |
+| `dataAsOf` | **服务端下发的** `recordedMeta.dataAsOf`（= `gd_spot_metric` 的 `max(report_date)`），前端不重算 |
+| `dataAsOf` 为空 | `本地日频指标的最后更新日期未知（每周手动采集一次，不是源站没发）。` —— 不印「最后更新于 —」 |
+| 等于今天 | 仍属「还没到」，保留「约在」（今天没过完，不能提前判成已过） |
+
+两个市场同一把尺子：`real` 的 +3 一样会「已过但没配上」，不允许只在 `ahead` 加这一支。
 
 `truthLagText` / `truthLagNote` 两个 computed 都按 `market` 分支，**切换市场时两句都必须改口**：
 

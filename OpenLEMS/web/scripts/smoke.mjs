@@ -1035,6 +1035,8 @@ let recordedNoActual = false
  * 但前端曾把 [0] 直接印成「自 X 起积累」，所以要钉住：印出来的必须是不早于今天的日子。
  */
 let recordedGeneratedDatesOverride = null
+/** 留痕 dataAsOf 覆盖：服务端下发的最新实际值日（= gd_spot_metric 的 max(report_date)） */
+let recordedDataAsOfOverride = null
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -1237,9 +1239,11 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
   if (u.includes('/api/forecast/recorded')) {
-    const dayFixture = recordedGeneratedDatesOverride
-      ? { ...FAKE_RECORDED_DAY, generatedDates: recordedGeneratedDatesOverride }
-      : FAKE_RECORDED_DAY
+    const dayFixture = {
+      ...FAKE_RECORDED_DAY,
+      ...(recordedGeneratedDatesOverride ? { generatedDates: recordedGeneratedDatesOverride } : {}),
+      ...(recordedDataAsOfOverride != null ? { dataAsOf: recordedDataAsOfOverride } : {}),
+    }
     if (u.includes('grain=day') && recordedNoActual) {
       return json({
         ...dayFixture,
@@ -3351,8 +3355,19 @@ console.log('\n== 预测复盘页 ==')
   // 空态里的「官方实际值 T+2 才发布」与「首个可配对交易日」都跟着市场走：
   // 日前真值与运行日报同日（T+0 → 生成日 +1），实时才是 T+2（→ +3）。
   // 页面有市场切换，两边的句子都不许说成另一边的口径。
+  //
+  // 夹具日期一律**相对今天**生成，不写死：写死会在某天之后整段滑进「已过」分支，
+  // 于是「约在」的断言变成永远测不到（或永远红），这组用例就烂掉了。
   console.log('\n== 预测复盘页 · 留痕空态（永久缺失 vs 还没到）==')
+  /** 今天的上海日期往后推 n 天 */
+  const shiftDay = (n) => {
+    const d = new Date(Date.parse(`${todayIso()}T00:00:00Z`) + n * 86400_000)
+    return d.toISOString().slice(0, 10)
+  }
+  const TODAY = todayIso()
   recordedNoActual = true
+  // 首个可配对日 = 今天 + 1（日前）⇒ 还没到
+  recordedGeneratedDatesOverride = [TODAY]
   await clickTo('分析预测', '长周期电价预测')
   await clickTo('分析预测', '预测复盘')
   await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
@@ -3380,10 +3395,10 @@ console.log('\n== 预测复盘页 ==')
     const emptyAhead = recordedEmpty()
     // §7：「也补不回来」不能省 —— 否则用户以为再等几天数据就齐了
     check(bodyHas('也补不回来'), '留痕空态写明「也补不回来」（留痕是永久缺失，不是等一等就有）')
-    // 默认腿 = 日前：夹具首个生成日 2026-09-19 → 首个可配对日 = 2026-09-20（+1）
+    // 默认腿 = 日前：生成日今天 → 首个可配对日 = 今天 + 1
     check(
-      bodyHas('首个可配对交易日约在 2026-09-20'),
-      '日前：首个可配对交易日 = 生成日 + 1（09-19 → 09-20）',
+      bodyHas(`首个可配对交易日约在 ${shiftDay(1)}`),
+      '日前：首个可配对交易日 = 生成日 + 1（今天 → 明天），仍在「约在」口径',
       emptyAhead,
     )
     check(!bodyHas('T+2'), '日前市场不许说「T+2」（那是实时市场的口径）', emptyAhead)
@@ -3396,11 +3411,11 @@ console.log('\n== 预测复盘页 ==')
       doc.body.textContent?.match(/另有[^。]*/)?.[0] ?? '',
     )
 
-    // 切到实时：偏移变 +3（09-19 → 09-22），文案必须改口成 T+2
-    const emptyReal = await pickMarket('real', '2026-09-22')
+    // 切到实时：偏移变 +3（今天 → 今天+3），文案必须改口成 T+2
+    const emptyReal = await pickMarket('real', shiftDay(3))
     check(
-      bodyHas('首个可配对交易日约在 2026-09-22'),
-      '实时：首个可配对交易日 = 生成日 + 3（09-19 → 09-22）',
+      bodyHas(`首个可配对交易日约在 ${shiftDay(3)}`),
+      '实时：首个可配对交易日 = 生成日 + 3（今天 → 今天+3）',
       emptyReal,
     )
     check(bodyHas('官方实际值 T+2 才发布'), '实时市场保留「T+2 才发布」的说法', emptyReal)
@@ -3411,13 +3426,119 @@ console.log('\n== 预测复盘页 ==')
     )
 
     // 切回日前：两个数都要退回去，不能残留实时的 +3（只看留痕空态那一块，页面别处也可能印日期）
-    const backAhead = await pickMarket('ahead', '2026-09-20')
+    const backAhead = await pickMarket('ahead', shiftDay(1))
     check(
-      backAhead.includes('首个可配对交易日约在 2026-09-20') && !backAhead.includes('2026-09-22'),
+      backAhead.includes(`首个可配对交易日约在 ${shiftDay(1)}`) && !backAhead.includes(shiftDay(3)),
       '切回日前：偏移退回 +1，不残留实时的 +3',
       backAhead,
     )
   }
+
+  // ---- 「首个可配对日已过」：+1/+3 只描述源站节奏，采集停摆时页面必须说清 ----
+  //
+  // 线上真实形态（2026-11-14）：首个可用生成日 11-11 → 日前口径首个可配对日 11-12，
+  // 已经是两天前，而 gd_spot_metric 的 max(report_date) 还停在 11-11（那只手动脚本没跑）。
+  // 旧文案会印「约在 2026-11-12」+「待入库」——「约在某个过去的日期」自相矛盾，
+  // 读者只会判断成系统坏了。这一节钉住：已过就说已过，并指出本地采集停在哪天。
+  console.log('\n== 预测复盘页 · 首个可配对日已过（采集没跑，不是源站没发）==')
+  {
+    const emptyText = () =>
+      [...doc.querySelectorAll('.empty')]
+        .find((el) => (el.textContent ?? '').includes('还没有可复盘的当时预测'))
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim() ?? ''
+
+    // 生成日 = 今天 - 5：日前 +1 → 今天-4（已过），实时 +3 → 今天-2（也已过）
+    recordedGeneratedDatesOverride = [shiftDay(-5)]
+    recordedDataAsOfOverride = shiftDay(-6)
+    await clickTo('分析预测', '长周期电价预测')
+    await clickTo('分析预测', '预测复盘')
+    await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
+    {
+      const aheadPast = emptyText()
+      check(
+        aheadPast.includes(`首个可配对交易日 ${shiftDay(-4)} 已过`),
+        `日前：首个可配对日 ${shiftDay(-4)} 早于今天 → 印「已过」`,
+        aheadPast,
+      )
+      check(
+        !aheadPast.includes('首个可配对交易日约在'),
+        '日前已过时不许再说「约在」（过去的日子不能还挂「约」）',
+        aheadPast,
+      )
+      check(aheadPast.includes('实际值仍未入库'), '已过时说明实际值仍未入库', aheadPast)
+      check(
+        aheadPast.includes(`本地日频指标最后更新于 ${shiftDay(-6)}`),
+        '已过时指出本地日频采集停在哪天（dataAsOf 原样用服务端下发的值）',
+        aheadPast,
+      )
+      check(
+        aheadPast.includes('每周手动采集一次，不是源站没发'),
+        '已过时点明是本地采集节奏，不是源站没发布',
+        aheadPast,
+      )
+
+      // 实时腿同一把尺子：+3 一样会「已过但没配上」
+      const marketSelect = [...doc.querySelectorAll('select')].find((s) =>
+        [...s.options].some((o) => o.value === 'real' && o.textContent.trim() === '实时'),
+      )
+      const opt = [...marketSelect.options].find((o) => o.value === 'real')
+      marketSelect.selectedIndex = opt.index
+      marketSelect.dispatchEvent(new window.Event('change', { bubbles: true }))
+      // 不能只等「已过」—— 日前腿已经是「已过」，会在重新请求前就命中，读到的是上一腿的日期
+      await waitFor(() => emptyText().includes(`首个可配对交易日 ${shiftDay(-2)} 已过`), 3000)
+      const realPast = emptyText()
+      check(
+        realPast.includes(`首个可配对交易日 ${shiftDay(-2)} 已过`),
+        `实时：首个可配对日 ${shiftDay(-2)} 早于今天 → 同样印「已过」`,
+        realPast,
+      )
+      check(!realPast.includes('首个可配对交易日约在'), '实时已过时也不许说「约在」', realPast)
+
+      // 切回日前，把下拉复位给后续用例
+      const optAhead = [...marketSelect.options].find((o) => o.value === 'ahead')
+      marketSelect.selectedIndex = optAhead.index
+      marketSelect.dispatchEvent(new window.Event('change', { bubbles: true }))
+      await waitFor(() => emptyText().includes(shiftDay(-4)), 3000)
+    }
+
+    // 边界：首个可配对日**等于今天** → 仍属「还没到」，保留「约在」
+    recordedGeneratedDatesOverride = [shiftDay(-1)]
+    await clickTo('分析预测', '长周期电价预测')
+    await clickTo('分析预测', '预测复盘')
+    await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
+    {
+      const todayEdge = emptyText()
+      check(
+        todayEdge.includes(`首个可配对交易日约在 ${TODAY}`),
+        '首个可配对日等于今天 → 仍说「约在」（今天还没过完，不能提前判成已过）',
+        todayEdge,
+      )
+      check(!todayEdge.includes('已过'), '等于今天时不许出现「已过」', todayEdge)
+    }
+
+    // dataAsOf 为空：给不带日期的兜底，绝不印「最后更新于 —」
+    recordedGeneratedDatesOverride = [shiftDay(-5)]
+    recordedDataAsOfOverride = ''
+    await clickTo('分析预测', '长周期电价预测')
+    await clickTo('分析预测', '预测复盘')
+    await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
+    {
+      const noAsOf = emptyText()
+      check(
+        !noAsOf.includes('最后更新于 —') && !noAsOf.includes('最后更新于 '),
+        'dataAsOf 为空时不许印「最后更新于 —」',
+        noAsOf,
+      )
+      check(
+        noAsOf.includes('最后更新日期未知') && noAsOf.includes('每周手动采集一次'),
+        'dataAsOf 为空时给不带日期的兜底，仍点明是本地采集节奏',
+        noAsOf,
+      )
+      check(noAsOf.includes(`首个可配对交易日 ${shiftDay(-4)} 已过`), 'dataAsOf 缺失不影响「已过」判定', noAsOf)
+    }
+  }
+  recordedDataAsOfOverride = null
 
   // ---- 生成日必须是不早于今天的可用日（后端已过滤回填行，前端不许把过去日期印出来）----
   //
@@ -3428,7 +3549,9 @@ console.log('\n== 预测复盘页 ==')
   //
   // 这里钉的是**页面拿到的数组首项**：后端给了过滤后的 11-11 起，页面就必须从 11-11 起算。
   console.log('\n== 预测复盘页 · 生成日取可用日（不许印回填日）==')
-  recordedGeneratedDatesOverride = ['2026-11-11', '2026-11-12', '2026-11-13']
+  // 可用生成日用相对今天的第一天：写死 11-11 会在那天之后滑进「已过」分支，断言就测不到「约在」
+  const firstUsable = shiftDay(0)
+  recordedGeneratedDatesOverride = [firstUsable, shiftDay(1), shiftDay(2)]
   await clickTo('分析预测', '长周期电价预测')
   await clickTo('分析预测', '预测复盘')
   await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
@@ -3439,10 +3562,14 @@ console.log('\n== 预测复盘页 ==')
         .find((el) => (el.textContent ?? '').includes('还没有可复盘的当时预测'))
         ?.textContent?.replace(/\s+/g, ' ')
         .trim() ?? ''
-    check(bodyHas('预测留痕自 2026-11-11 起积累'), '「起积累」跟的是首个可用生成日（2026-11-11），不是回填日 10-07', emptyText)
+    check(bodyHas(`预测留痕自 ${firstUsable} 起积累`), `「起积累」跟的是首个可用生成日（${firstUsable}），不是回填日 10-07`, emptyText)
     check(!bodyHas('2026-10-07') && !bodyHas('2026-10-10'), '页面不出现整批回填的生成日与其推算出的过去日期', emptyText)
-    // 首个可配对日由 [0] 推出，按当前市场（默认日前）取 +1：11-11 → 11-12
-    check(bodyHas('首个可配对交易日约在 2026-11-12'), '首个可配对交易日由首个可用生成日推出（日前 11-11 → 11-12）', emptyText)
+    // 首个可配对日由 [0] 推出，按当前市场（默认日前）取 +1
+    check(
+      bodyHas(`首个可配对交易日约在 ${shiftDay(1)}`),
+      `首个可配对交易日由首个可用生成日推出（日前 ${firstUsable} → ${shiftDay(1)}）`,
+      emptyText,
+    )
     // 首项被剔掉时不能留空：后端全过滤成空数组也要回落「—」，不印 undefined/NaN
     recordedGeneratedDatesOverride = []
     await clickTo('分析预测', '长周期电价预测')

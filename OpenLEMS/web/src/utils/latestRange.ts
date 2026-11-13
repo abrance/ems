@@ -21,6 +21,17 @@ export function anchorEndDate(latestDate?: string | null, today: Date = new Date
   return parsed.getTime() < today.getTime() ? parsed : today
 }
 
+/**
+ * 上海时区的「今天」YYYY-MM-DD。
+ *
+ * 复盘页要判断「首个可配对日是否已经过去」，这个判断必须和后端（Asia/Shanghai）
+ * 以及 lagDaysFrom 同一口径：容器里跑的无头浏览器是 UTC，用本地时区会在跨日前后
+ * 把「今天」算成昨天，于是「约在今天」被误判成「已过」。
+ */
+export function todayInShanghai(today: Date = new Date()): string {
+  return new Date(today.getTime() + 8 * 3600_000).toISOString().slice(0, 10)
+}
+
 /** 本地日期 → YYYY-MM-DD（不用 toISOString，那个会按 UTC 偏移一天） */
 export function isoDate(d: Date): string {
   const loc = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
