@@ -3,6 +3,7 @@ package cmd
 import (
 	applog "application/internal/log"
 	"application/internal/logic"
+	forecastlogic "application/internal/logic/forecast"
 	"application/internal/logic/homemarket"
 	retentionlogic "application/internal/logic/retention"
 	"application/internal/service"
@@ -70,6 +71,10 @@ func InitSystem(ctx context.Context, parser *gcmd.Parser) error {
 	// 写 gd_spot_metric；这里在进程内跑，写 gd_home_24h / gd_node_price。
 	// 两边不共享定时器与失败语义，一边挂了另一边照常。
 	homemarket.Start(ctx, homemarket.DefaultInterval)
+
+	// 每日电价预测留痕（复盘「当时预测」腿的数据来源）。
+	// 只做 day 粒度，目标日=生成日次日；与页面手动预测共用 loadDaily，不另写一套口径。
+	forecastlogic.Start(ctx)
 
 	// 注册设备管理器
 	common.RegisterDeviceManager(s_driver.NewDriverManagerImpl(ctx))

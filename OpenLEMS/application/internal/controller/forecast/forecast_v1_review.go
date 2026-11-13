@@ -62,7 +62,8 @@ func (c *ControllerV1) GetRecordedForecast(ctx context.Context, req *v1.GetRecor
 		targetDate := fromDate(r.TargetTime)
 		// 生成日晚于目标日 = 事后回填的历史值，不是「当时发出去的预测」。
 		// 拿它冒充留痕，等于把「当前模型重跑」贴上「当时预测」的标签。
-		if r.GeneratedOn > targetDate {
+		// 判断收在 logic 里，留痕任务与页面共用同一条规则（单测直接钉住）。
+		if forecastlogic.IsBackfilledForecast(r.GeneratedOn, r.TargetTime) {
 			res.Backfilled++
 			continue
 		}
