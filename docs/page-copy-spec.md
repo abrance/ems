@@ -171,41 +171,63 @@ const dailyNever = dailyEmpty && lag === 0                     // ← 3.0
 **禁止**：补 0、把缺口连成直线、把缺日算进「区间均价」的分母以外的任何填充动作。
 缺日就是缺日，图上断开。
 
-## 7. 复盘页 · 留痕为空（未满 3 天）
+## 7. 复盘页 · 留痕为空（真值还没出）
 
 `ReviewView.vue`，`source === 'recorded'` 且 `pairs.length === 0`。
-留痕 `generated_on = 当天`、`target_time = 次日`，真值官方 T+2
-→ **首个可配对日 = 启用日 + 3 天**（启用 11-13 → 11-16 之前图一定是空的）。
+留痕 `generated_on = 当天`、`target_time = 次日`，偏移量**跟着市场走**（源站发布节奏见
+`tools/gdpm/gdpm_sqlite.py` 的 `report_of()`：实时 T+2、**日前与日报同日**）：
+
+| 市场 | 真值可达 | 首个可配对日 | 例（启用 11-13） |
+|---|---|---|---|
+| `ahead` 日前（默认） | T+0 | **启用日 + 1** | 11-14 |
+| `real` 实时 | T+2 | **启用日 + 3** | 11-16 |
+
+缺省/未知 market 按日前 +1（页面默认腿就是日前）。
+
+> 这组偏移只描述**源站发布节奏**。实际能否配上对还要看 `gd_spot_metric` 多久更新一次：
+> `tools/gdpm/README.md` 的「每周更新（手动执行一次）」写明采集是用户手动跑的、没有定时任务，
+> 所以配对点目前最多每周前进一次。这句是给改代码的人看的，**不进用户可见 UI**。
 
 | 场景 | 触发条件 | 文案原文 |
 |---|---|---|
 | 标题 | `pairs.length === 0 && source === 'recorded'` | `还没有可复盘的当时预测` |
-| 主体 | 同上 | `预测留痕自 ${recordedMeta.generatedDates[0] \| '—'} 起积累，之前的日子没有记录，也补不回来。官方实际值 T+2 才发布，首个可配对交易日约在 ${首个可配对日}。` |
+| 主体 | 同上 | `预测留痕自 ${recordedMeta.generatedDates[0] \| '—'} 起积累，之前的日子没有记录，也补不回来。${truthLagText}，首个可配对交易日约在 ${首个可配对日}。` |
+| 次级 | 同上 | `另有 N 条留痕的实际值还没出（${truthLagNote}）。` |
 
-**落点 `ReviewView.vue:754-757`，可直接替换整块**：
+`truthLagText` / `truthLagNote` 两个 computed 都按 `market` 分支，**切换市场时两句都必须改口**：
+
+| market | `truthLagText` | `truthLagNote` |
+|---|---|---|
+| `ahead` | `日前市场的官方实际值当天就出` | `目标日数据待入库` |
+| `real` | `官方实际值 T+2 才发布` | `官方 T+2` |
+
+日前腿不说 T+2，实时腿不说「当天就出」；两边都不许留一句只在对面市场成立的句子。
+
+**落点 `ReviewView.vue` 的 recorded 空态分支（`v-else-if="!loading"` 内）**：
 
 ```vue
           <div>
             预测留痕自 {{ recordedMeta?.generatedDates[0] || '—' }} 起积累，之前的日子没有记录，也补不回来。
-            官方实际值 T+2 才发布，首个可配对交易日约在 {{ firstPairDate || '—' }}。
+            {{ truthLagText }}，首个可配对交易日约在 {{ firstPairDate || '—' }}。
+          </div>
+          <div v-if="recordedMeta?.unavailable" class="muted">{{ recordedMeta.unavailable }}</div>
+          <div v-else-if="recordedMeta?.actualMissing" class="muted">
+            另有 {{ recordedMeta.actualMissing }} 条留痕的实际值还没出（{{ truthLagNote }}）。
           </div>
 ```
 
-`firstPairDate` 目前全仓没有，必须新增（`rg "首个可配对"` 零命中，代码里没算过这个日期）：
+`firstPairDate` 在 `src/utils/firstPairDate.ts`（纯函数，smoke 直接 import 测）：
 
 ```ts
-/** 首个可配对日 = 首条留痕生成日 + 3。
- *  generated_on = 当天、target_time = 次日（daily_record.go:24-27），真值官方 T+2
- *  ⇒ 目标日 D+1 的实际值在 D+3 可得。 */
-const firstPairDate = computed(() => {
-  const g = recordedMeta.value?.generatedDates[0]
-  if (!g) return ''
-  const d = new Date(`${g}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return ''
-  d.setDate(d.getDate() + 3)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-})
+/** 真值发布滞后（天）：实时比日前多等两天。两个市场之外的取值一律按日前。 */
+function lagDays(market?: string | null): number {
+  return String(market ?? '').trim() === 'real' ? 3 : 1
+}
+
+export function firstPairDate(generatedOn?: string | null, market?: string | null): string {
+  // …解析 YYYY-MM-DD，非法返回空串（模板回落「—」）…
+  d.setDate(d.getDate() + lagDays(market))
+}
 ```
 
 **为什么「也补不回来」不能省**：留痕是「当天发了预测才写」，昨天没跑就是永久缺一天，

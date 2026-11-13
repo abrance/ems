@@ -181,8 +181,20 @@ const overviewSub = computed(
 )
 const chartSub = computed(() => `${MODE_LABEL[source.value]} · ${rangeLabel.value}`)
 
-/** 首个可配对交易日 = 首条留痕生成日 + 3（generated_on 当天、target_time 次日、真值 T+2） */
-const firstPairDate = computed(() => firstPairDateOf(recordedMeta.value?.generatedDates[0]))
+/**
+ * 首个可配对交易日 = 首条留痕生成日 + 该市场的真值发布滞后
+ * （generated_on 当天、target_time 次日；日前 T+0 → +1，实时 T+2 → +3）。
+ * 偏移随市场走，页面有市场切换，不能拿实时口径的 +3 说日前腿。
+ */
+const firstPairDate = computed(() => firstPairDateOf(recordedMeta.value?.generatedDates[0], market.value))
+
+/** 真值发布节奏的用户可读说法（按市场）：日前当天就出，实时 T+2 */
+const truthLagText = computed(() =>
+  market.value === 'real' ? '官方实际值 T+2 才发布' : '日前市场的官方实际值当天就出',
+)
+// 实际值未出时的括注：实时在等源站 T+2；日前源站当天就发，还没配对只可能是目标日的数据没入库。
+// 括注不能两边都用「官方 T+2」—— 那句话对日前是错的。
+const truthLagNote = computed(() => (market.value === 'real' ? '官方 T+2' : '目标日数据待入库'))
 
 /** 图上的水印：重跑腿常驻，历史存档额外再标一次 */
 const chartWatermark = computed(() => {
@@ -757,11 +769,11 @@ onMounted(async () => {
           <div class="empty-title">还没有可复盘的当时预测</div>
           <div>
             预测留痕自 {{ recordedMeta?.generatedDates[0] || '—' }} 起积累，之前的日子没有记录，也补不回来。
-            官方实际值 T+2 才发布，首个可配对交易日约在 {{ firstPairDate || '—' }}。
+            {{ truthLagText }}，首个可配对交易日约在 {{ firstPairDate || '—' }}。
           </div>
           <div v-if="recordedMeta?.unavailable" class="muted">{{ recordedMeta.unavailable }}</div>
           <div v-else-if="recordedMeta?.actualMissing" class="muted">
-            另有 {{ recordedMeta.actualMissing }} 条留痕的实际值还没出（官方 T+2）。
+            另有 {{ recordedMeta.actualMissing }} 条留痕的实际值还没出（{{ truthLagNote }}）。
           </div>
           <button class="btn" type="button" @click="switchToBacktest">先看当前模型重跑</button>
         </template>
