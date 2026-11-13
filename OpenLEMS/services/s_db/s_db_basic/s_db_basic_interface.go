@@ -248,8 +248,9 @@ type IHomeMarketService interface {
 // 这张表里只有 ocr / manual 两种 origin，官方值永远在 gd_spot_metric（pm-api），
 // 核对页右列另取一路；两边不覆盖、不合并、无 fallback。
 type IReportDailyService interface {
-	// UpsertBatch 按唯一键 (run_date, dataset, scope, metric) 覆盖写；force=false 时保留 manual 行。
-	// 返回写入条数与被保留（manual 未覆盖）条数。
+	// UpsertBatch 按唯一键 (run_date, dataset, scope, metric) 覆盖写。
+	// force=false 时保留 manual 行，并且只在「报告日比已有行更接近运行日」时才覆盖。
+	// 返回写入条数、被保留的 manual 条数与被保留的「报告日更远」条数。
 	UpsertBatch(ctx context.Context, rows []*s_db_model.SReportDailyModel, force bool) (ReportDailyWriteResult, error)
 	// ListByRunDateRange 取 [from, to] 区间内的日报原值行（按 run_date、dataset、scope、metric 升序）
 	ListByRunDateRange(ctx context.Context, from, to string) ([]*s_db_model.SReportDailyModel, error)
@@ -267,6 +268,8 @@ type IReportDailyService interface {
 type ReportDailyWriteResult struct {
 	Written   int // 实际写入（插入 + 覆盖）
 	Preserved int // 因 origin=manual 而被保留、未被本次覆盖的行数
+	// SkippedFarther 因已有行的报告日更接近运行日（或距离相等）而被保留、未被本次覆盖的行数
+	SkippedFarther int
 }
 
 // ReportDailyBackfillResult 历史回填结果

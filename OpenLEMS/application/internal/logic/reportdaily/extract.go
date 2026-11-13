@@ -136,6 +136,7 @@ func ExtractDay(ctx context.Context, reportDate string, force bool) (*v1.Extract
 		TradeDate:  extracted.TradeDate,
 		MetricRows: written.Written,
 		Preserved:  written.Preserved,
+		SkippedFarther: written.SkippedFarther,
 		Status:     status,
 		// 模板的交叉校验告警照原样透出（它们解释「为什么这一天的某行看起来不对」），
 		// 但不影响入库集合：入库只看上面的子集过滤。

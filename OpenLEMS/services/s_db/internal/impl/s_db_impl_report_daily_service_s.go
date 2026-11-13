@@ -27,8 +27,13 @@ func GetReportDailyService() s_db_basic.IReportDailyService {
 
 // UpsertBatch 按唯一键 (run_date, dataset, scope, metric) 覆盖写。
 //
-// force=false 时保留 origin=manual 的行：核对页上的日报原值允许人工修订，
-// 重跑解析不该把人改过的数悄悄换回 OCR 值（与旧链路 ReplaceMetrics 的语义一致）。
+// force=false 时有两层保留：
+//  1. origin=manual 的行：核对页上的日报原值允许人工修订，重跑解析不该把人改过的
+//     数悄悄换回 OCR 值（与旧链路 ReplaceMetrics 的语义一致），计入 Preserved。
+//  2. 「报告日最接近运行日」：同一运行日会被多份日报覆盖（表1(二) 当日 / 表2(一) T-2），
+//     只有新的报告日距离**严格更小**时才覆盖，否则保留已有行计入 SkippedFarther。
+//     距离相等时保留已有行（先到者胜，与 BackfillFromSpotMetric 的 INSERT OR IGNORE 同口径）。
+//     少了这条，活链路会被后写进来的远日报覆盖，而 compare 仍对外宣称「按最接近只留一行」。
 func (s *sReportDailyServiceImpl) UpsertBatch(ctx context.Context, rows []*s_db_model.SReportDailyModel, force bool) (s_db_basic.ReportDailyWriteResult, error) {
 	res := s_db_basic.ReportDailyWriteResult{}
 	for _, row := range rows {
@@ -37,19 +42,32 @@ func (s *sReportDailyServiceImpl) UpsertBatch(ctx context.Context, rows []*s_db_
 		}
 		if !force {
 			// 单字段扫进 *string 会被 gf 拒绝（in valid parameter type），按行结构体接。
+			// 距离算式与 BackfillFromSpotMetric 的 ORDER BY 完全一致，且都交给 sqlite 算，
+			// 避免 Go 侧再实现一份日期差。
 			var existing []struct {
-				Origin string `orm:"origin"`
+				Origin  string  `orm:"origin"`
+				Dist    float64 `orm:"dist"`
+				NewDist float64 `orm:"new_dist"`
 			}
 			err := g.DB().GetScan(ctx, &existing, `
-				SELECT origin FROM gd_report_daily
+				SELECT origin,
+				       ABS(julianday(report_date) - julianday(?)) AS dist,
+				       ABS(julianday(?) - julianday(?)) AS new_dist
+				FROM gd_report_daily
 				WHERE run_date = ? AND dataset = ? AND scope = ? AND metric = ?`,
-				row.RunDate, row.Dataset, row.Scope, row.Metric)
+				row.RunDate, row.ReportDate, row.RunDate, row.RunDate, row.Dataset, row.Scope, row.Metric)
 			if err != nil {
 				return res, errors.Wrap(err, "查询日报原值已有行失败")
 			}
-			if len(existing) > 0 && existing[0].Origin == s_db_model.ReportDailyOriginManual {
-				res.Preserved++
-				continue
+			if len(existing) > 0 {
+				if existing[0].Origin == s_db_model.ReportDailyOriginManual {
+					res.Preserved++
+					continue
+				}
+				if !(existing[0].NewDist < existing[0].Dist) {
+					res.SkippedFarther++
+					continue
+				}
 			}
 		}
 		_, err := g.DB().Exec(ctx, `
