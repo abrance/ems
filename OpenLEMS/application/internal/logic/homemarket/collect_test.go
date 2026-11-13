@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 解析层单测：拿本地桩服务替掉真实源站。
@@ -142,5 +143,58 @@ func TestHourOfRejectsBadFormat(t *testing.T) {
 	h, err := hourOf("2026-11-07 23:00:00")
 	if err != nil || h != 23 {
 		t.Errorf("hourOf = %d, %v；期望 23, nil", h, err)
+	}
+}
+
+// 14 天全失败：必须返回带类别的 error。
+// 返回 nil 会被调度器写成「最近 14 天都没有数据（源站未发布）」，源站故障被记成没发布，
+// 建在这句日志上的告警全是假的。
+func TestCollectHome24hAllFailuresSurfaceClassifiedError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "blocked", http.StatusBadRequest) // 动态防护的典型形态
+	})
+
+	date, n, err := CollectHome24h(context.Background(), time.Now())
+	if err == nil {
+		t.Fatal("14 天全部 400 时应返回 error（否则调度器打成「源站未发布」）")
+	}
+	if date != "" || n != 0 {
+		t.Errorf("失败时不该报日期/点数：date=%q n=%d", date, n)
+	}
+	if got := classifyErr(err); got != ErrKindBlocked {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindBlocked, err)
+	}
+	if !strings.Contains(err.Error(), string(ErrKindBlocked)) {
+		t.Errorf("错误文案该带类别：%v", err)
+	}
+}
+
+// 请求成功且 payload 明确为空：这才是「源站未发布」，返回 nil 且不报错。
+func TestCollectHome24hEmptyPayloadIsNotError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"msg":"操作成功！","data":{"details":[]}}`)
+	})
+
+	date, n, err := CollectHome24h(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("空 payload 不该报错，实际: %v", err)
+	}
+	if date != "" || n != 0 {
+		t.Errorf("未发布时应返回空日期/0 点：date=%q n=%d", date, n)
+	}
+}
+
+// 错误归类：JSON 形状不符要归 parse，别和网络/拦截混在一起。
+func TestGetJSONClassifiesParseError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `not json`)
+	})
+	var out tradeSituationResp
+	err := getJSON(context.Background(), gatewayBase+"/x", &out)
+	if err == nil {
+		t.Fatal("非 JSON 应返回错误")
+	}
+	if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
 	}
 }

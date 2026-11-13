@@ -10,6 +10,8 @@ import (
 	"s_db/s_db_model"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 )
 
@@ -94,6 +96,9 @@ func TestGetHome24hEndpointShape(t *testing.T) {
 			t.Fatalf("响应缺字段 %q：%v", k, got)
 		}
 	}
+	if got["pointCount"] != float64(24) {
+		t.Fatalf("pointCount = %v，期望 24", got["pointCount"])
+	}
 	if got["empty"] != false {
 		t.Fatalf("empty = %v，期望 false", got["empty"])
 	}
@@ -165,6 +170,50 @@ func TestGetNodePriceEndpointShape(t *testing.T) {
 	for _, k := range []string{"city", "periodType", "price"} {
 		if _, ok := first[k]; !ok {
 			t.Fatalf("点缺字段 %q: %v", k, first)
+		}
+	}
+}
+
+// date 格式错必须是参数错误，不能变成 empty:true —— 否则前端分不清「填错」和「源站没发布」。
+func TestGetHome24hRejectsBadDate(t *testing.T) {
+	setupHomeMarketDB(t)
+	c := &ControllerV1{}
+
+	_, err := c.GetHome24h(context.Background(), &v1.GetHome24hReq{Date: "2026/11/13"})
+	if err == nil {
+		t.Fatal("date=2026/11/13 应报参数错误")
+	}
+	if code := gerror.Code(err); code != gcode.CodeInvalidParameter {
+		t.Fatalf("code = %v，期望 CodeInvalidParameter（%v）", code, err)
+	}
+
+	// 地市端点同一口径
+	_, err = c.GetNodePrice(context.Background(), &v1.GetNodePriceReq{Date: "2026-13-01"})
+	if code := gerror.Code(err); code != gcode.CodeInvalidParameter {
+		t.Fatalf("node-price code = %v，期望 CodeInvalidParameter（%v）", code, err)
+	}
+}
+
+// 缺点日：全天统计不下发，但 pointCount 要说清楚点数。
+func TestGetHome24hPartialDayOmitsAllDayStats(t *testing.T) {
+	setupHomeMarketDB(t)
+	if _, err := g.DB().Exec(context.Background(),
+		`DELETE FROM gd_home_24h WHERE price_date = '2026-11-07' AND hour >= 17`); err != nil {
+		t.Fatalf("删点失败: %v", err)
+	}
+
+	c := &ControllerV1{}
+	res, err := c.GetHome24h(context.Background(), &v1.GetHome24hReq{})
+	if err != nil {
+		t.Fatalf("GetHome24h 失败: %v", err)
+	}
+	got := jsonShape(t, res)
+	if got["pointCount"] != float64(17) {
+		t.Fatalf("pointCount = %v，期望 17", got["pointCount"])
+	}
+	for _, k := range []string{"meanAhead", "meanRealtime", "peakPowerMw", "lowPowerMw"} {
+		if v, ok := got[k]; ok {
+			t.Fatalf("%s 不该下发（17 点不是全天），实际 %v", k, v)
 		}
 	}
 }

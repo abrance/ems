@@ -3,6 +3,7 @@ package homemarket
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -114,12 +115,34 @@ func TestLoadHome24hFullDay(t *testing.T) {
 	if day.Source != SourceHome24h {
 		t.Fatalf("source = %q", day.Source)
 	}
+	if day.PointCount != 24 {
+		t.Fatalf("pointCount = %d，期望 24", day.PointCount)
+	}
 	// 均值 = (400 + 423)/2 = 411.5
-	if !near(day.MeanAhead, 411.5) {
+	if day.MeanAhead == nil || !near(*day.MeanAhead, 411.5) {
 		t.Fatalf("均值 = %v，期望 411.5", day.MeanAhead)
 	}
-	if !near(day.PeakPowerMw, 60023) || !near(day.LowPowerMw, 60000) {
+	if day.PeakPowerMw == nil || day.LowPowerMw == nil ||
+		!near(*day.PeakPowerMw, 60023) || !near(*day.LowPowerMw, 60000) {
 		t.Fatalf("负荷峰谷错: %v / %v", day.PeakPowerMw, day.LowPowerMw)
+	}
+}
+
+// 缺点日：均值/峰谷不给值，但点数要说清楚 —— 17 个点算出的「全天均值」会被当结论用。
+func TestLoadHome24hPartialDayHasNoAllDayStats(t *testing.T) {
+	newTestDB(t)
+	seed24h(t, "2026-11-07", 17)
+
+	day, err := LoadHome24h(context.Background(), "2026-11-07")
+	if err != nil {
+		t.Fatalf("LoadHome24h 失败: %v", err)
+	}
+	if day.PointCount != 17 || len(day.Points) != 17 {
+		t.Fatalf("pointCount = %d / points = %d，期望都是 17", day.PointCount, len(day.Points))
+	}
+	if day.MeanAhead != nil || day.MeanRealtime != nil || day.PeakPowerMw != nil || day.LowPowerMw != nil {
+		t.Fatalf("17 点不该给全天统计：%+v / %+v / %+v / %+v",
+			day.MeanAhead, day.MeanRealtime, day.PeakPowerMw, day.LowPowerMw)
 	}
 }
 
@@ -208,14 +231,22 @@ func TestAgainstRealDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadHome24h 失败: %v", err)
 	}
-	t.Logf("24 点：日期 %s 最新 %s 滞后 %d 天 点数 %d 均值 日前 %.2f 实时 %.2f",
-		h.Date, h.LatestDate, h.LagDays, len(h.Points), h.MeanAhead, h.MeanRealtime)
+	t.Logf("24 点：日期 %s 最新 %s 滞后 %d 天 点数 %d 均值 日前 %s 实时 %s",
+		h.Date, h.LatestDate, h.LagDays, h.PointCount, fmtPtr(h.MeanAhead), fmtPtr(h.MeanRealtime))
 	n, err := LoadNodePrice(context.Background(), "")
 	if err != nil {
 		t.Fatalf("LoadNodePrice 失败: %v", err)
 	}
 	t.Logf("地市：日期 %s 滞后 %d 天 条数 %d（高峰 %d / 低谷 %d）",
 		n.Date, n.LagDays, len(n.Points), n.PeakCities, n.ValleyCities)
+}
+
+// fmtPtr 把可空的全天统计打印出来（缺点日就是 nil，不是 0）。
+func fmtPtr(v *float64) string {
+	if v == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%.2f", *v)
 }
 
 func near(a, b float64) bool {

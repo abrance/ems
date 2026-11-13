@@ -9,6 +9,9 @@ import (
 	"s_db/s_db_model"
 )
 
+// home24hPointsPerDay 一天的整点数（0..23）。缺点时均值/峰谷不给值。
+const home24hPointsPerDay = 24
+
 // Home24hPoint 一个整点。
 type Home24hPoint struct {
 	Hour          int     `json:"hour"`
@@ -31,12 +34,17 @@ type Home24hDay struct {
 	LagDays int            `json:"lagDays"`
 	Points  []Home24hPoint `json:"points"`
 	Source  string         `json:"source"`
+	// PointCount 该日实际落库的点数（正常 24）。缺点的日子不能拿来当全天统计。
+	PointCount int `json:"pointCount"`
 	// MeanAhead / MeanRealtime 当日均值（源站也给了 todaymeanPrevPrice/todaymeanPrice，
-	// 这里按落库的点自己算，保证与曲线一致）
-	MeanAhead    float64 `json:"meanAhead"`
-	MeanRealtime float64 `json:"meanRealtime"`
-	PeakPowerMw  float64 `json:"peakPowerMw"`
-	LowPowerMw   float64 `json:"lowPowerMw"`
+	// 这里按落库的点自己算，保证与曲线一致）。
+	//
+	// 只在 24 点齐全时才给值：17 个点算出的「全天均值」会被当成结论用。缺点时
+	// 这几个字段不下发（前端拿到 undefined 显示 —），并靠 PointCount 说明原因。
+	MeanAhead    *float64 `json:"meanAhead,omitempty"`
+	MeanRealtime *float64 `json:"meanRealtime,omitempty"`
+	PeakPowerMw  *float64 `json:"peakPowerMw,omitempty"`
+	LowPowerMw   *float64 `json:"lowPowerMw,omitempty"`
 }
 
 // NodePricePoint 一个地市在某时段的价格。
@@ -115,10 +123,14 @@ func LoadHome24h(ctx context.Context, date string) (*Home24hDay, error) {
 		}
 	}
 	out.Points = points
-	out.MeanAhead = sumAhead / float64(len(rows))
-	out.MeanRealtime = sumRealtime / float64(len(rows))
-	out.PeakPowerMw = peak
-	out.LowPowerMw = low
+	out.PointCount = len(rows)
+	// 只有满 24 点才算「全天」：缺点的日子给均值/峰谷就是错数
+	if out.PointCount == home24hPointsPerDay {
+		meanAhead := sumAhead / float64(out.PointCount)
+		meanRealtime := sumRealtime / float64(out.PointCount)
+		out.MeanAhead, out.MeanRealtime = &meanAhead, &meanRealtime
+		out.PeakPowerMw, out.LowPowerMw = &peak, &low
+	}
 	return out, nil
 }
 
