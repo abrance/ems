@@ -93,7 +93,7 @@ export interface MetricSeries {
 }
 
 export function fetchMetricSeries(
-  params: { from: string; to: string; kind?: string },
+  params: { from: string; to: string; kind?: string; allowFrozen?: boolean },
   signal?: AbortSignal,
 ): Promise<MetricSeries> {
   return api.get<MetricSeries>('/api/gd-metric/series', params, signal).then((r) => ({

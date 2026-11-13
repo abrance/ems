@@ -31,3 +31,19 @@ export function isoDate(d: Date): string {
 export function rangeEndingAt(end: Date, days: number): { from: string; to: string } {
   return { from: isoDate(new Date(end.getTime() - days * 86400_000)), to: isoDate(end) }
 }
+
+/**
+ * 数据最新日距今天几天（自然日，按 Asia/Shanghai 算）。
+ *
+ * 为什么固定时区：复盘页的「实际值截至 X · 滞后 N 天」是给广东现货市场看的，
+ * 用浏览器本地时区算会在跨时区（或 UTC 容器里的无头浏览器）漂一天，
+ * 同一个数据在两个地方显示成 2 天和 3 天。
+ * 算法：都把「日期」换成上海时区的自然日序号再相减，不做毫秒除法。
+ */
+export function lagDaysFrom(latestDate: string, today: Date = new Date()): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(latestDate).trim())
+  if (!m) return -1
+  const dataDay = Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000)
+  const todayDay = Math.floor((today.getTime() + 8 * 3600_000) / 86400000)
+  return todayDay - dataDay
+}

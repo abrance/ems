@@ -118,7 +118,10 @@ type store struct {
 	mu        sync.RWMutex
 	refreshMu sync.Mutex
 	// enabled 第三方 CSV 通道是否还去网上拉。false 时只读本地缓存，不再连第三方站点。
-	enabled      bool
+	enabled bool
+	// serveFrozen 过渡开关：允许**默认入口**读这个已停更的第三方通道。
+	// 默认 false —— 未经人拍板，任何调用方都拿不到 CSV 里的数（见 channel.go 的守卫）。
+	serveFrozen  bool
 	url          string
 	cachePath    string
 	metaPath     string
@@ -148,8 +151,11 @@ func shanghaiLocation() *time.Location {
 // loadConfig 读 gd_metric.* 配置。enabled 默认 true（行为与历史一致）；
 // 置 false 表示「第三方 CSV 通道停用」——不再向 file.xiaoyxq.top 拉取，
 // 只用本地已有缓存（96 点分时序列目前没有别的来源，本地数据仍然可用）。
-func loadConfig(ctx context.Context) (enabled bool, url, cachePath string, refresh time.Duration) {
+func loadConfig(ctx context.Context) (enabled, serveFrozen bool, url, cachePath string, refresh time.Duration) {
 	enabled = true
+	// 注意：serveFrozen 的默认值必须是 false。配置文件读不到时宁可「用不了」，
+	// 也不能把已停更的通道当成「还能用」。
+	serveFrozen = false
 	url = defaultURL
 	cachePath = defaultCachePath
 	hours := defaultRefreshHrs
@@ -171,7 +177,13 @@ func loadConfig(ctx context.Context) (enabled bool, url, cachePath string, refre
 	if v := strings.TrimSpace(os.Getenv("GD_METRIC_ENABLED")); v != "" {
 		enabled = !strings.EqualFold(v, "false") && v != "0"
 	}
-	return enabled, url, cachePath, time.Duration(hours) * time.Hour
+	if g.Cfg() != nil {
+		serveFrozen = g.Cfg().MustGet(ctx, "gd_metric.serve_frozen", false).Bool()
+	}
+	if v := strings.TrimSpace(os.Getenv("GD_METRIC_SERVE_FROZEN")); v != "" {
+		serveFrozen = !strings.EqualFold(v, "false") && v != "0"
+	}
+	return enabled, serveFrozen, url, cachePath, time.Duration(hours) * time.Hour
 }
 
 func loadMaxSize(ctx context.Context) int64 {
@@ -194,8 +206,9 @@ func metaPathFor(csvPath string) string {
 
 func initGlobal(ctx context.Context) {
 	globalOnce.Do(func() {
-		enabled, url, cachePath, refresh := loadConfig(ctx)
+		enabled, serveFrozen, url, cachePath, refresh := loadConfig(ctx)
 		global.enabled = enabled
+		global.serveFrozen = serveFrozen
 		global.url = url
 		global.cachePath = cachePath
 		global.refreshAfter = refresh
@@ -222,7 +235,18 @@ func LocalDataReady() bool {
 	return len(global.days) > 0
 }
 
+// GetSnapshot 读日/分时快照。
+//
+// 已停用：日频请用官方直采（spotmarket.LoadBoard）；96 点只剩冻结的历史演示。
 func GetSnapshot(ctx context.Context, from, to, date string) (*Snapshot, error) {
+	if err := guard(ctx, "电网日指标快照"); err != nil {
+		return nil, err
+	}
+	return GetFrozenSnapshot(ctx, from, to, date)
+}
+
+// GetFrozenSnapshot 读快照（**冻结的历史演示通道**）。
+func GetFrozenSnapshot(ctx context.Context, from, to, date string) (*Snapshot, error) {
 	initGlobal(ctx)
 	if err := global.ensureFresh(ctx); err != nil {
 		global.mu.RLock()

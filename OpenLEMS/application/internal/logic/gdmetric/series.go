@@ -54,8 +54,19 @@ func NormalizeKind(kind string) (SeriesKind, error) {
 const MaxSeriesDays = 400
 
 // GetSeries 返回 [from, to] 内某类指标的 96 点序列，按时间升序。
-// 区间内没有数据的日期直接跳过（不补洞）。
+//
+// 已停用：第三方通道不再更新，这里直接返回 ChannelRetiredError（带实际值止于哪天）。
+// 仍要读历史演示数据请显式用 GetFrozenSeries —— 名字里的 Frozen 就是提醒。
 func GetSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSample, error) {
+	if err := guard(ctx, "96 点序列"); err != nil {
+		return nil, err
+	}
+	return GetFrozenSeries(ctx, from, to, kind)
+}
+
+// GetFrozenSeries 读 96 点序列（**冻结的历史演示通道**）。
+// 区间内没有数据的日期直接跳过（不补洞）。
+func GetFrozenSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSample, error) {
 	initGlobal(ctx)
 	if err := global.ensureFresh(ctx); err != nil {
 		global.mu.RLock()
@@ -64,7 +75,7 @@ func GetSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSa
 		if empty {
 			return nil, err
 		}
-		// 有缓存就沿用：复盘看的是历史，不该因为一次拉取失败而打不开
+		// 有缓存就沿用（冻结通道本来就不会再有新数据）
 	}
 	return global.series(from, to, kind)
 }
@@ -129,7 +140,15 @@ func (s *store) series(from, to string, kind SeriesKind) ([]TimedSample, error) 
 // 复盘/回测必须用它：占位行是另一个模型的预测，拿它当基准真值去算准确度，
 // 算出来的只是「两个模型差多少」，与「预测准不准」无关。
 func GetRealSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSample, error) {
-	all, err := GetSeries(ctx, from, to, kind)
+	if err := guard(ctx, "96 点实际值序列"); err != nil {
+		return nil, err
+	}
+	return GetFrozenRealSeries(ctx, from, to, kind)
+}
+
+// GetFrozenRealSeries 同 GetFrozenSeries，但只保留实际值（**冻结通道**，仅供历史演示）。
+func GetFrozenRealSeries(ctx context.Context, from, to string, kind SeriesKind) ([]TimedSample, error) {
+	all, err := GetFrozenSeries(ctx, from, to, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +169,7 @@ func realOnly(all []TimedSample) []TimedSample {
 
 // AvailableDates 返回区间内确实有数据的日期（升序），供前端灰显无数据的日期。
 func AvailableDates(ctx context.Context, from, to string) ([]string, error) {
-	series, err := GetSeries(ctx, from, to, KindDayAhead)
+	series, err := GetFrozenSeries(ctx, from, to, KindDayAhead)
 	if err != nil {
 		return nil, err
 	}

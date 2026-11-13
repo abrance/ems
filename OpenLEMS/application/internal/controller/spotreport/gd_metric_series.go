@@ -19,7 +19,15 @@ func (c *ControllerV1) GetGdMetricSeries(ctx context.Context, req *v1.GetGdMetri
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
 	}
 	points, err := gdmetric.GetSeries(ctx, req.From, req.To, kind)
+	if gdmetric.IsChannelRetired(err) && req.AllowFrozen {
+		// 历史演示：调用点写 Frozen 才能读，且前端必须显示「冻结」提示
+		points, err = gdmetric.GetFrozenSeries(ctx, req.From, req.To, kind)
+	}
 	if err != nil {
+		if gdmetric.IsChannelRetired(err) {
+			// 停更是「明确事实」，不要包成 500 把原因吞掉
+			return nil, gerror.NewCode(gcode.CodeInternalError, err.Error())
+		}
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "读取电网日指标序列失败")
 	}
 	days, err := gdmetric.AvailableDates(ctx, req.From, req.To)

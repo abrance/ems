@@ -1,6 +1,6 @@
 import { fetchBacktest, fetchEffectSummary } from '@/api/effect'
 import { fetchPriceBacktest, fetchPriceForecast } from '@/api/forecast'
-import { fetchMetricSeries, fetchSupplyCurve } from '@/api/gdmetric'
+import { fetchMetricSeries } from '@/api/gdmetric'
 import { getReportData, listReports } from '@/api/spotreport'
 
 /**
@@ -82,8 +82,10 @@ const MARKET_LABEL: Record<string, string> = { ahead: '日前', real: '实时' }
 export const DATASETS: Dataset[] = [
   {
     key: 'grid-metric',
-    title: '电网日指标（96 点）',
-    desc: '负荷或出清价的 15 分钟序列，按区间导出。',
+    title: '电网日指标（96 点 · 已停用）',
+    // 用户硬规则：官方没覆盖的能力不许拿 CSV 假装还能用。官方披露只有日频，
+    // 96 点只剩冻结的历史演示（2026-10-02 前），所以这里直接说明并指向官方导出。
+    desc: '已停用：官方披露没有 96 点分时口径，第三方通道实际值止于 2026-10-02。日频请导出「现货市场日指标」。',
     source: 'GET /api/gd-metric/series',
     params: [
       {
@@ -108,6 +110,7 @@ export const DATASETS: Dataset[] = [
       const kindLabel =
         p.kind === 'load' ? '系统负荷 MW' : p.kind === 'dayAhead' ? '日前出清价 元/MWh' : '实时出清价 元/MWh'
       const res = await fetchMetricSeries({ from: p.from, to: p.to, kind: p.kind })
+      // 关卡在后端：默认入口会返回「通道已停更」的错误，而不是空数组（空的会被读成「这几天没数据」）
       return {
         columns: ['日期', '时刻', '类别', '数值', '来源'],
         rows: res.points.map((s) => [
@@ -166,7 +169,7 @@ export const DATASETS: Dataset[] = [
   {
     key: 'price-forecast',
     title: '电价预测（TimesFM）',
-    desc: '模型输入的历史序列 + 预测点及分位带，一次导出成一张纵向表。',
+    desc: '模型输入的历史序列 + 预测点及分位带，一次导出成一张纵向表（官方日频日均价）。\n96 点不导出：它的输入是冻结在 2026-10-02 的第三方曲线，导出来会像「今天的预测」。',
     source: 'GET /api/forecast/price',
     params: [
       MARKET,
@@ -174,11 +177,8 @@ export const DATASETS: Dataset[] = [
         key: 'grain',
         label: '粒度',
         type: 'select',
-        options: [
-          { value: 'day', label: '日均（日报）' },
-          { value: 'intraday', label: '96 点' },
-        ],
-        default: 'intraday',
+        options: [{ value: 'day', label: '日均（官方日频）' }],
+        default: 'day',
       },
       { key: 'historyDays', label: '历史天数', type: 'number', default: '30', min: 1, max: 400 },
       { key: 'horizonDays', label: '预测天数', type: 'number', default: '5', min: 1, max: 15 },
@@ -231,26 +231,6 @@ export const DATASETS: Dataset[] = [
           pt.q90,
           Number((pt.predicted - pt.actual).toFixed(4)),
           Number(Math.abs(pt.predicted - pt.actual).toFixed(4)),
-        ]),
-        suffix: MARKET_LABEL[p.market] ?? p.market,
-      }
-    },
-  },
-  {
-    key: 'supply-curve',
-    title: '策略反演·反演报价段',
-    desc: '由 (负荷, 出清价) 反演出的市场聚合报价段（估计值，不是任何一台机组的真实报价）。',
-    source: 'GET /api/gd-metric/supply-curve',
-    params: [MARKET, dateParam('from', '起始日期', 89), dateParam('to', '结束日期', 0)],
-    async load(p) {
-      const res = await fetchSupplyCurve({ from: p.from, to: p.to, market: p.market })
-      return {
-        columns: ['负荷下限 MW', '负荷上限 MW', '反演报价 元/MWh', '观测点数'],
-        rows: res.steps.map((s) => [
-          Number(s.loadFrom.toFixed(0)),
-          Number(s.loadTo.toFixed(0)),
-          Number(s.price.toFixed(2)),
-          s.count,
         ]),
         suffix: MARKET_LABEL[p.market] ?? p.market,
       }
