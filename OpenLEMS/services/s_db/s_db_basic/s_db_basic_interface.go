@@ -240,6 +240,15 @@ type IHomeMarketService interface {
 	ListNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceModel, error)
 	// LatestNodePriceDate 最近一个有数据的运行日
 	LatestNodePriceDate(ctx context.Context) (string, error)
+
+	// RecordFetchRun 记一次采集尝试（按 target_date+dataset 覆盖），返回落库后的行。
+	// 调用方只填 TargetDate/Dataset/Status/ErrorKind/RowsWritten/RowsExpected/LastError，
+	// attempt_count 与两个连续计数由实现按已有行推算。
+	RecordFetchRun(ctx context.Context, run *s_db_model.SFetchRunModel) (*s_db_model.SFetchRunModel, error)
+	// LatestFetchRun 某路最近一次尝试（按写入顺序倒序）；没有记录时返回 nil
+	LatestFetchRun(ctx context.Context, dataset string) (*s_db_model.SFetchRunModel, error)
+	// LatestOKFetchRun 某路最近一次成功的行（按 target_date 倒序）；没有成功记录时返回 nil
+	LatestOKFetchRun(ctx context.Context, dataset string) (*s_db_model.SFetchRunModel, error)
 }
 
 // IReportDailyService 日报核对左列（OCR 日报原值）的读写。

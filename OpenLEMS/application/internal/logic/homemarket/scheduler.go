@@ -2,6 +2,8 @@ package homemarket
 
 import (
 	"context"
+	stdErrors "errors"
+	"sync"
 	"time"
 
 	"common/c_log"
@@ -27,6 +29,12 @@ const (
 // MaxBackfillDays 手动回补的窗口上限。再大就不是「补洞」而是「导数据」了，
 // 而源站有动态防护：一次 30 天 = 30 次 24 点 + 30 次地市，已经够呛。
 const MaxBackfillDays = 30
+
+// ErrBackfillBusy 已有回补在跑。
+var ErrBackfillBusy = stdErrors.New("回补正在进行中，请稍后再试")
+
+// backfillMu 回补互斥锁（包级）：自动启动回补与运维手动回补共用一个。
+var backfillMu sync.Mutex
 
 // Start 启动采集（幂等：重复调用只起一个协程由 ctx 控制生命周期）。
 //
@@ -66,7 +74,15 @@ func Start(ctx context.Context, interval time.Duration) {
 // days 是**地市**的窗口（T+0 口径，含当天）；24 点的窗口由 Home24hWindowDays
 // 单独换算（源站 T-6 才发布，共用一个数字会让整窗只剩一天有数）。
 // 失败只记日志、不补假数据，与自动采集同一套语义 —— 调用方看返回值就知道哪几天真写进去了。
-func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, map[string]int) {
+//
+// 回补是全局唯一的：窗口最大 30 天 × 两路 = 源站几百次请求，两个回补叠在一起只会
+// 把动态防护触得更狠。抢不到锁直接返回 ErrBackfillBusy，不排队、不阻塞调用方。
+func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, map[string]int, error) {
+	if !backfillMu.TryLock() {
+		return nil, nil, ErrBackfillBusy
+	}
+	defer backfillMu.Unlock()
+
 	nodeDays := clampDays(days)
 	home24hWindow := Home24hWindowDays(nodeDays)
 	from := now.In(time.Local).AddDate(0, 0, -(home24hWindow - 1))
@@ -75,7 +91,7 @@ func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, 
 		c_log.Warningf(ctx, "手动回补 24 点分时中断（不补假数据）：%+v，已写入 %v", err, home24h)
 	}
 	node := BackfillNodePrice(ctx, now, nodeDays)
-	return home24h, node
+	return home24h, node, nil
 }
 
 // clampDays 把回补窗口夹到 [默认值, 上限]。
@@ -101,7 +117,12 @@ func runOnce(ctx context.Context, backfillDays int, first bool) {
 
 	if first {
 		// 首次启动：两路一起按窗口回补（与手动接口同一份实现，口径不会分叉）。
-		home24h, node := RunBackfill(ctx, now, backfillDays)
+		// 启动阶段抢不到锁说明有人在手动回补，跳过这一轮就行（下一轮定时会照常采当天）。
+		home24h, node, err := RunBackfill(ctx, now, backfillDays)
+		if err != nil {
+			c_log.Warningf(ctx, "首次启动回补跳过：%+v", err)
+			return
+		}
 		c_log.BizInfof(ctx, "首次启动回补完成：24 点 %v；地市 %v", home24h, node)
 		return
 	}

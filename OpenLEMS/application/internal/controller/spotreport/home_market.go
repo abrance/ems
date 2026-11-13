@@ -66,20 +66,40 @@ func (c *ControllerV1) GetNodePrice(ctx context.Context, req *v1.GetNodePriceReq
 // 注意 days 只约束地市（T+0）；24 点源站 T-6 才发布，窗口由
 // homemarket.Home24hWindowDays 单独换算，不会因为 days=7 就只剩一天有数。
 //
-// 同步阻塞：窗口上限 30 天 × 两路，最坏一个请求会跑很久，且没有并发保护
-// （启动回补同时再调一次会对源站打双倍请求）。落库是 ON CONFLICT 幂等，不会写坏数据。
-// 这是已知遗留项，改异步或加互斥另开 PR。
+// 同步阻塞：窗口上限 30 天 × 两路，最坏一个请求会跑很久，所以回补在逻辑层加了
+// 包级互斥（homemarket.backfillMu）：同时再来一次直接返回「回补正在进行中」，
+// 不排队、也不会对源站打双倍请求。
 func (c *ControllerV1) BackfillHomeMarket(ctx context.Context, req *v1.BackfillHomeMarketReq) (*v1.BackfillHomeMarketRes, error) {
 	days := req.Days
 	if days <= 0 {
 		// 缺省读配置，与自动采集保持一致：运维不传参数也不会补错窗口
 		days = homemarket.ParseDays(g.Cfg().MustGet(ctx, "home_market.backfill_days", "7").String())
 	}
-	home24h, node := homemarket.RunBackfill(ctx, time.Now(), days)
+	home24h, node, err := homemarket.RunBackfill(ctx, time.Now(), days)
+	if err != nil {
+		// 回补在跑属于「操作冲突」而不是参数错：CodeInvalidParameter 会让前端
+		// 把提示挂在 days 输入框上，这里用 Invalid Operation。
+		return nil, gerror.NewCode(gcode.CodeInvalidOperation, err.Error())
+	}
 	return &v1.BackfillHomeMarketRes{
 		Days:        min(days, homemarket.MaxBackfillDays),
 		Home24hDays: homemarket.Home24hWindowDays(days),
 		Home24h:     home24h,
 		NodePrice:   node,
 	}, nil
+}
+
+// GetHomeMarketStatus 两路采集状态：只讲「能不能用」，不给数值。
+//
+// 四个非正常态各自对应一种处置：
+//   - never   从没成功过：查配置/网络/是否被源站 400 挡死；
+//   - failed  最近一次失败，errorKind 区分 blocked（防护）/ network / parse（改版）；
+//   - stopped 连续 K 次「200 + 空」：源站停更或页面改版，别再等人肉盯；
+//   - lagging 最近成功但数据滞后超预期：采集在跑但没采到新的。
+func (c *ControllerV1) GetHomeMarketStatus(ctx context.Context, req *v1.GetHomeMarketStatusReq) (*v1.GetHomeMarketStatusRes, error) {
+	st, err := homemarket.LoadMarketStatus(ctx, time.Now())
+	if err != nil {
+		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取官网主页采集状态失败")
+	}
+	return &v1.GetHomeMarketStatusRes{MarketStatus: st}, nil
 }

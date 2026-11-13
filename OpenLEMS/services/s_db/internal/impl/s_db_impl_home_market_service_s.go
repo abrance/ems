@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/pkg/errors"
 )
 
@@ -136,4 +137,128 @@ func (s *sHomeMarketServiceImpl) LatestNodePriceDate(ctx context.Context) (strin
 		return "", nil
 	}
 	return rows[0].RunDate, nil
+}
+
+// RecordFetchRun 记一次采集尝试。
+//
+// 先读旧行再覆盖写（而不是一条 ON CONFLICT 里做 CASE 算术）：连续失败/连续空
+// 这两个计数要读旧值，写成 SQL 表达式既难读又只有一个调用方会受益。
+// shortcut: 读-改-写不是原子的，同一 (target_date,dataset) 并发写会丢一次计数；
+// 采集是单协程串行调用，真并行采集时改成 ON CONFLICT 里的 CASE 算术。
+func (s *sHomeMarketServiceImpl) RecordFetchRun(ctx context.Context, run *s_db_model.SFetchRunModel) (*s_db_model.SFetchRunModel, error) {
+	if run == nil || run.TargetDate == "" || run.Dataset == "" {
+		return nil, errors.New("采集运行记录缺少 target_date/dataset")
+	}
+	prev, err := s.fetchRun(ctx, run.TargetDate, run.Dataset)
+	if err != nil {
+		return nil, err
+	}
+
+	run.AttemptCount = 1
+	run.ConsecutiveFailures = 0
+	run.ConsecutiveEmpties = 0
+	switch run.Status {
+	case s_db_model.FetchStatusFailed:
+		run.ConsecutiveFailures = 1
+	case s_db_model.FetchStatusEmpty:
+		run.ConsecutiveEmpties = 1
+	}
+	if prev != nil {
+		run.AttemptCount = prev.AttemptCount + 1
+		if run.Status == s_db_model.FetchStatusFailed {
+			run.ConsecutiveFailures = prev.ConsecutiveFailures + 1
+		}
+		if run.Status == s_db_model.FetchStatusEmpty {
+			run.ConsecutiveEmpties = prev.ConsecutiveEmpties + 1
+		}
+		// 失败/为空不抹掉上一次成功时间：页面要看的是「上次有数是什么时候」。
+		run.LastOkAt = prev.LastOkAt
+	}
+	if run.Status == s_db_model.FetchStatusOK {
+		run.LastOkAt = gtime.Now()
+	}
+
+	_, err = g.DB().Exec(ctx, `
+		INSERT INTO gd_home_market_fetch_run
+			(target_date, dataset, status, error_kind, rows_written, rows_expected,
+			 attempt_count, consecutive_failures, consecutive_empties, last_error,
+			 first_seen_at, last_ok_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, datetime('now'))
+		ON CONFLICT(target_date, dataset) DO UPDATE SET
+			status = excluded.status,
+			error_kind = excluded.error_kind,
+			rows_written = excluded.rows_written,
+			rows_expected = excluded.rows_expected,
+			attempt_count = excluded.attempt_count,
+			consecutive_failures = excluded.consecutive_failures,
+			consecutive_empties = excluded.consecutive_empties,
+			last_error = excluded.last_error,
+			last_ok_at = excluded.last_ok_at,
+			updated_at = datetime('now')
+	`, run.TargetDate, run.Dataset, run.Status, run.ErrorKind, run.RowsWritten, run.RowsExpected,
+		run.AttemptCount, run.ConsecutiveFailures, run.ConsecutiveEmpties, run.LastError,
+		nullableTime(run.LastOkAt))
+	if err != nil {
+		return nil, errors.Wrap(err, "写入采集运行记录失败")
+	}
+	return s.fetchRun(ctx, run.TargetDate, run.Dataset)
+}
+
+func (s *sHomeMarketServiceImpl) LatestFetchRun(ctx context.Context, dataset string) (*s_db_model.SFetchRunModel, error) {
+	// 按 id 兜底排序：同一轮里 14 个日期是同一秒写进去的，updated_at 会撞。
+	var rows []*s_db_model.SFetchRunModel
+	err := g.Model(s_db_model.TableFetchRun).Ctx(ctx).
+		Where("dataset", dataset).
+		OrderDesc("id").
+		Limit(1).
+		Scan(&rows)
+	if err != nil {
+		return nil, errors.Wrap(err, "查询最近一次采集记录失败")
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+func (s *sHomeMarketServiceImpl) LatestOKFetchRun(ctx context.Context, dataset string) (*s_db_model.SFetchRunModel, error) {
+	var rows []*s_db_model.SFetchRunModel
+	err := g.Model(s_db_model.TableFetchRun).Ctx(ctx).
+		Where("dataset", dataset).
+		Where("status", s_db_model.FetchStatusOK).
+		OrderDesc("target_date").
+		OrderDesc("id").
+		Limit(1).
+		Scan(&rows)
+	if err != nil {
+		return nil, errors.Wrap(err, "查询最近一次成功采集记录失败")
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+func (s *sHomeMarketServiceImpl) fetchRun(ctx context.Context, targetDate, dataset string) (*s_db_model.SFetchRunModel, error) {
+	var rows []*s_db_model.SFetchRunModel
+	err := g.Model(s_db_model.TableFetchRun).Ctx(ctx).
+		Where("target_date", targetDate).
+		Where("dataset", dataset).
+		Limit(1).
+		Scan(&rows)
+	if err != nil {
+		return nil, errors.Wrap(err, "查询采集运行记录失败")
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// nullableTime 让 nil 走进 sql 的 NULL（gtime 零值会被写成 0001-01-01，破坏「从没成功过」的语义）。
+func nullableTime(t *gtime.Time) interface{} {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t
 }

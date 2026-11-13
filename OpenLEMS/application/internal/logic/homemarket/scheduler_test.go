@@ -136,7 +136,10 @@ func TestHome24hWindowDecoupledFromNodePrice(t *testing.T) {
 
 	const days = defaultBackfillDays // 生产默认 7
 	now := time.Now()
-	home24h, node := RunBackfill(context.Background(), now, days)
+	home24h, node, err := RunBackfill(context.Background(), now, days)
+	if err != nil {
+		t.Fatalf("RunBackfill 失败: %v", err)
+	}
 
 	if len(node) != days {
 		t.Errorf("地市回补天数 = %d，期望 %d（地市窗口就是调用方给的那个数字）", len(node), days)
@@ -197,7 +200,10 @@ func TestRunBackfillClampsWindowAndCoversBothRoutes(t *testing.T) {
 	// 手动补洞入口：窗口上限 30 天，两路都回补。
 	// 传 999 天若不夹紧，会对着有动态防护的源站连打 999 次。
 	now := time.Now()
-	home24h, node := RunBackfill(context.Background(), now, 999)
+	home24h, node, err := RunBackfill(context.Background(), now, 999)
+	if err != nil {
+		t.Fatalf("RunBackfill 失败: %v", err)
+	}
 
 	if len(node) != MaxBackfillDays {
 		t.Errorf("地市回补天数 = %d，期望夹到上限 %d", len(node), MaxBackfillDays)
