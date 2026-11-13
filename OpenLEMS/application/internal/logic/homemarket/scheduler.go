@@ -24,6 +24,10 @@ const (
 	startupDelay = 90 * time.Second
 )
 
+// MaxBackfillDays 手动回补的窗口上限。再大就不是「补洞」而是「导数据」了，
+// 而源站有动态防护：一次 30 天 = 30 次 24 点 + 30 次地市，已经够呛。
+const MaxBackfillDays = 30
+
 // Start 启动采集（幂等：重复调用只起一个协程由 ctx 控制生命周期）。
 //
 // 关掉的办法：配置 home_market.enabled=false。默认 true —— 这两路是页面的数据源，
@@ -57,12 +61,42 @@ func Start(ctx context.Context, interval time.Duration) {
 	c_log.Infof(ctx, "官网主页市场数据采集已启动：每 %s 一次（首次 %s 后）", interval, startupDelay)
 }
 
+// RunBackfill 手动回补一次两路（供运维接口调用）。
+//
+// 与首次启动的窗口口径一致：24 点与地市都是「今天往回 days 天」。
+// 失败只记日志、不补假数据，与自动采集同一套语义 —— 调用方看返回值就知道哪几天真写进去了。
+func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, map[string]int) {
+	if days <= 0 {
+		days = defaultBackfillDays
+	}
+	if days > MaxBackfillDays {
+		days = MaxBackfillDays
+	}
+	from := now.In(time.Local).AddDate(0, 0, -(days - 1))
+	home24h, err := BackfillHome24h(ctx, from, now)
+	if err != nil {
+		c_log.Warningf(ctx, "手动回补 24 点分时中断（不补假数据）：%+v，已写入 %v", err, home24h)
+	}
+	node := BackfillNodePrice(ctx, now, days)
+	return home24h, node
+}
+
 // runOnce 一次采集：24 点取最近有数的一天，地市按最近 N 天回补。
 //
-// first 为 true 时地市做一次回补（覆盖最近 N 天）；之后每次只采当天 ——
+// first 为 true 时两路都做一次回补（覆盖最近 N 天）；之后每次只采当天 ——
 // 回补是「补历史缺口」，每次定时都重扫 7 天既浪费请求也容易触发源站限流。
+//
+// 24 点必须回补而不能只靠 CollectHome24h：它探到「最近一个有数的一天」就停手，
+// 进程停机跨过一个发布日时，恢复后只会采到最新那天，中间几天永久缺。
 func runOnce(ctx context.Context, backfillDays int, first bool) {
 	now := time.Now()
+
+	if first {
+		// 首次启动：两路一起按窗口回补（与手动接口同一份实现，口径不会分叉）。
+		home24h, node := RunBackfill(ctx, now, backfillDays)
+		c_log.BizInfof(ctx, "首次启动回补完成：24 点 %v；地市 %v", home24h, node)
+		return
+	}
 
 	date, n, err := CollectHome24h(ctx, now)
 	if err != nil {
@@ -73,20 +107,10 @@ func runOnce(ctx context.Context, backfillDays int, first bool) {
 		c_log.Infof(ctx, "24 点分时最近 %d 天都没有数据（源站未发布）", maxLookbackDays)
 	}
 
-	if first {
-		got := BackfillNodePrice(ctx, now, backfillDays)
-		c_log.BizInfof(ctx, "地市节点价回补完成：%v", got)
-		return
-	}
 	today := now.Format(dateLayout)
 	if m, err := CollectNodePrice(ctx, today); err != nil {
 		c_log.Warningf(ctx, "采集地市节点价 %s 失败：%+v", today, err)
 	} else if m > 0 {
 		c_log.BizInfof(ctx, "地市节点价已更新：%s（%d 条）", today, m)
 	}
-}
-
-// RunOnceNow 供接口/测试手动触发一次（不改变定时器状态）。
-func RunOnceNow(ctx context.Context, backfillDays int) {
-	runOnce(ctx, backfillDays, false)
 }

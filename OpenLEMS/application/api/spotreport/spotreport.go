@@ -16,4 +16,6 @@ type ISpotReportV1 interface {
 	// 但响应中间件按**接口**处理返回值，拿不到具体类型就写出空 body（HTTP 200 + 空）。
 	GetHome24h(ctx context.Context, req *v1.GetHome24hReq) (res *v1.GetHome24hRes, err error)
 	GetNodePrice(ctx context.Context, req *v1.GetNodePriceReq) (res *v1.GetNodePriceRes, err error)
+	// BackfillHomeMarket 运维手动补洞：按窗口重跑两路回补。
+	BackfillHomeMarket(ctx context.Context, req *v1.BackfillHomeMarketReq) (res *v1.BackfillHomeMarketRes, err error)
 }

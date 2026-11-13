@@ -2,12 +2,14 @@ package spotreport
 
 import (
 	"context"
+	"time"
 
 	v1 "application/api/spotreport/v1"
 	"application/internal/logic/homemarket"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // GetHome24h 官网主页 24 点分时（电价 + 负荷）。
@@ -29,4 +31,23 @@ func (c *ControllerV1) GetNodePrice(ctx context.Context, req *v1.GetNodePriceReq
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取地市节点价失败")
 	}
 	return &v1.GetNodePriceRes{NodePriceDay: day}, nil
+}
+
+// BackfillHomeMarket 手动回补官网主页两路数据（运维补洞）。
+//
+// 自动采集只能保证「首次启动补一次窗口 + 每轮采最新」：某天采集失败后，
+// 下一轮的 CollectHome24h 会探到更新的日子停手，失败那天不会自己回来。
+// 这个接口把那个洞补上，窗口与首次启动同一份实现（homemarket.RunBackfill）。
+func (c *ControllerV1) BackfillHomeMarket(ctx context.Context, req *v1.BackfillHomeMarketReq) (*v1.BackfillHomeMarketRes, error) {
+	days := req.Days
+	if days <= 0 {
+		// 缺省读配置，与自动采集保持一致：运维不传参数也不会补错窗口
+		days = homemarket.ParseDays(g.Cfg().MustGet(ctx, "home_market.backfill_days", "7").String())
+	}
+	home24h, node := homemarket.RunBackfill(ctx, time.Now(), days)
+	return &v1.BackfillHomeMarketRes{
+		Days:      min(days, homemarket.MaxBackfillDays),
+		Home24h:   home24h,
+		NodePrice: node,
+	}, nil
 }
