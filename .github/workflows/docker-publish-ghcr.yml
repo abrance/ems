@@ -14,7 +14,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: abrance/yoc/.github/workflows/docker-publish-ghcr.yml@v1.0.0
+    uses: abrance/yoc/.github/workflows/docker-publish-ghcr.yml@v1.0.1
     with:
       context: OpenLEMS
       file: OpenLEMS/script/Dockerfile.dev
