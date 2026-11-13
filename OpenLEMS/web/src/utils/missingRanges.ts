@@ -71,7 +71,13 @@ export function missingSummary(dates: string[]): string {
   const ranges = missingRanges(unique)
   // 日期解析不了就退回逐个列：折叠的前提是「知道缺了哪几天」，不知道就别折
   if (unique.length <= FOLD_OVER || !ranges.length) {
-    return `区间内未入库：${unique.join('、')}`
+    // 逐个列也要按日期升序：调用方传乱序时印输入顺序，会被读成「缺了这几天」的错序。
+    // ranges 非空就说明全部日期可解析，能排；有坏日期时（ranges 为空）退回原样，
+    // 宁可长，不许悄悄丢一天。
+    const listed = ranges.length
+      ? [...unique].sort((a, b) => (dayNumber(a) as number) - (dayNumber(b) as number))
+      : unique
+    return `区间内未入库：${listed.join('、')}`
   }
 
   const multi = ranges.length > 1
