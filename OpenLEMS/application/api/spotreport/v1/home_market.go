@@ -28,3 +28,20 @@ type GetNodePriceReq struct {
 type GetNodePriceRes struct {
 	*homemarket.NodePriceDay
 }
+
+// BackfillHomeMarketReq 手动触发一次两路回补（运维补洞用）。
+//
+// 为什么需要这个接口：自动采集只能保证「首次启动补一次窗口 + 每轮采最新」。
+// 如果某天采集失败（源站临时挂掉、机器重启），下一轮的 CollectHome24h 探到
+// 更新的日子就停手 —— 失败那天再也不会被重试，成为永久空洞。
+// 这里让运维能指定窗口重跑，而不是只能进容器敲 SQL 或重启进程。
+type BackfillHomeMarketReq struct {
+	g.Meta `path:"/gd-metric/home-market/backfill" method:"post" tags:"电力市场" summary:"手动回补官网主页两路数据（24 点 + 地市节点价）" role:"admin"`
+	Days   int `json:"days" d:"从今天往回回补的天数，缺省读配置 home_market.backfill_days（7），上限 30"`
+}
+
+type BackfillHomeMarketRes struct {
+	Days      int            `json:"days" dc:"实际回补窗口（含当天）"`
+	Home24h   map[string]int `json:"home24h" dc:"24 点：日期 → 写入点数（无数据的日子不出现）"`
+	NodePrice map[string]int `json:"nodePrice" dc:"地市：日期 → 写入条数"`
+}
