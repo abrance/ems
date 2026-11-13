@@ -2469,62 +2469,18 @@ console.log('\n== 预测复盘页 ==')
   check(bodyHas('占位不入曲线'), '口径说明写明 999 占位不当基准')
 }
 
-console.log('\n== 策略反演页 ==')
+console.log('\n== 策略反演页（已停用）==')
 await clickTo('分析预测', '策略反演')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
-  await waitFor(() => bodyHas('统计反演'))
-  check(bodyHas('估计值') && bodyHas('不是任何一台机组的真实报价'), '明示是统计反演、不是机组真实报价')
-
-  await waitFor(() => bodyHas('观测点数') || bodyHas('1000 个观测点'))
-  check(bodyHas('1000 个观测点 · 30 天'), '概览显示观测点数与覆盖天数')
-  check(bodyHas('1.000'), '负荷-价格秩相关原样显示')
-
-  // 当前负荷默认取 latestLoad=1500；两箱分位相同 ⇒ 插值结果就是 uniformQ
-  //   500 MW 处中位价 = 500；负荷历史分位 = 500/1000 = 50%
-  await waitFor(() => bodyHas('当前负荷历史分位'))
-  check(bodyHas('50.0%'), '当前负荷历史分位 = 50%（500+500 观测点中前一半在下方）', bodyHas('50.0%'))
-  check(bodyHas('500.0'), '当前负荷处的中位价 = 500.0 元/MWh')
-
-  // 未填边际成本时必须提示「最优点会落在最低报价」
-  check(bodyHas('未填边际成本') && bodyHas('最优点会落在最低报价'), '未填成本时给出退化提示')
-
-  // 填成本 500 ⇒ 最优报价 = 500（成本下方报都是同样的 125，取扫描下界）、期望收益 = 125
-  const costInput = [...doc.querySelectorAll('.toolbar input[type=number]')].pop()
-  costInput.value = '500'
-  costInput.dispatchEvent(new window.Event('input', { bubbles: true }))
-  await tick()
-  check(!bodyHas('未填边际成本'), '填了成本后退化提示消失')
-  await waitFor(() => bodyHas('最优报价'))
-  check(bodyHas('125.0'), '期望收益代理 = 125.0 元/MWh（∫₅₀₀¹⁰⁰⁰(p−500)/1000 dp）')
-
-  // 策略族：目标中标概率 80/50/20% → 报价 200/500/800
-  //   中标时均价 = E[p|p≥bid]；期望收益 = E[(p−500)·1{p≥bid}]（成本 500）
-  //   稳健的口径 125 最高，与上面 KPI 的「最优报价 500」自洽 —— 两处用同一套公式
-  const table = [...doc.querySelectorAll('.table')].pop()
-  const cells = [...table.querySelectorAll('div')].map((d) => d.textContent.replace(/\s+/g, '').trim())
-  const rowOf = (label) => {
-    const i = cells.indexOf(label)
-    return cells.slice(i, i + 6)
-  }
-  check(JSON.stringify(rowOf('激进')) === JSON.stringify(['激进', '80%', '200.0', '80.0%', '600.0', '80.0']),
-    '激进策略：80% 中标率 → 报价 200', JSON.stringify(rowOf('激进')))
-  check(JSON.stringify(rowOf('稳健')) === JSON.stringify(['稳健', '50%', '500.0', '50.0%', '750.0', '125.0']),
-    '稳健策略：50% 中标率 → 报价 500，中标时均价 750', JSON.stringify(rowOf('稳健')))
-  check(JSON.stringify(rowOf('保守')) === JSON.stringify(['保守', '20%', '800.0', '20.0%', '900.0', '80.0']),
-    '保守策略：20% 中标率 → 报价 800', JSON.stringify(rowOf('保守')))
-
-  // 局限必须写在页面上，不假装有能力
-  check(bodyHas('净负荷') && bodyHas('没有网络与阻塞') && bodyHas('没有机组成本'), '局限与缺口清单常驻')
-
-  // 切实时：供给栈漂移（逆序 7、ρ=-0.2）→ 页面要报警，而不是继续装作曲线可用
-  const mkt = doc.querySelector('.toolbar select')
-  mkt.value = 'real'
-  mkt.dispatchEvent(new window.Event('change', { bubbles: true }))
-  await waitFor(() => requests.some((r) => r.url.includes('supply-curve') && r.url.includes('market=real')))
-  check(requests.some((r) => r.url.includes('market=real')), '切市场带上 market=real')
-  await waitFor(() => bodyHas('曲线可信度低'))
-  check(bodyHas('7 处逆序'), '逆序数报给用户，并说明原因（供给栈漂移）')
+  check(bodyHas('已停用'), '页面说明已停用，不是空白页也不是报错页')
+  check(bodyHas('gd_metric.csv') && bodyHas('2026-10-02'), '写明依赖哪条通道、实际值止于哪天')
+  check(bodyHas('市场成员账号'), '给出恢复条件（合规 96 点）')
+  check(!bodyHas('7 处逆序') && !bodyHas('统计反演'), '停用时不渲染反演结果，不假装还能算')
+  check(
+    !requests.some((r) => r.url.includes('/api/gd-metric/supply-curve')),
+    '停用时不打供给曲线接口（省一次必然失败的请求）',
+  )
 }
 
 console.log('\n== 长周期电价预测页 ==')
@@ -2532,7 +2488,7 @@ await clickTo('分析预测', '长周期电价预测')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('预测概览'))
-  check(bodyHas('平均视图'), '默认平均视图，并说明序列源是日报日均价')
+  check(bodyHas('日均视图'), '只有日均视图，并说明序列源是官方直采日均价')
   check(bodyHas('1683.20') || bodyHas('368.4'), '首日预测取到值（证明 { forecast } 拆包对）')
   check(bodyHas('372.1'), '末日预测取到值')
   check(bodyHas('历史 60 点'), '展示上下文点数')
@@ -2569,30 +2525,14 @@ await clickTo('分析预测', '长周期电价预测')
   const forced = requests.filter((r) => r.url.includes('/api/forecast/price')).pop()
   check(forced.url.includes('forceRefresh=true'), '刷新预测带 forceRefresh=true', forced.url)
 
-  // 切「分时」视图：序列源换成电网日指标 CSV（96 点/日）。
-  // 后端 grain=intraday 早就实现了（96×5=480 ≤ max_horizon 512），原先缺的只是这个视图。
-  const viewSel = [...doc.querySelectorAll('.toolbar .field select')][1]
-  const intraOpt = [...viewSel.options].find((o) => o.textContent.trim() === '分时')
-  viewSel.selectedIndex = intraOpt.index
-  viewSel.dispatchEvent(new window.Event('change', { bubbles: true }))
-  await waitFor(() => bodyHas('未来多日分时电价预测'))
-  const priceCalls = requests.filter((r) => r.url.includes('/api/forecast/price'))
-  const intraCall = priceCalls[priceCalls.length - 1]
-  check(intraCall.url.includes('grain=intraday'), '切分时带 grain=intraday', intraCall.url)
-  check(intraCall.url.includes('historyDays=30'), '分时用 30 天历史窗口（日均用 60 天）', intraCall.url)
-  check(bodyHas('预测点数') && bodyHas('192'), '分时按「点」计数而不是按天')
-  check(bodyHas('395.0'), '分日汇总给出该预测日均价（300+(0..95)×2 的均值）')
-
-  // 预测日按 96 点切，不是按日历日（连续序列按日历切会出 95/96/1 的碎块）
-  const intraRows = [...doc.querySelectorAll('tbody tr')]
-  check(intraRows.length === 2, `分日汇总 2 行（实际 ${intraRows.length}）`)
-  const firstDay = [...(intraRows[0]?.querySelectorAll('td') ?? [])].map((c) => c.textContent.trim())
-  check(firstDay[0] === 'D+1' && firstDay[2] === '96', '预测日按 96 点切分', JSON.stringify(firstDay))
-
-  // 分时天数上限就是 5 日（96×5=480 ≤ TimesFM max_horizon 512）
-  const hSel = [...doc.querySelectorAll('.toolbar .field select')][2]
+  // 96 点（15 分钟）视图已停用：工具栏不再留一个只有一项的「视图」下拉（假控件不做），
+  // 停用原因写在日均视图的说明里，恢复条件写清（合规 96 点）；代码与接口保留（B4）。
+  const fieldLabels = [...doc.querySelectorAll('.toolbar .field')].map((f) => f.textContent.trim())
+  check(!fieldLabels.some((t) => t.startsWith('视图')), '不再有「视图」下拉（96 点已停用）', fieldLabels.join(' | '))
+  check(bodyHas('15 分钟（96 点）视图已停用'), '写明 96 点视图已停用')
+  const hSel = [...doc.querySelectorAll('.toolbar .field select')][1]
   const opts = [...hSel.options].map((o) => o.textContent.trim()).join('/')
-  check(opts === '1 日/2 日/3 日/4 日/5 日', '分时只给 1~5 日', opts)
+  check(opts === '7 日/14 日/21 日', '日均只给 7/14/21 日', opts)
 }
 
 console.log('\n== 市场出清页 ==')

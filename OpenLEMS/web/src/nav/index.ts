@@ -77,8 +77,10 @@ export const NAV: NavTab[] = [
         key: 'inference',
         title: '策略反演',
         path: '/scene/inference',
-        status: 'ready',
-        note: '基础版 = 统计反演：由 (负荷, 出清价) 观测反推市场聚合报价曲线。逐机组反演与逆优化仍需出清明细/网络模型（设计稿 §14.1）',
+        status: 'paused',
+        note:
+          '已停用：本页的供给曲线只从第三方分时通道（gd_metric.csv）来，而该通道已停更（实际值止于 2026-10-02）；官方匿名接口没有 96 点出清价，反推不出可用的供给曲线。' +
+          '恢复条件：拿到广东电力交易中心市场成员账号的合规 96 点（T+1）后重新开启。代码与数据表都保留，不在停用期删。',
       },
       { key: 'forecast', title: '长周期电价预测', path: '/scene/forecast', status: 'ready' },
     ],

@@ -3,6 +3,15 @@ import { DEFAULT_ROUTE, NAV } from '@/nav'
 import { PAGE_LOADERS, PlaceholderView } from '@/pages'
 
 /**
+ * 入口 status=paused 时一般不该再渲染这个页面：能用的功能关掉了，页面自己也没写停用态，
+ * 让人看到一个「看起来能用但一用就报错」的界面最糟。这类页统一落到 PlaceholderView（写停用原因）。
+ *
+ * 例外：页面自己实现了停用态（内容换成只读说明），就要留着它 —— 「手动控制」就是这样，
+ * 它要告诉用户后端也拒绝、以及怎么临时启用。
+ */
+const PAUSED_KEEPS_VIEW = new Set(['manual'])
+
+/**
  * 路由表由 nav 生成，不手写第二份。
  * 单独成文件、且只导出纯函数：不在这里 new router（创建 web history 需要浏览器环境），
  * 这样测试可以用内存 history 复用同一份表。
@@ -12,7 +21,10 @@ export function buildRoutes(): RouteRecordRaw[] {
     tab.pages.map((page) => ({
       path: page.path,
       name: page.key,
-      component: PAGE_LOADERS[page.key] ?? PlaceholderView,
+      component:
+        page.status === 'paused' && !PAUSED_KEEPS_VIEW.has(page.key)
+          ? PlaceholderView
+          : (PAGE_LOADERS[page.key] ?? PlaceholderView),
       meta: { tab: tab.key, page: page.key, title: page.title },
     })),
   )

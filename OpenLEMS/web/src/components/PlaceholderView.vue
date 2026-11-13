@@ -14,7 +14,11 @@ const current = computed(() => findPageByPath(route.path)?.page)
 
 const title =
   computed(() =>
-    current.value?.status === 'todo' ? '本期不做' : '本期做，界面待实现',
+    current.value?.status === 'todo'
+      ? '本期不做'
+      : current.value?.status === 'paused'
+        ? '已停用'
+        : '本期做，界面待实现',
   )
 </script>
 
@@ -23,7 +27,7 @@ const title =
     <strong>{{ title }}</strong>
     <span v-if="current?.note">　{{ current.note }}</span>
   </div>
-  <div class="grid">
+  <div class="grid" v-if="current?.status !== 'paused'">
     <PanelBox
       v-for="(name, i) in current?.panels ?? []"
       :key="name"

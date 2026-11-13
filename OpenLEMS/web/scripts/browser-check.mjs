@@ -428,30 +428,24 @@ class Marionette {
  * ------------------------------------------------------------------ */
 
 const PAGES = [
-  { name: '场景 · 信息披露', path: '/scene/disclosure', min: 2 },
+  { name: '市场数据 · 信息披露', path: '/scene/disclosure', min: 2 },
   // 决策支持现在有三张图：电价预测、负荷预测、相似日情况分析（目标日 + 叠加日）
-  { name: '场景 · 决策支持', path: '/scene/decision', min: 3 },
+  { name: '分析预测 · 决策支持', path: '/scene/decision', min: 3 },
   // 三张图：日前成交电价、实时成交电价、四条线面板（官方口径能画出实际两条线才会是 3）
-  { name: '场景 · 历史信息', path: '/scene/history', min: 3 },
-  { name: '场景 · 长周期电价预测', path: '/scene/forecast', min: 1 },
+  { name: '市场数据 · 历史信息', path: '/scene/history', min: 3 },
+  { name: '分析预测 · 长周期电价预测（日均）', path: '/scene/forecast', min: 1 },
   {
-    // 「分时」视图是 480 个点（96×5）的连续曲线 + 分位带：happy-dom 没有 canvas，
-    // 这张图只有真浏览器能验证它真的画出来了（切下拉 → 等图 → 数 canvas）。
-    name: '场景 · 长周期电价预测（分时）',
-    path: '/scene/forecast',
-    min: 1,
-    act: `(() => {
-      const sel = [...document.querySelectorAll('.toolbar .field select')][1];
-      if (!sel) return false;
-      const opt = [...sel.options].find((o) => o.textContent.trim() === '分时');
-      if (!opt) return false;
-      sel.selectedIndex = opt.index;
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    })()`,
+    // 96 点视图已停用：旧书签 ?view=intraday 必须看到停用说明（不 404、不假装在跑、不打接口）。
+    // 这条只能在真浏览器里验 —— happy-dom 下 vue-router 的 pushState 不同步 location，
+    // 冒烟里查不了 query。所以停用页的深链归这里守。
+    name: '分析预测 · 长周期电价预测（?view=intraday 停用说明）',
+    path: '/scene/forecast?view=intraday',
+    min: 0,
+    text: ['96 点分时视图已停用', '2026-10-02'],
   },
-  { name: '场景 · 策略反演', path: '/scene/inference', min: 1 },
-  { name: '场景 · 预测复盘', path: '/scene/review', min: 1 },
+  // 策略反演入口置 paused：页面只剩停用说明，不该再有图
+  { name: '分析预测 · 策略反演（已停用）', path: '/scene/inference', min: 0, text: ['已停用', '市场成员账号'] },
+  { name: '分析预测 · 预测复盘', path: '/scene/review', min: 1 },
   { name: '运行监控 · 能源总览', path: '/monitor/overview', min: 1 },
   { name: '运行监控 · 储能柜', path: '/monitor/cabinet', min: 1 },
 ]
@@ -515,14 +509,20 @@ async function main() {
 
       // 轮询等图出现，不用固定 sleep：有的页面要等接口回来才渲染（固定 2.5s 会偶发 0 图，
       // 那是检查自己不稳，不是页面有问题）。最多等 8 秒。
+      const wantText = page.text ?? []
       const deadline = Date.now() + 8000
       for (;;) {
         const n = await m.call('WebDriver:ExecuteScript', {
-          script: "return document.querySelectorAll('.chart').length;",
+          script: `return JSON.stringify({
+            charts: document.querySelectorAll('.chart').length,
+            text: (document.body.textContent || '').replace(/\\s+/g, ' '),
+          });`,
           args: [],
         })
-        const count = typeof n === 'number' ? n : Number(n?.value ?? 0)
-        if (count >= page.min || Date.now() > deadline) break
+        const got = JSON.parse(typeof n === 'string' ? n : (n?.value ?? '{}'))
+        const count = Number(got.charts ?? 0)
+        const textOk = wantText.every((t) => (got.text ?? '').includes(t))
+        if ((count >= page.min && textOk) || Date.now() > deadline) break
         await new Promise((r) => setTimeout(r, 300))
       }
 
@@ -532,6 +532,7 @@ async function main() {
           const txt = (sel) => [...document.querySelectorAll(sel)].map(e => e.textContent.replace(/\s+/g,' ').trim()).filter(Boolean);
           return {
             h1: document.querySelector('.pagehead h1')?.textContent ?? null,
+            bodyText: (document.body.textContent || '').replace(/\\s+/g, ' '),
             totalCanvas: document.querySelectorAll('canvas').length,
             empty: txt('.empty').slice(0, 2),
             errors: txt('.alert.error, .notice.error').slice(0, 2),
@@ -550,6 +551,8 @@ async function main() {
       const info = JSON.parse(typeof raw === 'string' ? raw : raw.value)
       const problems = []
       if (info.charts.length < page.min) problems.push(`图表容器 ${info.charts.length} 个（至少 ${page.min}）`)
+      const missing = (page.text ?? []).filter((t) => !(info.bodyText ?? '').includes(t))
+      if (missing.length) problems.push(`页面缺说明文字：${missing.join(' / ')}`)
       for (const [i, c] of info.charts.entries()) {
         if (c.error) problems.push(`第 ${i + 1} 个图报错: ${c.error}`)
         if (c.canvases === 0) problems.push(`第 ${i + 1} 个图没有 canvas（容器空；数据点 ${c.points}）`)
