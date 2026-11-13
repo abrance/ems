@@ -108,16 +108,18 @@ func runOnce(ctx context.Context, backfillDays int, first bool) {
 
 	date, n, err := CollectHome24h(ctx, now)
 	if err != nil {
-		c_log.Warningf(ctx, "采集 24 点分时失败：%+v", err)
+		// 按类别打：blocked（防护/网关）与 network/parse 的处置不同，不能混成一句
+		c_log.Warningf(ctx, "采集 24 点分时失败[%s]：%+v", classifyErr(err), err)
 	} else if n > 0 {
 		c_log.BizInfof(ctx, "24 点分时已更新：%s（%d 点）", date, n)
 	} else {
+		// 只有「每轮请求都成功且 payload 明确为空」才走到这里（CollectHome24h 已把失败抛成 error）
 		c_log.Infof(ctx, "24 点分时最近 %d 天都没有数据（源站未发布）", maxLookbackDays)
 	}
 
 	today := now.Format(dateLayout)
 	if m, err := CollectNodePrice(ctx, today); err != nil {
-		c_log.Warningf(ctx, "采集地市节点价 %s 失败：%+v", today, err)
+		c_log.Warningf(ctx, "采集地市节点价 %s 失败[%s]：%+v", today, classifyErr(err), err)
 	} else if m > 0 {
 		c_log.BizInfof(ctx, "地市节点价已更新：%s（%d 条）", today, m)
 	}

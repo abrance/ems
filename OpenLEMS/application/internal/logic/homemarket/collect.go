@@ -21,6 +21,7 @@ package homemarket
 import (
 	"context"
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,6 +63,43 @@ const (
 
 var httpClient = &http.Client{Timeout: requestTimeout}
 
+// collectErrKind 采集失败的类别。
+//
+// 为什么要分类：源站的动态防护会返回 HTTP 400，网络抖动是连接错误，源站改字段是
+// JSON 形状变化 —— 三者处置完全不同（前者要换请求方式/降频，中者等下一轮，后者要改代码）。
+// 只有「请求成功且 payload 明确为空」才是「源站未发布」，不能和失败混成一句话。
+type collectErrKind string
+
+const (
+	// ErrKindBlocked 源站/网关拦截（HTTP 非 200，常见动态防护 400）
+	ErrKindBlocked collectErrKind = "blocked"
+	// ErrKindNetwork 连不上、超时、读响应失败
+	ErrKindNetwork collectErrKind = "network"
+	// ErrKindParse 响应不是预期形状（JSON 解析失败、业务 code != 200）
+	ErrKindParse collectErrKind = "parse"
+)
+
+// collectError 带类别的采集错误。类别只在本包内判定，对外只体现 Error() 文案。
+type collectError struct {
+	Kind collectErrKind
+	Err  error
+}
+
+func (e *collectError) Error() string { return fmt.Sprintf("%s: %v", e.Kind, e.Err) }
+func (e *collectError) Unwrap() error { return e.Err }
+
+// classifyErr 把采集错误归成三类；未带类别的错误按 network 计（兜底）。
+func classifyErr(err error) collectErrKind {
+	if err == nil {
+		return ""
+	}
+	var ce *collectError
+	if stdErrors.As(err, &ce) {
+		return ce.Kind
+	}
+	return ErrKindNetwork
+}
+
 // tradeSituationResp 24 点响应（只取用到的字段，源站还有 monthUsePower 等）
 type tradeSituationResp struct {
 	Code int    `json:"code"`
@@ -96,7 +134,7 @@ type nodePriceResp struct {
 func getJSON(ctx context.Context, url string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return &collectError{Kind: ErrKindNetwork, Err: err}
 	}
 	// 源站对裸 UA 会返回 400（动态防护），带上正常浏览器的 UA 与 Referer
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "+
@@ -106,18 +144,18 @@ func getJSON(ctx context.Context, url string, out any) error {
 
 	res, err := httpClient.Do(req)
 	if err != nil {
-		return errors.Wrapf(err, "请求失败 %s", url)
+		return &collectError{Kind: ErrKindNetwork, Err: errors.Wrapf(err, "请求失败 %s", url)}
 	}
 	defer res.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	if err != nil {
-		return errors.Wrap(err, "读取响应失败")
+		return &collectError{Kind: ErrKindNetwork, Err: errors.Wrap(err, "读取响应失败")}
 	}
 	if res.StatusCode != http.StatusOK {
-		return errors.Errorf("HTTP %d（%s）", res.StatusCode, truncate(string(body), 160))
+		return &collectError{Kind: ErrKindBlocked, Err: errors.Errorf("HTTP %d（%s）", res.StatusCode, truncate(strings.TrimSpace(string(body)), 160))}
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return errors.Wrapf(err, "解析响应失败（%s）", truncate(string(body), 160))
+		return &collectError{Kind: ErrKindParse, Err: errors.Wrapf(err, "解析响应失败（%s）", truncate(strings.TrimSpace(string(body)), 160))}
 	}
 	return nil
 }
@@ -137,7 +175,7 @@ func FetchHome24h(ctx context.Context, date string) ([]*s_db_model.SHome24hModel
 		return nil, err
 	}
 	if resp.Code != 200 {
-		return nil, errors.Errorf("源站返回 code=%d msg=%s", resp.Code, resp.Msg)
+		return nil, &collectError{Kind: ErrKindParse, Err: errors.Errorf("源站返回 code=%d msg=%s", resp.Code, resp.Msg)}
 	}
 	rows := make([]*s_db_model.SHome24hModel, 0, len(resp.Data.Details))
 	for _, d := range resp.Data.Details {
@@ -176,7 +214,7 @@ func FetchNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceM
 		return nil, err
 	}
 	if resp.Code != 200 {
-		return nil, errors.Errorf("源站返回 code=%d msg=%s", resp.Code, resp.Msg)
+		return nil, &collectError{Kind: ErrKindParse, Err: errors.Errorf("源站返回 code=%d msg=%s", resp.Code, resp.Msg)}
 	}
 	rows := make([]*s_db_model.SNodePriceModel, 0, len(resp.Data.CurrentPirceAreaVOList))
 	for _, item := range resp.Data.CurrentPirceAreaVOList {
@@ -204,18 +242,20 @@ func FetchNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceM
 // 找到第一个有数的日子就采完停手（不批量补历史 —— 那是 backfill 的事）。
 func CollectHome24h(ctx context.Context, today time.Time) (string, int, error) {
 	base := today.In(time.Local)
+	errCount, emptyDays := 0, 0
+	var lastErr error
 	for i := 0; i < maxLookbackDays; i++ {
 		date := base.AddDate(0, 0, -i).Format(dateLayout)
 		rows, err := FetchHome24h(ctx, date)
 		if err != nil {
-			// 单日失败不终止：往前一天再试。全部失败才把最后一次错误抛出去。
-			c_log.Warningf(ctx, "采集 24 点分时 %s 失败：%+v", date, err)
-			if i == maxLookbackDays-1 {
-				return "", 0, err
-			}
+			// 单日失败不终止：往前一天再试，循环结束后再定性。
+			errCount++
+			lastErr = err
+			c_log.Warningf(ctx, "采集 24 点分时 %s 失败[%s]：%+v", date, classifyErr(err), err)
 			continue
 		}
 		if len(rows) == 0 {
+			emptyDays++
 			continue
 		}
 		n, err := s_db.GetHomeMarketService().UpsertHome24h(ctx, rows)
@@ -223,6 +263,14 @@ func CollectHome24h(ctx context.Context, today time.Time) (string, int, error) {
 			return date, n, err
 		}
 		return date, n, nil
+	}
+	// 有失败就不能返回 nil：nil 会在调度器里被写成「最近 14 天都没有数据（源站未发布）」，
+	// 源站故障被记成「没发布」，建在这句日志上的告警全是假的。
+	if errCount > 0 {
+		kind := classifyErr(lastErr)
+		return "", 0, &collectError{Kind: kind, Err: errors.Errorf(
+			"最近 %d 天都没有取到数据（失败 %d 天、成功但为空 %d 天），最后一次：%v",
+			maxLookbackDays, errCount, emptyDays, lastErr)}
 	}
 	return "", 0, nil
 }

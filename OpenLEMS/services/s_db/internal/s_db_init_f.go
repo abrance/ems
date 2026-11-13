@@ -407,7 +407,7 @@ func initConfigDatabase() error {
 	_, err = g.DB().Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_home_24h (
 			price_date VARCHAR(10) NOT NULL,
-			hour INTEGER NOT NULL,
+			hour INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
 			power_mw REAL NOT NULL DEFAULT 0,
 			ahead_price REAL NOT NULL DEFAULT 0,
 			realtime_price REAL NOT NULL DEFAULT 0,
@@ -426,7 +426,7 @@ func initConfigDatabase() error {
 		CREATE TABLE IF NOT EXISTS gd_node_price (
 			run_date VARCHAR(10) NOT NULL,
 			city VARCHAR(32) NOT NULL,
-			period_type INTEGER NOT NULL DEFAULT 1,
+			period_type INTEGER NOT NULL DEFAULT 1 CHECK (period_type IN (1, 2)),
 			price REAL NOT NULL DEFAULT 0,
 			source VARCHAR(64) NOT NULL DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

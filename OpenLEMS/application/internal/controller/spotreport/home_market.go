@@ -2,6 +2,7 @@ package spotreport
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	v1 "application/api/spotreport/v1"
@@ -12,12 +13,31 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
+// parseDateParam 校验 date 参数。
+//
+// 不做校验时传 2026/11/13 会走到「库里查不到」→ empty:true，和「源站还没发布」
+// 完全一样，前端无法区分是填错还是没数据。格式错属于参数错误。
+func parseDateParam(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if _, err := time.ParseInLocation("2006-01-02", raw, time.Local); err != nil {
+		return "", gerror.NewCodef(gcode.CodeInvalidParameter, "date 必须是 YYYY-MM-DD（收到 %q）", raw)
+	}
+	return raw, nil
+}
+
 // GetHome24h 官网主页 24 点分时（电价 + 负荷）。
 //
 // 与 /api/gd-metric/series（96 点第三方通道，已停更）和 /api/spot-market/board
 // （披露接口日频）都不是一路：这是主页的 24 个整点，滞后 6 天左右，独立表 gd_home_24h。
 func (c *ControllerV1) GetHome24h(ctx context.Context, req *v1.GetHome24hReq) (*v1.GetHome24hRes, error) {
-	day, err := homemarket.LoadHome24h(ctx, req.Date)
+	date, err := parseDateParam(req.Date)
+	if err != nil {
+		return nil, err
+	}
+	day, err := homemarket.LoadHome24h(ctx, date)
 	if err != nil {
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取 24 点分时失败")
 	}
@@ -26,7 +46,11 @@ func (c *ControllerV1) GetHome24h(ctx context.Context, req *v1.GetHome24hReq) (*
 
 // GetNodePrice 21 地市节点电价（高峰/低谷各 21 条）。
 func (c *ControllerV1) GetNodePrice(ctx context.Context, req *v1.GetNodePriceReq) (*v1.GetNodePriceRes, error) {
-	day, err := homemarket.LoadNodePrice(ctx, req.Date)
+	date, err := parseDateParam(req.Date)
+	if err != nil {
+		return nil, err
+	}
+	day, err := homemarket.LoadNodePrice(ctx, date)
 	if err != nil {
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "获取地市节点价失败")
 	}
