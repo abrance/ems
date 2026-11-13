@@ -965,7 +965,7 @@ const FAKE_IGNORE_ALARMS = [
  * 且对应的数值接口返回空 —— 真实场景就是「没数 + 状态说清为什么没数」。
  *
  * 断言的是**页面真实渲染出来的文案**，不是这里的夹具定义：夹具只是饲料，
- * 文案写错（比如 lagging 用了告警口气）这里就该红。
+ * 文案写错（比如 lagging 说成「等下一轮」）这里就该红。
  */
 let marketStatusState = null
 /** failed 的细分原因：blocked / network / parse 三种处置不同，不能都写「采集失败」 */
@@ -1516,11 +1516,11 @@ await clickTo('市场数据', '市场总览')
 }
 home24hPartial = false
 
-// ---- 四态空态：文案与口气（lagging 绝不能告警） ----
+// ---- 四态空态：文案与口气（lagging 是采集没跟上，必须带提醒） ----
 //
 // 只换夹具不够：页面必须重新取数，所以每一态都离开再回来一次。
 // 断言的是**页面真实渲染出来的文字与 class**，不是夹具里的字段。
-console.log('\n== 市场数据 · 四态空态（lagging 不能是告警色）==')
+console.log('\n== 市场数据 · 四态空态（lagging 要说采集没跟上）==')
 
 /** 读两路状态提示：面板 data-state 与文字、是否带告警 class */
 function readStateNotes() {
@@ -1563,20 +1563,26 @@ async function remountMarket() {
   await remountMarket()
   check(readStateNotes().length === 0, 'ok：不渲染任何状态提示', JSON.stringify(readStateNotes()))
 
-  // lagging：有数据只是旧了。**正常口气**，绝不能红 —— 这是本批最容易写反的一条
+  // lagging = 超出预期滞后，采集没跟上，**要人处理**。
+  // 写成「源站还没发布，等下一轮」会让人一直等一个不会自己好的东西。
   marketStatusState = 'lagging'
   await remountMarket()
   {
     const notes = readStateNotes().filter((n) => n.state === 'lagging')
     check(notes.length === 2, `lagging：两路都给出提示（实际 ${notes.length}）`, JSON.stringify(readStateNotes()))
     check(
-      notes.every((n) => !n.alert && n.neutral),
-      'lagging：**不带告警样式**，走中性样式（滞后是「等就行」，标红会让人去查没坏的东西）',
+      notes.every((n) => n.alert && !n.neutral),
+      'lagging：带告警样式（采集落后是故障，不是等等就好）',
       JSON.stringify(notes),
     )
     check(
-      notes.every((n) => /源站还没发布 \d+ 天前的数据，等下一轮采集/.test(n.text)),
-      'lagging：文案为「源站还没发布 N 天前的数据，等下一轮采集」',
+      notes.every((n) => /采集已落后：库里最新到 \S+（\d+ 天前）/.test(n.text)),
+      'lagging：文案说明库里最新到哪天、落后几天',
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+    check(
+      notes.every((n) => !n.text.includes('等下一轮')),
+      'lagging：不能写「等下一轮」（超预期滞后不会自己好）',
       JSON.stringify(notes.map((n) => n.text)),
     )
     // 滞后是有数据的：图必须照画（不能因为状态不是 ok 就把图换成空态）

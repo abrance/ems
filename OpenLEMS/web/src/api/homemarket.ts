@@ -137,7 +137,7 @@ const ERROR_KIND_LABEL: Record<string, string> = {
 
 /** 状态 → 页面上的一句话，以及该用哪种口气 */
 export interface StatusNote {
-  /** neutral = 正常语气（滞后：等下一轮就行）；alert = 告警样式 */
+  /** neutral = 正常语气；alert = 需要人处理 */
   tone: 'neutral' | 'alert'
   text: string
 }
@@ -145,14 +145,19 @@ export interface StatusNote {
 /**
  * 五态里 `ok` 不需要任何提示（有数、滞后在预期内，说话只是噪音）。
  *
- * `lagging` **必须是中性语气**：滞后是「源站还没发，等就行」，标成红色会让人
- * 去排查一个根本没有坏的东西 —— 这是这个功能最容易写反的一条。
+ * `lagging` 的语义是「最近成功过，但最新数据超出了预期滞后上限」——status.go
+ * 里写得很清楚：「超了就是采集没跟上，而不是源站还没发布」。所以它必须带
+ * 提醒，不能写成「等下一轮采集」，那句话会让人一直等一个不会自己好的东西。
+ * 正常滞后（24 点 T-6、地市 T+0）落在 ok 里，不弹提示。
  */
 export function statusNote(st?: DatasetStatus | null): StatusNote | null {
   if (!st) return null
   switch (st.state) {
     case 'lagging':
-      return { tone: 'neutral', text: `源站还没发布 ${st.lagDays} 天前的数据，等下一轮采集` }
+      return {
+        tone: 'alert',
+        text: `采集已落后：库里最新到 ${st.asOf}（${st.lagDays} 天前），超出正常滞后，请检查采集是否在跑`,
+      }
     case 'failed':
       return {
         tone: 'alert',
