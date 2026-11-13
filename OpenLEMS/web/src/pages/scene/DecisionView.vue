@@ -420,7 +420,7 @@ watch(
       :foot="price ? `模型 ${price.model} · 历史 ${price.contextPoints} 点 · 区间 ${price.from} ~ ${price.to} · 缺数据 ${price.missingDays} 天 · 耗时 ${price.timeMs.toFixed(0)}ms` : '数据来源：官方直采日均成交价（gd_spot_metric）'"
     >
       <template #actions>
-        <SourceBadge tone="blue" label="官网·日频 T+2" />
+        <SourceBadge tone="blue" label="官网·披露接口" />
       </template>
       <div v-if="errors.price" class="empty">{{ errors.price }}</div>
       <template v-else>

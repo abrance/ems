@@ -36,7 +36,7 @@ import { dailyTier } from '@/utils/dailyLag'
  * 三批数据，粒度与滞后都不同，所以是三张表、三个接口，不混表：
  *
  *   地市节点价   gd_node_price   /api/gd-metric/node-price     T+0   42 条（21 市 × 高峰/低谷）
- *   日频指标     gd_spot_metric  /api/spot-market/board         T+2   日均价/成交量/申报均价…
+ *   日频指标     gd_spot_metric  /api/spot-market/board         T+0（实时腿 T+2）  日均价/成交量/申报均价…
  *   24 点分时    gd_home_24h     /api/gd-metric/home-24h        T-6   24 个整点
  *
  * 页头批次条把三个日期**分别**标出来（含来源与滞后），就是为了让人一眼看出
@@ -48,7 +48,7 @@ import { dailyTier } from '@/utils/dailyLag'
  * 每个面板右上角有源角标；空日期给明确的「该日无数据」而不是空图。
  */
 const HOME24H_SOURCE = '官网·24 点 T-6'
-const DAILY_SOURCE = '官网·日频 T+2'
+const DAILY_SOURCE = '官网·披露接口'
 const NODE_SOURCE = '官网·节点价 T+0'
 
 const daily = ref<MarketBoard | null>(null)
@@ -183,12 +183,13 @@ const priceUnit = computed(() => aheadAvg.value?.unit || '元/兆瓦时')
 const volUnit = computed(() => aheadVolGen.value?.unit || 'MWh')
 const dailyEmpty = computed(() => !loadingDaily.value && dailySeries.value.length === 0)
 /**
- * 日频空态分级。三档比一句话多的那点代码，换来的是「采集停了」不再被说成「T+2 还没发」。
- * 见 utils/dailyLag.ts 的 tier 语义。
+ * 日频空态分级。三档比一句话多的那点代码，换来的是「采集停了」不再被说成「还没发布」。
+ * 见 utils/dailyLag.ts 的 tier 语义。board.date 是**日前运行日**，所以传 ahead：
+ * 日前当日发布，lag=1 就已经漏了一天，拿实时腿的 T+2 当阈值会说成正常。
  */
 const dailyLag = computed(() => lagOf(daily.value?.date))
-const dailyTierNow = computed(() => dailyTier(dailyLag.value, dailyEmpty.value))
-/** 库里近一年没有日频指标：空库时 board.date 回落成今天，lag 恒为 0，不能拿去说 T+2 */
+const dailyTierNow = computed(() => dailyTier(dailyLag.value, dailyEmpty.value, 'ahead'))
+/** 库里近一年没有日频指标：空库时 board.date 回落成今天，lag 恒为 0，不能拿去说「还没发布」 */
 const dailyNever = computed(() => dailyTierNow.value === 'never')
 
 const dailyEmptyText = computed(() => {
@@ -199,14 +200,16 @@ const dailyEmptyText = computed(() => {
       // 那同样是「采集早停了」，告警一样成立
       return '库里近一年没有日频指标。日频来自披露接口直采，请检查采集是否在跑。'
     case 'lag':
-      return `采集滞后：库里最新运行日 ${latest}（${dailyLag.value} 天前），官方正常 T+2，已超出预期`
+      // 阈值跟着腿走：这里判的是日前运行日，官方当日发布，滞后 1 天以上就算超出节奏。
+      // 写「官方正常 T+2」会把日前漏采两天说成正常。
+      return `采集滞后：库里最新运行日 ${latest}（${dailyLag.value} 天前），官方日前当日发布，已超出预期`
     case 'stop':
       return `采集已落后：库里最新运行日 ${latest}（${dailyLag.value} 天前），请检查采集是否在跑`
     default:
       return `该日无数据：披露接口还没有这一天的指标（实时 T+2 才发布）。库里最新运行日 ${latest}。`
   }
 })
-/** 空库与「超出 T+2」都要告警；3~7 天只是中性偏提醒，红绿不混 */
+/** 空库与「采集落后」都要告警；3~7 天只是中性偏提醒，红绿不混 */
 const dailyEmptyTone = computed(() =>
   dailyTierNow.value === 'never' || dailyTierNow.value === 'stop'
     ? 'is-alert'
