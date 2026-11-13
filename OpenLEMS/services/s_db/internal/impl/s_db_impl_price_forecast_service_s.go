@@ -78,12 +78,24 @@ func (s *sPriceForecastServiceImpl) ListByTargetRange(
 func (s *sPriceForecastServiceImpl) GeneratedDates(
 	ctx context.Context, market, grain string,
 ) ([]string, error) {
-	m := g.Model(s_db_model.TablePriceForecast).Ctx(ctx).Fields(s_db_model.FieldPriceForecastGeneratedOn).Distinct()
+	// 只返回「至少有一条可用于复盘」的生成日。判据与复盘页剔除回填行的那条
+	// 完全同源（见 logic/forecast 的 IsBackfilledForecast：generated_on > target 的日期部分
+	// 就是事后补算），所以这里能配对 ⟺ target_time 的日期部分 >= generated_on。
+	//
+	// 为什么必须过滤：CSV 时代留下 30 行历史回填（6 个生成日，target 全早于
+	// generated_on），DISTINCT 会把它们当「留痕自 2026-10-07 起积累」显示给用户，
+	// 于是空态文案算出「首个可配对交易日约在 2026-10-10」——一个多月前的日子。
+	//
+	// intraday 同日不算回填（复盘页保留当天后续时段的点），用 >= 正好覆盖，不需要按 grain 分支。
+	where := "1=1"
+	args := make([]any, 0, 2)
 	if strings.TrimSpace(market) != "" {
-		m = m.Where(s_db_model.FieldPriceForecastMarket, market)
+		where += " AND market = ?"
+		args = append(args, market)
 	}
 	if strings.TrimSpace(grain) != "" {
-		m = m.Where(s_db_model.FieldPriceForecastGrain, grain)
+		where += " AND grain = ?"
+		args = append(args, grain)
 	}
 	// 注意：不能直接 `Scan(&[]string)` —— 单字段查询扫进 []string 时，gf 会把**整行**
 	// 序列化成 JSON 字符串塞进数组（线上实测拿到的是 `{"generated_on":"2026-10-07"}`，
@@ -91,7 +103,13 @@ func (s *sPriceForecastServiceImpl) GeneratedDates(
 	var rows []struct {
 		GeneratedOn string `orm:"generated_on"`
 	}
-	if err := m.OrderAsc(s_db_model.FieldPriceForecastGeneratedOn).Scan(&rows); err != nil {
+	if err := g.DB().GetScan(ctx, &rows, `
+		SELECT generated_on
+		  FROM `+s_db_model.TablePriceForecast+`
+		 WHERE `+where+`
+		 GROUP BY generated_on
+		HAVING SUM(CASE WHEN substr(target_time, 1, 10) >= generated_on THEN 1 ELSE 0 END) > 0
+		 ORDER BY generated_on ASC`, args...); err != nil {
 		return nil, errors.Wrap(err, "查询预测留痕生成日失败")
 	}
 	dates := make([]string, 0, len(rows))

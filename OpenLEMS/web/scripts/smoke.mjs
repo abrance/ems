@@ -1028,6 +1028,13 @@ let home24hPartial = false
 let dailyLagOverride = null
 /** 留痕全都没出实际值（pairs 为空）→ 复盘页走「还没到」的空态 */
 let recordedNoActual = false
+/**
+ * 留痕生成日夹具：真实线上形态里 generatedDates 含 CSV 时代的整批回填日
+ * （10-07 ~ 11-08，每个生成日 5 行、target 全早于 generated_on，复盘页逐行剔除）。
+ * 后端 GeneratedDates 已经过滤掉它们，这里给的是「过滤后」的数组；
+ * 但前端曾把 [0] 直接印成「自 X 起积累」，所以要钉住：印出来的必须是不早于今天的日子。
+ */
+let recordedGeneratedDatesOverride = null
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -1230,14 +1237,17 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/effect/summary')) return json({ summary: FAKE_SUMMARY })
   if (u.includes('/api/effect/backtest2')) return json({})
   if (u.includes('/api/forecast/recorded')) {
+    const dayFixture = recordedGeneratedDatesOverride
+      ? { ...FAKE_RECORDED_DAY, generatedDates: recordedGeneratedDatesOverride }
+      : FAKE_RECORDED_DAY
     if (u.includes('grain=day') && recordedNoActual) {
       return json({
-        ...FAKE_RECORDED_DAY,
-        actualMissing: FAKE_RECORDED_DAY.points.length,
-        points: FAKE_RECORDED_DAY.points.map((p) => ({ ...p, actual: null })),
+        ...dayFixture,
+        actualMissing: dayFixture.points.length,
+        points: dayFixture.points.map((p) => ({ ...p, actual: null })),
       })
     }
-    return json(u.includes('grain=day') ? FAKE_RECORDED_DAY : FAKE_RECORDED)
+    return json(u.includes('grain=day') ? dayFixture : FAKE_RECORDED)
   }
   if (u.includes('/api/forecast/backtest')) {
     // 粒度决定返回哪个夹具：日频一天一点，96 点是分时
@@ -3334,6 +3344,36 @@ console.log('\n== 预测复盘页 ==')
     // §8.1：「（官方 T+2）」5 个字不能省 —— 否则分不清「在等源站」和「系统坏了」
     check(bodyHas('条留痕的实际值还没出（官方 T+2）'), '留痕实际值未出时标注「（官方 T+2）」', doc.body.textContent?.match(/另有[^。]*。?/)?.[0] ?? '')
   }
+
+  // ---- 生成日必须是不早于今天的可用日（后端已过滤回填行，前端不许把过去日期印出来）----
+  //
+  // 线上真实形态：gd_price_forecast 里 CSV 时代留下 6 个整批回填的生成日
+  // （10-07 ~ 11-08，每个 5 行、target 全在 09-26 ~ 09-30）。后端 GeneratedDates 曾经只做
+  // DISTINCT，把它们全返回，于是页面印「预测留痕自 2026-10-07 起积累」+「首个可配对交易日
+  // 约在 2026-10-10」—— 两个都比今天早一个多月，用户读到的是「早过了为什么还是空的」。
+  //
+  // 这里钉的是**页面拿到的数组首项**：后端给了过滤后的 11-11 起，页面就必须从 11-11 起算。
+  console.log('\n== 预测复盘页 · 生成日取可用日（不许印回填日）==')
+  recordedGeneratedDatesOverride = ['2026-11-11', '2026-11-12', '2026-11-13']
+  await clickTo('分析预测', '长周期电价预测')
+  await clickTo('分析预测', '预测复盘')
+  await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
+  {
+    const emptyText = doc.querySelector('.empty')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    check(bodyHas('预测留痕自 2026-11-11 起积累'), '「起积累」跟的是首个可用生成日（2026-11-11），不是回填日 10-07', emptyText)
+    check(!bodyHas('2026-10-07') && !bodyHas('2026-10-10'), '页面不出现整批回填的生成日与其推算出的过去日期', emptyText)
+    // 首个可配对日由 [0] 推出：11-11 + 3 = 11-14，不早于今天
+    check(bodyHas('首个可配对交易日约在 2026-11-14'), '首个可配对交易日由首个可用生成日推出（11-11 → 11-14）', emptyText)
+    // 首项被剔掉时不能留空：后端全过滤成空数组也要回落「—」，不印 undefined/NaN
+    recordedGeneratedDatesOverride = []
+    await clickTo('分析预测', '长周期电价预测')
+    await clickTo('分析预测', '预测复盘')
+    await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
+    const emptyNoDates = doc.querySelector('.empty')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    check(bodyHas('预测留痕自 — 起积累'), '生成日全被过滤时回落「—」，不印 undefined', emptyNoDates)
+    check(!/NaN-NaN-NaN|undefined/.test(emptyNoDates), '没有生成日时不许印 NaN-NaN-NaN 或 undefined', emptyNoDates)
+  }
+  recordedGeneratedDatesOverride = null
   recordedNoActual = false
 }
 
