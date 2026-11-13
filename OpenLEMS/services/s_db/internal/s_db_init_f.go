@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"s_db/s_db_model"
 
 	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gctx"
@@ -421,16 +423,24 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	if err := migrateNodePriceCityCode(ctx); err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	// 21 地市节点电价（高峰/低谷两时段，42 条/日，T+0）。
+	// city_code 是 GB/T 2260 行政区划编码（源站只给中文名，编码由应用层静态表映射），
+	// city_name 是展示用中文名。唯一键建在 city_code 上：中文名可能被源站改写，编码不会。
 	_, err = g.DB().Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_node_price (
 			run_date VARCHAR(10) NOT NULL,
-			city VARCHAR(32) NOT NULL,
+			city_code VARCHAR(16) NOT NULL,
+			city_name VARCHAR(32) NOT NULL,
 			period_type INTEGER NOT NULL DEFAULT 1 CHECK (period_type IN (1, 2)),
 			price REAL NOT NULL DEFAULT 0,
 			source VARCHAR(64) NOT NULL DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (run_date, city, period_type)
+			UNIQUE (run_date, city_code, period_type)
 		)
 	`)
 	if err != nil {
@@ -691,4 +701,58 @@ func initSystemSettings(ctx context.Context) {
 	}
 
 	c_log.Info(ctx, "System settings initialized successfully")
+}
+
+// migrateNodePriceCityCode 一次性迁移：gd_node_price 初版只有 city（中文名）一列，
+// C3 引入 city_code（GB/T 2260）作为唯一键的一部分。
+//
+// 与 migrateSpotMetricUniqueKey 的区别：那张表的旧数据能靠重跑解析恢复，这张表
+// **不能默认无数据** —— 它可能是某个环境（本地开发库、测试库）已经在用的，静默 DROP
+// 会丢真实数据。所以先 COUNT(*)：
+//   - 0 行：表是空的（线上 v1.0.69 根本没有这张表），直接 DROP 重建；
+//   - >0 行：**打 Error 并中止迁移**，把表留给人工处理，不自动删。
+//
+// 只对 sqlite 生效；非 sqlite 或表不存在时静默跳过（新表由后面的 CREATE 建出来）。
+func migrateNodePriceCityCode(ctx context.Context) error {
+	_, err := migrateNodePriceCityCodeWith(ctx, g.DB())
+	return err
+}
+
+// dbExecer 迁移只需要「取单值」与 Exec 两件事，抽成接口让单测能直接喂 *sql.DB。
+type dbExecer interface {
+	GetValue(ctx context.Context, sql string, args ...any) (gdb.Value, error)
+	Exec(ctx context.Context, sql string, args ...any) (sql.Result, error)
+}
+
+// migrateNodePriceCityCodeWith 是迁移的实际实现，便于单测直接驱动。
+// 返回 dropped=true 表示旧表为空、已删除重建。
+func migrateNodePriceCityCodeWith(ctx context.Context, db dbExecer) (dropped bool, err error) {
+	// 非 sqlite（没有 sqlite_master）或表不存在 → 无需迁移
+	sqlText, err := db.GetValue(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, "gd_node_price")
+	if err != nil || sqlText.IsNil() {
+		return false, nil
+	}
+	// 已经有 city_code 列 → 新表，什么都不做（幂等）
+	hasCode, err := db.GetValue(ctx, `SELECT COUNT(*) FROM pragma_table_info('gd_node_price') WHERE name = ?`, "city_code")
+	if err != nil {
+		return false, nil // 非 sqlite
+	}
+	if hasCode.Int() > 0 {
+		return false, nil
+	}
+	// 旧表：先看有没有数据。有数据就不动，留人工。
+	count, err := db.GetValue(ctx, `SELECT COUNT(*) FROM gd_node_price`)
+	if err != nil {
+		return false, err
+	}
+	if count.Int() > 0 {
+		c_log.Errorf(ctx, "gd_node_price 旧表（无 city_code）已有 %d 行数据，拒绝自动重建；"+
+			"请人工确认后迁移：加 city_code 列并按 city 中文名回填 GB/T 2260 编码", count.Int())
+		return false, nil
+	}
+	c_log.Warning(ctx, "检测到 gd_node_price 旧表（无 city_code）且为空，删除重建")
+	if _, err := db.Exec(ctx, `DROP TABLE IF EXISTS gd_node_price`); err != nil {
+		return false, err
+	}
+	return true, nil
 }

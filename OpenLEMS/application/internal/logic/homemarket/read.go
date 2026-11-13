@@ -48,7 +48,11 @@ type Home24hDay struct {
 }
 
 // NodePricePoint 一个地市在某时段的价格。
+//
+// CityCode 是 GB/T 2260 行政区划编码（如 440100），跨系统对接与稳定排序都该用它；
+// City 是源站给的中文名，保留是为了不破坏现有页面（前端按 city 显示）。
 type NodePricePoint struct {
+	CityCode   string  `json:"cityCode"`
 	City       string  `json:"city"`
 	PeriodType int     `json:"periodType" dc:"1 高峰 / 2 低谷"`
 	Price      float64 `json:"price"`
@@ -60,7 +64,7 @@ type NodePriceDay struct {
 	Empty      bool   `json:"empty"`
 	LatestDate string `json:"latestDate"`
 	LagDays    int    `json:"lagDays"`
-	// Points 按 periodType、city 升序
+	// Points 按 periodType、cityCode 升序（编码排序稳定，中文名会被源站改写）
 	Points []NodePricePoint `json:"points"`
 	Source string           `json:"source"`
 	// PeakCities / ValleyCities 各时段城市数（正常 21）
@@ -165,7 +169,7 @@ func LoadNodePrice(ctx context.Context, date string) (*NodePriceDay, error) {
 	}
 	points := make([]NodePricePoint, 0, len(rows))
 	for _, r := range rows {
-		points = append(points, NodePricePoint{City: r.City, PeriodType: r.PeriodType, Price: r.Price})
+		points = append(points, NodePricePoint{CityCode: r.CityCode, City: r.City, PeriodType: r.PeriodType, Price: r.Price})
 		switch r.PeriodType {
 		case s_db_model.NodePricePeriodPeak:
 			out.PeakCities++

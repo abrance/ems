@@ -37,7 +37,8 @@ type SHome24hModel struct {
 const (
 	TableNodePrice           = "gd_node_price"
 	FieldNodePriceRunDate    = "run_date"
-	FieldNodePriceCity       = "city"
+	FieldNodePriceCityCode   = "city_code"
+	FieldNodePriceCity       = "city_name"
 	FieldNodePricePeriodType = "period_type"
 	FieldNodePricePrice      = "price"
 	FieldNodePriceSource     = "source"
@@ -50,10 +51,15 @@ const (
 // 口径：源站 model=2 的 currentPirceAreaVOList，21 市 × 2 时段 = 42 条/日，T+0 可得。
 // 与披露接口的「节点边际电价」不是一回事：那是按交易时间单元的机组节点，匿名拿不到
 // （四个节点全返回 0 条，见 docs/data-source-matrix.md）；这里是地市维度的公开价格。
+//
+// CityCode 是行政区划编码（GB/T 2260，如 广州市=440100），主键与唯一键都建在它上面；
+// City 是源站给的中文名，仅作展示。源站只给中文名、没有编码，编码由 homemarket.CityCodeOf
+// 的静态表映射得到 —— 不改名成 CityName 是因为 status.go 等调用方按 City 取展示名。
 type SNodePriceModel struct {
 	g.Meta     `orm:"table:gd_node_price"`
 	RunDate    string      `json:"runDate" orm:"run_date"`
-	City       string      `json:"city" orm:"city"`
+	CityCode   string      `json:"cityCode" orm:"city_code"`
+	City       string      `json:"city" orm:"city_name"`
 	PeriodType int         `json:"periodType" orm:"period_type"` // 1 高峰 / 2 低谷
 	Price      float64     `json:"price" orm:"price"`
 	Source     string      `json:"source" orm:"source"`

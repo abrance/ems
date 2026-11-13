@@ -89,17 +89,18 @@ func (s *sHomeMarketServiceImpl) LatestHome24hDate(ctx context.Context) (string,
 func (s *sHomeMarketServiceImpl) UpsertNodePrice(ctx context.Context, rows []*s_db_model.SNodePriceModel) (int, error) {
 	n := 0
 	for _, row := range rows {
-		if row == nil || row.RunDate == "" || row.City == "" {
+		if row == nil || row.RunDate == "" || row.CityCode == "" {
 			continue
 		}
 		_, err := g.DB().Exec(ctx, `
-			INSERT INTO gd_node_price (run_date, city, period_type, price, source, updated_at)
-			VALUES (?, ?, ?, ?, ?, datetime('now'))
-			ON CONFLICT(run_date, city, period_type) DO UPDATE SET
+			INSERT INTO gd_node_price (run_date, city_code, city_name, period_type, price, source, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+			ON CONFLICT(run_date, city_code, period_type) DO UPDATE SET
+				city_name = excluded.city_name,
 				price = excluded.price,
 				source = excluded.source,
 				updated_at = datetime('now')
-		`, row.RunDate, row.City, row.PeriodType, row.Price, row.Source)
+		`, row.RunDate, row.CityCode, row.City, row.PeriodType, row.Price, row.Source)
 		if err != nil {
 			return n, errors.Wrap(err, "写入地市节点价失败")
 		}
@@ -113,7 +114,7 @@ func (s *sHomeMarketServiceImpl) ListNodePrice(ctx context.Context, date string)
 	err := g.Model(s_db_model.TableNodePrice).Ctx(ctx).
 		Where(s_db_model.FieldNodePriceRunDate, date).
 		OrderAsc(s_db_model.FieldNodePricePeriodType).
-		OrderAsc(s_db_model.FieldNodePriceCity).
+		OrderAsc(s_db_model.FieldNodePriceCityCode).
 		Scan(&list)
 	if err != nil {
 		return nil, errors.Wrap(err, "查询地市节点价失败")

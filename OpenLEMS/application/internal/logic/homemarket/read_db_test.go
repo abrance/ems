@@ -42,11 +42,12 @@ func newTestDB(t *testing.T) *sql.DB {
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE gd_node_price (
-			run_date VARCHAR(10) NOT NULL, city VARCHAR(32) NOT NULL,
+			run_date VARCHAR(10) NOT NULL, city_code VARCHAR(16) NOT NULL,
+			city_name VARCHAR(32) NOT NULL,
 			period_type INTEGER NOT NULL DEFAULT 1, price REAL NOT NULL DEFAULT 0,
 			source VARCHAR(64) NOT NULL DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (run_date, city, period_type))`); err != nil {
+			UNIQUE (run_date, city_code, period_type))`); err != nil {
 		t.Fatalf("建 gd_node_price 失败: %v", err)
 	}
 	// run 表：采集状态用。建表语句与 s_db 的 DDL 保持一致（唯一键只有 target_date+dataset，
@@ -168,9 +169,10 @@ func TestLoadNodePrice42Rows(t *testing.T) {
 	cities := []string{"东莞市", "广州市", "深圳市"}
 	for _, c := range cities {
 		for _, tp := range []int{1, 2} {
+			code, _ := CityCodeOf(c)
 			_, err := g.DB().Exec(context.Background(), `
-				INSERT INTO gd_node_price (run_date, city, period_type, price, source)
-				VALUES (?, ?, ?, ?, ?)`, "2026-11-13", c, tp, 500.0, SourceNodePrice)
+				INSERT INTO gd_node_price (run_date, city_code, city_name, period_type, price, source)
+				VALUES (?, ?, ?, ?, ?, ?)`, "2026-11-13", code, c, tp, 500.0, SourceNodePrice)
 			if err != nil {
 				t.Fatalf("插地市价失败: %v", err)
 			}
@@ -190,6 +192,26 @@ func TestLoadNodePrice42Rows(t *testing.T) {
 	// 按 period_type 升序：前 3 条是高峰
 	if day.Points[0].PeriodType != 1 || day.Points[5].PeriodType != 2 {
 		t.Fatalf("排序错: 首 %d 末 %d", day.Points[0].PeriodType, day.Points[5].PeriodType)
+	}
+	// 编码必须读回来（DTO 新增字段，前端按需用）；中文名照旧下发。
+	for _, p := range day.Points {
+		if p.CityCode == "" {
+			t.Fatalf("cityCode 没读回来: %+v", p)
+		}
+		if p.City == "" {
+			t.Fatalf("city（中文名）丢了，前端会显示空白: %+v", p)
+		}
+	}
+	// 同一时段内按 city_code 升序：东莞 441900 < 广州 440100 是错的，
+	// 正确顺序是 广州 440100 < 深圳 440300 < 东莞 441900
+	peak := day.Points[:3]
+	for i := 1; i < len(peak); i++ {
+		if peak[i-1].CityCode > peak[i].CityCode {
+			t.Fatalf("高峰段未按 cityCode 升序: %v", []string{peak[0].CityCode, peak[1].CityCode, peak[2].CityCode})
+		}
+	}
+	if peak[0].CityCode != "440100" || peak[0].City != "广州市" {
+		t.Fatalf("首条应为广州市/440100，实际 %s/%s", peak[0].CityCode, peak[0].City)
 	}
 }
 

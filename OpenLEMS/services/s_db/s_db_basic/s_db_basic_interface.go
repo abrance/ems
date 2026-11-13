@@ -234,9 +234,9 @@ type IHomeMarketService interface {
 	// LatestHome24hDate 最近一个有数据的运行日；空串表示库里一条都没有
 	LatestHome24hDate(ctx context.Context) (string, error)
 
-	// UpsertNodePrice 覆盖写某天的地市节点价（唯一键 run_date+city+period_type）
+	// UpsertNodePrice 覆盖写某天的地市节点价（唯一键 run_date+city_code+period_type）
 	UpsertNodePrice(ctx context.Context, rows []*s_db_model.SNodePriceModel) (int, error)
-	// ListNodePrice 取某天的地市节点价（按 period_type、city 升序）
+	// ListNodePrice 取某天的地市节点价（按 period_type、city_code 升序）
 	ListNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceModel, error)
 	// LatestNodePriceDate 最近一个有数据的运行日
 	LatestNodePriceDate(ctx context.Context) (string, error)

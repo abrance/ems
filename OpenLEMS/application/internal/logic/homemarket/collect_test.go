@@ -133,6 +133,48 @@ func TestFetchNodePriceParses42RowsAndSkipsUnknownType(t *testing.T) {
 		if r.Source != SourceNodePrice {
 			t.Errorf("source = %q，期望 %q", r.Source, SourceNodePrice)
 		}
+		// 编码必须由静态表映射出来，且与中文名一致 —— 空编码会撞唯一键，
+		// 把 21 个城市挤成一行，而且写库不报错。
+		if r.CityCode == "" {
+			t.Errorf("cityCode 为空（中文名 %q 没映射到编码）: %+v", r.City, r)
+		}
+		if want, ok := CityCodeOf(r.City); !ok || want != r.CityCode {
+			t.Errorf("cityCode = %q，与 CityCodeOf(%q) 不一致", r.CityCode, r.City)
+		}
+	}
+	// 东莞 441900 / 广州 440100 / 深圳 440300
+	want := map[string]string{"东莞市": "441900", "广州市": "440100", "深圳市": "440300"}
+	for _, r := range rows {
+		if w, ok := want[r.City]; ok && r.CityCode != w {
+			t.Errorf("%s 的 cityCode = %q，期望 %q", r.City, r.CityCode, w)
+		}
+	}
+}
+
+// 源站若新增一个我们表里没有的市，必须跳过 + 告警，不能写空编码。
+// 空编码会撞唯一键 (run_date, city_code, period_type)，21 个城市静默挤成一行。
+func TestFetchNodePriceSkipsUnknownCity(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[
+			{"name":"广州市","value":610.5,"type":1},
+			{"name":"横琴新区","value":999.9,"type":1},
+			{"name":"广州市","value":409.7,"type":2}]}}`)
+	})
+
+	rows, err := FetchNodePrice(context.Background(), "2026-11-13")
+	if err != nil {
+		t.Fatalf("FetchNodePrice 失败: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("条数 = %d，期望 2（未知地市被跳过）: %+v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if r.City == "横琴新区" {
+			t.Fatal("未知地市被写进结果了：编码为空会撞唯一键")
+		}
+		if r.CityCode == "" {
+			t.Fatalf("写入了空 cityCode: %+v", r)
+		}
 	}
 }
 
