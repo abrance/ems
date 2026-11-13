@@ -14,8 +14,10 @@ type ExtractDayRes struct {
 	TradeDate  string   `json:"tradeDate" dc:"表2 承载的滞后运行日"`
 	MetricRows int      `json:"metricRows" dc:"写入日报原值表的行数"`
 	Preserved  int      `json:"preserved" dc:"因人工修订而被保留、未覆盖的行数"`
-	Status     string   `json:"status" dc:"ok / empty"`
-	Warnings   []string `json:"warnings" dc:"模板交叉校验告警，不影响入库集合"`
+	// SkippedFarther 因已有行的报告日更接近运行日（或距离相等）而被保留的行数
+	SkippedFarther int      `json:"skippedFarther" dc:"因已有行的报告日更接近运行日而被保留的行数"`
+	Status         string   `json:"status" dc:"ok / empty"`
+	Warnings       []string `json:"warnings" dc:"模板交叉校验告警，不影响入库集合"`
 }
 
 // BatchExtractReq 区间批量解析（后台串行任务，OCR 只有 2 并发槽）
@@ -49,8 +51,10 @@ type BatchStatusRes struct {
 	Failed     int      `json:"failed"`
 	MetricRows int      `json:"metricRows" dc:"累计写入行数"`
 	Preserved  int      `json:"preserved"`
-	Current    string   `json:"current" dc:"正在处理的日报日"`
-	Errors     []string `json:"errors"`
+	// SkippedFarther 累计因报告日更远（或等距）而未覆盖的行数
+	SkippedFarther int      `json:"skippedFarther"`
+	Current        string   `json:"current" dc:"正在处理的日报日"`
+	Errors         []string `json:"errors"`
 }
 
 // BackfillReq 一次性历史回填（只读 gd_spot_metric，单向、幂等）

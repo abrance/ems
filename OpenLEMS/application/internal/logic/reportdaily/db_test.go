@@ -8,6 +8,8 @@ import (
 	"application/internal/logic/spotreport"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"s_db"
+	"s_db/s_db_model"
 )
 
 // 真库用例：本包的写路径（persistExtracted）与核对读路径（LoadReconcile）各跑一遍真 sqlite。
@@ -206,3 +208,106 @@ func scalarFloat(t *testing.T, sql string) float64 {
 }
 
 var _ = os.Getenv
+
+// TestReportDailyUpsertBatchKeepsClosestReportDate 规范 §2：同一 run_date 被多份日报覆盖时，
+// 只留「报告日最接近运行日」的那份。活链路（UpsertBatch）原来只判 manual，没有这层判定，
+// 后写的远日报会把先写的近日报覆盖掉（依赖写入顺序 = 结果不稳定）。
+//
+// 双向都验：先近后远、先远后近，两次都必须留 report_date=距离 0 的那行。
+func TestReportDailyUpsertBatchKeepsClosestReportDate(t *testing.T) {
+	const (
+		runDate    = "2026-09-19"
+		nearDate   = "2026-09-19" // 距离 0：表1(二) 当日
+		farDate    = "2026-09-21" // 距离 2：表2(一) T-2
+		needleSQL  = `SELECT report_date || '|' || report_title || '|' || value FROM gd_report_daily WHERE run_date = '2026-09-19' AND dataset = 'day_ahead_trade' AND scope = '发电侧' AND metric = '平均电价'`
+		nearExpect = nearDate + "|R(09.19) 表1(二)|431.0"
+	)
+	row := func(reportDate, title string, value float64) []*s_db_model.SReportDailyModel {
+		return []*s_db_model.SReportDailyModel{{
+			RunDate: runDate, ReportDate: reportDate, Dataset: "day_ahead_trade",
+			Scope: "发电侧", Metric: "平均电价", Value: value, Unit: "元/兆瓦时",
+			Source: "表1(二)", Origin: s_db_model.ReportDailyOriginOCR, ReportTitle: title,
+		}}
+	}
+
+	cases := []struct {
+		name    string
+		first   []*s_db_model.SReportDailyModel
+		second  []*s_db_model.SReportDailyModel
+		skipped int
+	}{
+		{"先近后远", row(nearDate, "R(09.19) 表1(二)", 431.0), row(farDate, "R(09.21) 表2(一)", 999.9), 1},
+		{"先远后近", row(farDate, "R(09.21) 表2(一)", 999.9), row(nearDate, "R(09.19) 表1(二)", 431.0), 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			newTestDB(t)
+			ctx := t.Context()
+			svc := s_db.GetReportDailyService()
+
+			if _, err := svc.UpsertBatch(ctx, c.first, false); err != nil {
+				t.Fatalf("首次写入失败: %v", err)
+			}
+			res, err := svc.UpsertBatch(ctx, c.second, false)
+			if err != nil {
+				t.Fatalf("二次写入失败: %v", err)
+			}
+			if res.SkippedFarther != c.skipped {
+				t.Fatalf("SkippedFarther = %d，期望 %d（written=%d preserved=%d）",
+					res.SkippedFarther, c.skipped, res.Written, res.Preserved)
+			}
+			if got := scalarStr(t, needleSQL); got != nearExpect {
+				t.Fatalf("留下的不是最近报告日那行：%q，期望 %q", got, nearExpect)
+			}
+			if n := scalar(t, `SELECT COUNT(*) FROM gd_report_daily`); n != 1 {
+				t.Fatalf("同一唯一键只应留 1 行，实际 %d", n)
+			}
+			t.Logf("%s：留下 %q，SkippedFarther=%d", c.name, scalarStr(t, needleSQL), res.SkippedFarther)
+		})
+	}
+
+	// 等距时保留已有行（先到者胜，与 BackfillFromSpotMetric 的 INSERT OR IGNORE 同口径）
+	t.Run("等距保留已有行", func(t *testing.T) {
+		newTestDB(t)
+		ctx := t.Context()
+		svc := s_db.GetReportDailyService()
+		if _, err := svc.UpsertBatch(ctx, row("2026-09-18", "R(09.18) 表2(二)", 111.1), false); err != nil {
+			t.Fatal(err)
+		}
+		// 运行日 09-19，距离 1；再写一个报告日 09-20 也是距离 1
+		res, err := svc.UpsertBatch(ctx, row("2026-09-20", "R(09.20) 表2(一)", 222.2), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.SkippedFarther != 1 {
+			t.Fatalf("等距应保留已有行（SkippedFarther=1），实际 %d", res.SkippedFarther)
+		}
+		kept := scalarStr(t, needleSQL)
+		if kept != "2026-09-18|R(09.18) 表2(二)|111.1" {
+			t.Fatalf("等距时不该覆盖已有行，实际 %q", kept)
+		}
+		t.Logf("等距：保留首次写入的 %q", kept)
+	})
+
+	// force=true 行为不变：人工强制重跑就该覆盖
+	t.Run("force覆盖远日报", func(t *testing.T) {
+		newTestDB(t)
+		ctx := t.Context()
+		svc := s_db.GetReportDailyService()
+		if _, err := svc.UpsertBatch(ctx, row(nearDate, "R(09.19) 表1(二)", 431.0), false); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.UpsertBatch(ctx, row(farDate, "R(09.21) 表2(一)", 999.9), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Written != 1 || res.SkippedFarther != 0 {
+			t.Fatalf("force=true 应直接覆盖：written=%d skippedFarther=%d", res.Written, res.SkippedFarther)
+		}
+		if got := scalarStr(t, needleSQL); got != farDate+"|R(09.21) 表2(一)|999.9" {
+			t.Fatalf("force=true 应留下远日报，实际 %q", got)
+		}
+		t.Logf("force=true：覆盖成 %q", scalarStr(t, needleSQL))
+	})
+}

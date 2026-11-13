@@ -25,10 +25,11 @@ type batchJob struct {
 	Done       int
 	Succeeded  int
 	Failed     int
-	MetricRows int
-	Preserved  int
-	Current    string
-	Errors     []string
+	MetricRows     int
+	Preserved      int
+	SkippedFarther int
+	Current        string
+	Errors         []string
 }
 
 type batchRegistry struct {
@@ -115,6 +116,7 @@ func runBatch(ctx context.Context, job *batchJob, dates []string, includeManual 
 			job.Succeeded++
 			job.MetricRows += res.MetricRows
 			job.Preserved += res.Preserved
+			job.SkippedFarther += res.SkippedFarther
 		}
 		job.mu.Unlock()
 	}
@@ -140,7 +142,7 @@ func GetBatchStatus(id string) (*v1.BatchStatusRes, error) {
 	return &v1.BatchStatusRes{
 		Id: job.Id, Status: job.Status, Total: job.Total, Done: job.Done,
 		Succeeded: job.Succeeded, Failed: job.Failed,
-		MetricRows: job.MetricRows, Preserved: job.Preserved,
+		MetricRows: job.MetricRows, Preserved: job.Preserved, SkippedFarther: job.SkippedFarther,
 		Current: job.Current, Errors: nonNilStrings(job.Errors),
 	}, nil
 }
