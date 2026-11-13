@@ -21,7 +21,7 @@ import {
   type Segment,
   type SegmentRange,
 } from '@/metrics/forecast'
-import { anchorEndDate, lagDaysFrom, rangeEndingAt } from '@/utils/latestRange'
+import { anchorEndDate, lagDaysFrom, rangeEndingAt, todayInShanghai } from '@/utils/latestRange'
 import { firstPairDate as firstPairDateOf } from '@/utils/firstPairDate'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
@@ -195,6 +195,36 @@ const truthLagText = computed(() =>
 // 实际值未出时的括注：实时在等源站 T+2；日前源站当天就发，还没配对只可能是目标日的数据没入库。
 // 括注不能两边都用「官方 T+2」—— 那句话对日前是错的。
 const truthLagNote = computed(() => (market.value === 'real' ? '官方 T+2' : '目标日数据待入库'))
+
+/**
+ * 首个可配对日是否已经过去。
+ *
+ * 为什么需要：+1 / +3 只描述**源站**发布节奏，而库里的日频实际值靠 tools/gdpm 那只手动脚本
+ * 写入（README「每周更新（手动执行一次）」，没有定时任务）。采集停几天，页面就会印出
+ * 「首个可配对交易日约在 2026-11-12」而今天已是 11-14、图还是空的 —— 「约在某个过去的日期」
+ * 加「待入库」，读者只会判断成系统坏了。
+ *
+ * 用上海时区算「今天」，与后端、lagDaysFrom 同一口径（容器里的无头浏览器是 UTC）。
+ */
+const firstPairPassed = computed(
+  () => pairs.value.length === 0 && !!firstPairDate.value && firstPairDate.value < todayInShanghai(),
+)
+
+/**
+ * 「已过」分支里的本地采集状态。
+ *
+ * dataAsOf 用服务端下发的 recordedMeta.dataAsOf（= gd_spot_metric 的 max(report_date)），
+ * 前端不重算 —— 重算会和服务端的 as-of 口径漂移。为空时给一句不带日期的兜底，
+ * 绝不印「最后更新于 —」。
+ *
+ * shortcut: 这一支假设 dataAsOf < firstPairDate（本地采集确实没跑到目标日）。
+ * dataAsOf 已覆盖目标日却仍配不上对，属于配对逻辑异常，暂不另设文案，等真出现再补。
+ */
+const localDataAsOfText = computed(() => {
+  const n = String(recordedMeta.value?.dataAsOf ?? '').trim()
+  const tail = '（每周手动采集一次，不是源站没发）'
+  return n ? `本地日频指标最后更新于 ${n}${tail}。` : `本地日频指标的最后更新日期未知${tail}。`
+})
 
 /** 图上的水印：重跑腿常驻，历史存档额外再标一次 */
 const chartWatermark = computed(() => {
@@ -769,7 +799,12 @@ onMounted(async () => {
           <div class="empty-title">还没有可复盘的当时预测</div>
           <div>
             预测留痕自 {{ recordedMeta?.generatedDates[0] || '—' }} 起积累，之前的日子没有记录，也补不回来。
-            {{ truthLagText }}，首个可配对交易日约在 {{ firstPairDate || '—' }}。
+            <template v-if="firstPairPassed">
+              首个可配对交易日 {{ firstPairDate }} 已过，实际值仍未入库。{{ localDataAsOfText }}
+            </template>
+            <template v-else>
+              {{ truthLagText }}，首个可配对交易日约在 {{ firstPairDate || '—' }}。
+            </template>
           </div>
           <div v-if="recordedMeta?.unavailable" class="muted">{{ recordedMeta.unavailable }}</div>
           <div v-else-if="recordedMeta?.actualMissing" class="muted">
