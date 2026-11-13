@@ -33,19 +33,27 @@ export interface Home24hDay {
   lagDays: number
   points: Home24hPoint[]
   source: string
-  meanAhead: number
-  meanRealtime: number
-  peakPowerMw: number
-  lowPowerMw: number
+  /** 该日实际落库的点数（正常 24）。缺点的日子不能拿来当全天统计 */
+  pointCount: number
+  // 下面四个只在满 24 点时后端才下发（缺点日 omitempty）——所以是可选，页面必须用 pointCount 说明原因
+  meanAhead?: number
+  meanRealtime?: number
+  peakPowerMw?: number
+  lowPowerMw?: number
 }
 
 /** GET /api/gd-metric/home-24h?date= */
 export function fetchHome24h(params: { date?: string }, signal?: AbortSignal): Promise<Home24hDay> {
   // Go 的 nil 切片序列化成 null，页面里 .map 会直接抛 —— 在 api 层统一收口
-  return api.get<Home24hDay>('/api/gd-metric/home-24h', { date: params.date }, signal).then((r) => ({
-    ...r,
-    points: r?.points ?? [],
-  }))
+  return api.get<Home24hDay>('/api/gd-metric/home-24h', { date: params.date }, signal).then((r) => {
+    const points = r?.points ?? []
+    return {
+      ...r,
+      points,
+      // 老后端没这个字段：按实际点数兜底，缺点的日子仍然会被页脚点出来，而不是显示「峰值 —」
+      pointCount: r?.pointCount ?? points.length,
+    }
+  })
 }
 
 /** 地市节点价的一个点 */
