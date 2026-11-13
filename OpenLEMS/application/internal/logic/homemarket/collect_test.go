@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"s_db/s_db_model"
 )
 
 // 解析层单测：拿本地桩服务替掉真实源站。
@@ -331,5 +333,178 @@ func TestFetchHome24hSingleZeroPointIsNotRejected(t *testing.T) {
 	}
 	if len(rows) != 2 {
 		t.Fatalf("条数 = %d，期望 2", len(rows))
+	}
+}
+
+// ---- 24 点两列独立判据（ahead / realtime 各判各的）----
+//
+// 旧判据是 `AheadPrice == 0 && RealtimePrice == 0`，必须两列同时为 0 才拦。
+// 源站只把 currentPrice 改名（realTimePrice 不动）时，ahead 整批 0 而 realtime 正常，
+// 守卫放行 → 0 元写库 → 页面画一条贴地的「日前电价」线，均值算成 0。
+// 下面两条各钉一列，缺一条就会漏掉一半的改名形态。
+
+// ahead 整批 0、realtime 全非 0：必须报 parse，且一条都不能返回。
+// 夹具里 realtime 带 610.5 这类真实非零值（不是 0），旧判据在这条上是放行的。
+func TestFetchHome24hAheadAllZeroRealtimeNormalIsParseError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+		for h := 0; h < 24; h++ {
+			if h > 0 {
+				fmt.Fprint(w, ",")
+			}
+			// currentPrice 改名 → 解出 0；realTimePrice 照常
+			fmt.Fprintf(w, `{"powerNum":%d,"currentPrice":0,"realTimePrice":%d.5,"dateTime":"2026-11-07 %02d:00:00"}`,
+				60000+h, 610+h, h)
+		}
+		fmt.Fprint(w, `]}}`)
+	})
+
+	rows, err := FetchHome24h(context.Background(), "2026-11-07")
+	if err == nil {
+		t.Fatalf("ahead 整批为 0 应报错，实际返回 %d 行且 err=nil（0 元会被写成真实日前价）", len(rows))
+	}
+	if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
+	}
+	if rows != nil {
+		t.Errorf("报错时不应返回任何行，实际 %d 行", len(rows))
+	}
+}
+
+// realtime 整批 0、ahead 全非 0：同样必须报 parse。
+// 这条防的是「只修 ahead 那一半」—— 反向改名一样会把 0 写进 realtime_price。
+func TestFetchHome24hRealtimeAllZeroAheadNormalIsParseError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+		for h := 0; h < 24; h++ {
+			if h > 0 {
+				fmt.Fprint(w, ",")
+			}
+			// realTimePrice 改名 → 解出 0；currentPrice 照常
+			fmt.Fprintf(w, `{"powerNum":%d,"currentPrice":%d.5,"realTimePrice":0,"dateTime":"2026-11-07 %02d:00:00"}`,
+				60000+h, 400+h, h)
+		}
+		fmt.Fprint(w, `]}}`)
+	})
+
+	rows, err := FetchHome24h(context.Background(), "2026-11-07")
+	if err == nil {
+		t.Fatalf("realtime 整批为 0 应报错，实际返回 %d 行且 err=nil", len(rows))
+	}
+	if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
+	}
+	if rows != nil {
+		t.Errorf("报错时不应返回任何行，实际 %d 行", len(rows))
+	}
+}
+
+// 判据必须「整批全为 0」而不是 `<=0`：负价（含合法负电价）与非 0 值混在一起时照常放行。
+// 这条是变异守卫 —— 把任一列判据改成 <=0，本用例立刻变红。
+// 线上库实测：gd_home_24h 192 行最小 53.2；gd_node_price 有 -8.523 的合法负价。
+func TestFetchHome24hKeepsNegativeAndMixedValues(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[
+			{"powerNum":60000,"currentPrice":-8.523,"realTimePrice":-3.2,"dateTime":"2026-11-07 00:00:00"},
+			{"powerNum":60000,"currentPrice":412.5,"realTimePrice":0,"dateTime":"2026-11-07 01:00:00"},
+			{"powerNum":60000,"currentPrice":0,"realTimePrice":433.1,"dateTime":"2026-11-07 02:00:00"}]}}`)
+	})
+
+	rows, err := FetchHome24h(context.Background(), "2026-11-07")
+	if err != nil {
+		t.Fatalf("含负价/非 0 值的批次不该被判失败：%v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("条数 = %d，期望 3", len(rows))
+	}
+	if rows[0].AheadPrice != -8.523 || rows[0].RealtimePrice != -3.2 {
+		t.Errorf("合法负价被改写：%+v", rows[0])
+	}
+}
+
+// 整批负价是合法数据，不是「字段改名」。
+//
+// 这条是 `<=0` 变异的唯一杀手：guardBatch 只要遇到一个非 0 值就放行，所以
+// 「混入一个 610.5」的夹具对 ==0 和 <=0 完全等价 —— 只有**整批 ≤0 且含负值**能区分。
+// 深度供大于求时全天负价在理论上是可能形态，此时必须原样写入而不是判成「全 0 拒绝」。
+func TestFetchHome24hAllNegativeBatchIsNotRejected(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+		for h := 0; h < 24; h++ {
+			if h > 0 {
+				fmt.Fprint(w, ",")
+			}
+			fmt.Fprintf(w, `{"powerNum":%d,"currentPrice":%d.5,"realTimePrice":%d.25,"dateTime":"2026-11-07 %02d:00:00"}`,
+				60000+h, -(h+1), -(h+2), h)
+		}
+		fmt.Fprint(w, `]}}`)
+	})
+
+	rows, err := FetchHome24h(context.Background(), "2026-11-07")
+	if err != nil {
+		t.Fatalf("整批负价是合法数据，不该被判成「全为 0」：%v", err)
+	}
+	if len(rows) != 24 {
+		t.Fatalf("条数 = %d，期望 24", len(rows))
+	}
+	if rows[0].AheadPrice != -1.5 || rows[0].RealtimePrice != -2.25 {
+		t.Errorf("负价被改写：%+v", rows[0])
+	}
+}
+
+// 地市同样：整批负价照常写入（线上 2026-11-08 湛江低谷已有 -8.523 先例）。
+func TestFetchNodePriceAllNegativeBatchIsNotRejected(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[
+			{"name":"湛江市","value":-8.523,"type":2},
+			{"name":"广州市","value":-1.2,"type":2},
+			{"name":"深圳市","value":-0.4,"type":2}]}}`)
+	})
+
+	rows, err := FetchNodePrice(context.Background(), "2026-11-08")
+	if err != nil {
+		t.Fatalf("整批负价不该被判成「全为 0」：%v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("条数 = %d，期望 3", len(rows))
+	}
+}
+// ⑥ 只有 ahead 整批 0（realtime 正常）：run 表记 failed/parse、数据表一行不多。
+// 旧判据 `ahead==0 && realtime==0` 在这条上是放行的，0 元会写进 gd_home_24h 的 ahead_price，
+// 页面 24 点电价图直接把「日前」那条线画成贴地 0 元、MeanAhead 算成 0。
+func TestCollectAheadOnlyZeroBatchWritesNoData(t *testing.T) {
+	newTestDB(t)
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		date := r.URL.Query().Get("date")
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+		for h := 0; h < 24; h++ {
+			if h > 0 {
+				fmt.Fprint(w, ",")
+			}
+			fmt.Fprintf(w, `{"powerNum":%d,"currentPrice":0,"realTimePrice":%d.5,"dateTime":"%s %02d:00:00"}`,
+				60000+h, 610+h, date, h)
+		}
+		fmt.Fprint(w, `]}}`)
+	})
+
+	if _, _, err := CollectHome24h(context.Background(), time.Now()); err == nil {
+		t.Fatal("ahead 整批 0 应返回 error（否则 0 元会被写成真实日前价）")
+	} else if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
+	}
+	if got := countRows(t, s_db_model.TableHome24h); got != 0 {
+		t.Fatalf("ahead 整批 0 却往数据表写了 %d 行，期望 0（页面会显示日前电价全天 0 元）", got)
+	}
+	runRows := fetchRunRows(t, s_db_model.DatasetHome24h)
+	if len(runRows) == 0 {
+		t.Fatal("run 表一行都没写，排障时看不出发生过什么")
+	}
+	for _, r := range runRows {
+		if r.Status != s_db_model.FetchStatusFailed || r.ErrorKind != string(ErrKindParse) {
+			t.Errorf("%s run 行 = %+v，期望 failed/parse", r.TargetDate, r)
+		}
+		if r.RowsWritten != 0 {
+			t.Errorf("%s 记了 %d 行写入，期望 0", r.TargetDate, r.RowsWritten)
+		}
 	}
 }
