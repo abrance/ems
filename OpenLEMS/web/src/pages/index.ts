@@ -12,6 +12,7 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   realtime: () => import('./monitor/RealtimeView.vue'),
   cabinet: () => import('./monitor/CabinetView.vue'),
   alarms: () => import('./monitor/AlarmsView.vue'),
+  market: () => import('./scene/MarketView.vue'),
   disclosure: () => import('./scene/DisclosureView.vue'),
   history: () => import('./scene/HistoryView.vue'),
   intradayResearch: () => import('./scene/IntradayResearchView.vue'),

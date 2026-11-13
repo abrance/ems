@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
+import SourceBadge from '@/components/SourceBadge.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { fetchBacktest, fetchEffectSummary, type EffectBacktest, type EffectSummary } from '@/api/effect'
@@ -416,13 +417,17 @@ watch(
       sub="TimesFM · 日均序列"
       :span="12"
       :loading="loading.price"
-      :foot="price ? `模型 ${price.model} · 历史 ${price.contextPoints} 点 · 区间 ${price.from} ~ ${price.to} · 缺数据 ${price.missingDays} 天 · 耗时 ${price.timeMs.toFixed(0)}ms` : '数据来源：/api/forecast/price'"
+      :foot="price ? `模型 ${price.model} · 历史 ${price.contextPoints} 点 · 区间 ${price.from} ~ ${price.to} · 缺数据 ${price.missingDays} 天 · 耗时 ${price.timeMs.toFixed(0)}ms` : '数据来源：官方直采日均成交价（gd_spot_metric）'"
     >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·日频 T+2" />
+      </template>
       <div v-if="errors.price" class="empty">{{ errors.price }}</div>
       <template v-else>
         <div class="warn">
-          本块出的是<strong>日均</strong>序列。要看 96 点分时预测，去「长周期电价预测」页的
-          「分时」视图 —— 那条序列走电网日指标 CSV，与这里的官方直采日均序列**不是同一份数据**。
+          本块出的是<strong>日均</strong>序列（官方直采日均成交价）。15 分钟（96 点）分时预测
+          已于 2026-11-13 停用：它依赖的第三方分时通道止于 2026-10-02，官方匿名接口没有 96 点。
+          两者**不是同一份数据**，不要互相换算。
         </div>
         <div ref="priceEl" class="chart" />
       </template>
@@ -433,8 +438,11 @@ watch(
       :sub="similar ? `目标日 ${similar.targetDate} · 候选 ${similar.candidates} 天` : ''"
       :span="4"
       :loading="similarLoading"
-      :foot="similar ? `${similar.method}｜${similar.formula}｜只统计实际值日（电查查预测占位不算）` : '数据来源：/api/gd-metric/similar-days'"
+      :foot="similar ? `${similar.method}｜${similar.formula}｜只统计实际值日（电查查预测占位不算）` : '数据来源：96 点序列（第三方通道已停更）'"
     >
+      <template #actions>
+        <SourceBadge tone="gray" label="第三方·已停用" />
+      </template>
       <div v-if="similarError" class="empty">{{ similarError }}</div>
       <template v-else-if="similar">
         <div class="muted">点一行叠加到右图（最多 {{ MAX_PICKS }} 天）。</div>
@@ -465,6 +473,9 @@ watch(
       :loading="similarLoading"
       foot="目标日实线加粗；勾选的相似日为虚线（先切「日前/实时」再叠加）"
     >
+      <template #actions>
+        <SourceBadge tone="gray" label="第三方·已停用" />
+      </template>
       <template v-if="similar">
         <div class="toolbar">
           <label class="field">

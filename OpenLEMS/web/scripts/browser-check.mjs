@@ -50,6 +50,22 @@ function curve96(kind) {
 const DAYS = ['2026-08-29', '2026-08-30', '2026-08-31']
 const quantileGrid = [200, 240, 280, 320, 340, 360, 380, 400, 430, 470, 520]
 
+/** 官方指标序列的桩形状（与 smoke.mjs 同一份，避免两处漂移） */
+function marketSeries(dataset, scope, metric, unit, values) {
+  const pts = values.map(([period, value]) => ({ period, value }))
+  const nums = values.map((v) => v[1])
+  return {
+    dataset, scope, metric, unit, grain: 'day',
+    points: pts,
+    latest: pts[pts.length - 1],
+    momPct: 2.5, yoyPct: -4.1,
+    peak: Math.max(...nums), valley: Math.min(...nums),
+    spread: Math.max(...nums) - Math.min(...nums),
+    mean: nums.reduce((a, b) => a + b, 0) / nums.length,
+    days: nums.length,
+  }
+}
+
 const FIXTURES = {
   '/api/gd-metric': {
     latestDate: '2026-08-31',
@@ -197,12 +213,56 @@ const FIXTURES = {
     ],
   },
   // 官方指标看板：复盘页用它取「实际值最新日」（按市场），决定区间锚点与陈旧档位
+  // 市场总览的两路新数据。日期刻意与日频板（08-31）不同：
+  // 24 点 11-07（T-6）、地市 11-13（T+0），用来验「三个批次分别标注」。
+  '/api/gd-metric/home-24h': {
+    date: '2026-11-07',
+    empty: false,
+    latestDate: '2026-11-07',
+    lagDays: 6,
+    source: '官网·24点',
+    points: Array.from({ length: 24 }, (_, h) => ({
+      hour: h, powerMw: 60000 + h * 100, aheadPrice: 400 + h, realtimePrice: 500 + h,
+    })),
+    meanAhead: 411.5, meanRealtime: 511.5, peakPowerMw: 62300, lowPowerMw: 60000,
+  },
+  '/api/gd-metric/node-price': {
+    date: '2026-11-13',
+    empty: false,
+    latestDate: '2026-11-13',
+    lagDays: 0,
+    source: '官网·节点价',
+    points: ['东莞市', '中山市', '云浮市', '佛山市', '广州市', '惠州市', '揭阳市', '梅州市',
+      '汕头市', '汕尾市', '江门市', '河源市', '深圳市', '清远市', '湛江市', '潮州市',
+      '珠海市', '肇庆市', '茂名市', '阳江市', '韶关市'].flatMap((city, i) => [
+      { city, periodType: 1, price: 465 + i },
+      { city, periodType: 2, price: 409 + i },
+    ]),
+    peakCities: 21, valleyCities: 21,
+  },
   '/api/spot-market/board': {
     date: '2026-08-31',
     from: '2026-06-03',
     to: '2026-08-31',
     days: 90,
-    daily: [],
+    // 日频给三条线（日前/实时均价 + 两条电量）：市场总览的「日频趋势」图靠它画出来。
+    // 空 daily 时那张图不会渲染，页面就少一张图 —— 那是桩的问题，不是页面的问题。
+    daily: [
+      marketSeries('day_ahead_trade', '发电侧', '发电侧日前加权平均电价', '元/兆瓦时',
+        [['2026-08-29', 380], ['2026-08-30', 390], ['2026-08-31', 400.5]]),
+      marketSeries('realtime_trade', '发电侧', '发电侧实时加权平均电价', '元/兆瓦时',
+        [['2026-08-29', 360], ['2026-08-30', 370]]),
+      marketSeries('day_ahead_trade', '发电侧', '发电侧日前总成交电量', 'MWh',
+        [['2026-08-29', 1500000], ['2026-08-30', 1510000], ['2026-08-31', 1520000]]),
+      marketSeries('day_ahead_trade', '用电侧', '用电侧日前总成交电量', 'MWh',
+        [['2026-08-29', 2300000], ['2026-08-30', 2310000], ['2026-08-31', 2320000]]),
+      marketSeries('day_ahead_trade', '发电侧', '发电侧日前加权最高电价', '元/兆瓦时',
+        [['2026-08-31', 760]]),
+      marketSeries('day_ahead_trade', '发电侧', '发电侧日前加权最低电价', '元/兆瓦时',
+        [['2026-08-31', 60]]),
+      marketSeries('day_ahead_trade', '发电侧', '日前申报均价', '元/兆瓦时',
+        [['2026-08-31', 412.3]]),
+    ],
     periodic: [],
     aheadRealtimeSpread: [],
     spreadPeak: 0,
@@ -428,6 +488,13 @@ class Marionette {
  * ------------------------------------------------------------------ */
 
 const PAGES = [
+  // 市场总览：4 张图（日频趋势 / 24 点电价 / 24 点负荷 / 地市 42 条条形）
+  {
+    name: '市场数据 · 市场总览',
+    path: '/scene/market',
+    min: 4,
+    text: ['官网·节点价 T+0', '官网·日频 T+2', '官网·24 点 T-6', '数据截至'],
+  },
   { name: '市场数据 · 信息披露', path: '/scene/disclosure', min: 2 },
   // 决策支持现在有三张图：电价预测、负荷预测、相似日情况分析（目标日 + 叠加日）
   { name: '分析预测 · 决策支持', path: '/scene/decision', min: 3 },

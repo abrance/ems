@@ -67,3 +67,8 @@ func GetPriceForecastService() s_db_basic.IPriceForecastService {
 func GetSpotExtractService() s_db_basic.ISpotExtractService {
 	return impl.GetSpotExtractService()
 }
+
+// GetHomeMarketService 获取官网主页市场数据（24 点 + 地市节点价）service 对象
+func GetHomeMarketService() s_db_basic.IHomeMarketService {
+	return impl.GetHomeMarketService()
+}

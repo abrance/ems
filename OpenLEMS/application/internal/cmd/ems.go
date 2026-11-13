@@ -3,6 +3,7 @@ package cmd
 import (
 	applog "application/internal/log"
 	"application/internal/logic"
+	"application/internal/logic/homemarket"
 	retentionlogic "application/internal/logic/retention"
 	"application/internal/service"
 	"application/internal/utils"
@@ -62,6 +63,13 @@ func InitSystem(ctx context.Context, parser *gcmd.Parser) error {
 	// 数据保留：按 device/system/log 三条设置定期清理历史数据。
 	// 放在存储注册之后 —— 没有存储实例时它只会跳过并在结果里写明原因。
 	retentionlogic.Start(ctx, retentionlogic.DefaultInterval)
+
+	// 官网主页市场数据采集（24 点分时 + 地市节点价）。
+	//
+	// 与 gd_spot_metric 的 pm-api 采集分开：那套是 tools/gdpm 的脚本 + 外部 cron，
+	// 写 gd_spot_metric；这里在进程内跑，写 gd_home_24h / gd_node_price。
+	// 两边不共享定时器与失败语义，一边挂了另一边照常。
+	homemarket.Start(ctx, homemarket.DefaultInterval)
 
 	// 注册设备管理器
 	common.RegisterDeviceManager(s_driver.NewDriverManagerImpl(ctx))

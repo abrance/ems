@@ -57,6 +57,15 @@ export const NAV: NavTab[] = [
     scene: true,
     pages: [
       {
+        key: 'market',
+        title: '市场总览',
+        path: '/scene/market',
+        status: 'ready',
+        note:
+          '三个批次的滞后不同：地市节点价 T+0、日频指标 T+2、主页 24 点 T-6。' +
+          '页头批次条分别标注来源与滞后，不拿一个日期代表全部。',
+      },
+      {
         key: 'disclosure',
         title: '信息披露',
         path: '/scene/disclosure',

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
+import SourceBadge from '@/components/SourceBadge.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import { fetchPriceForecast, type PriceForecast } from '@/api/forecast'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
@@ -215,8 +216,11 @@ onMounted(() => {
       :sub="data ? `${data.scope} · ${data.metric}` : ''"
       :span="12"
       :loading="loading"
-      :foot="data ? `模型 ${data.model} · 历史 ${data.contextPoints} 点 · 区间 ${data.from} ~ ${data.to} · 缺数据 ${data.missingDays} 天 · 耗时 ${data.timeMs.toFixed(0)}ms` : '数据来源：/api/forecast/price?grain=day'"
+      :foot="data ? `模型 ${data.model} · 历史 ${data.contextPoints} 点 · 区间 ${data.from} ~ ${data.to} · 缺数据 ${data.missingDays} 天 · 耗时 ${data.timeMs.toFixed(0)}ms` : '数据来源：官方直采日均成交价（gd_spot_metric）'"
     >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·日频 T+2" />
+      </template>
       <div class="kpis">
         <KpiCard label="预测天数" :value="dayRows.length || '—'" unit="日" :hint="`D+1 ~ D+${dayRows.length}`" />
         <KpiCard
