@@ -2,8 +2,11 @@ package research
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"application/internal/logic/gdmetric"
 )
 
 // 纯函数部分：滞后天数与日期区间。这两件事错了会直接体现在页面文案上
@@ -94,5 +97,23 @@ func TestLoadWithoutLocalCache(t *testing.T) {
 		if len(d.Points) == 0 {
 			t.Errorf("%s 进了 Days 却没有点：空态必须走 Missing", d.Date)
 		}
+	}
+}
+
+// 空态判定必须扛住 Wrap：以前用 == 比较哨兵错误，任何一层 errors.Wrap
+// 都会让空态变成 500（页面从「未入库」变成「读取失败」）。
+func TestIsMissingWrapped(t *testing.T) {
+	if !isMissing(gdmetric.ErrFrozenLocalMissing) {
+		t.Fatal("哨兵错误本身应判定为缺失")
+	}
+	wrapped := fmt.Errorf("读取冻结快照: %w", gdmetric.ErrFrozenLocalMissing)
+	if !isMissing(wrapped) {
+		t.Fatal("被 Wrap 的哨兵错误仍应判定为缺失（否则空态变 500）")
+	}
+	if isMissing(nil) {
+		t.Fatal("nil 不是缺失")
+	}
+	if isMissing(fmt.Errorf("别的错误")) {
+		t.Fatal("无关错误不能被当成缺失")
 	}
 }

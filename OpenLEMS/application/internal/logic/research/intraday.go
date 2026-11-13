@@ -2,6 +2,7 @@ package research
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"application/internal/logic/gdmetric"
@@ -125,8 +126,10 @@ func Load(ctx context.Context, from, to string, now time.Time) (*Result, error) 
 	return res, nil
 }
 
+// isMissing 用 errors.Is：错误一旦被 Wrap（空态那条路径以后加个上下文就会），
+// == 立刻失效，而失效的方向是「当成真错误返回 500」—— 页面从空态变成报错。
 func isMissing(err error) bool {
-	return err == gdmetric.ErrFrozenLocalMissing
+	return errors.Is(err, gdmetric.ErrFrozenLocalMissing)
 }
 
 // LagDays 数据日到 now 的自然日数（按 Asia/Shanghai 的日历日）；格式不对返回 -1。
