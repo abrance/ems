@@ -220,6 +220,14 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 				if st.FetchedAt == "" {
 					t.Error("lagging 应给出上次成功时间 fetchedAt")
 				}
+				// *gtime.Time.Format 是 PHP 风格："Y-m-d H:i:s" 才是真日期，
+				// 传 Go 的 layout（"2006-01-02 15:04:05"）会被当成字面量原样吐出来。
+				// 两种写法都不会报错，只是页面印出一串假日期，所以这里两个都钉。
+				for _, layout := range []string{"2006-01-02 15:04:05", "Y-m-d H:i:s"} {
+					if st.FetchedAt == layout {
+						t.Errorf("fetchedAt = %q，格式串被原样输出了（*gtime.Time.Format 要 PHP 风格 Y-m-d H:i:s）", layout)
+					}
+				}
 				if st.Rows != 24 || st.RowsExpected != 24 {
 					t.Errorf("rows/rowsExpected = %d/%d，期望 24/24", st.Rows, st.RowsExpected)
 				}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"application/api/spotreport/v1"
+	"application/internal/logic/homemarket"
 	"s_db/s_db_model"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -38,10 +39,11 @@ func setupHomeMarketDB(t *testing.T) {
 			realtime_price REAL NOT NULL DEFAULT 0, source VARCHAR(64) NOT NULL DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE (price_date, hour))`, `
 		CREATE TABLE gd_node_price (
-			run_date VARCHAR(10) NOT NULL, city VARCHAR(32) NOT NULL,
+			run_date VARCHAR(10) NOT NULL, city_code VARCHAR(16) NOT NULL,
+			city_name VARCHAR(32) NOT NULL,
 			period_type INTEGER NOT NULL DEFAULT 1, price REAL NOT NULL DEFAULT 0,
 			source VARCHAR(64) NOT NULL DEFAULT '',
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE (run_date, city, period_type))`, `
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE (run_date, city_code, period_type))`, `
 		CREATE TABLE gd_home_market_fetch_run (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			target_date VARCHAR(10) NOT NULL, dataset VARCHAR(16) NOT NULL,
@@ -70,9 +72,10 @@ func setupHomeMarketDB(t *testing.T) {
 		"珠海市", "肇庆市", "茂名市", "阳江市", "韶关市"}
 	for _, c := range cities {
 		for _, tp := range []int{s_db_model.NodePricePeriodPeak, s_db_model.NodePricePeriodValley} {
+			code, _ := homemarket.CityCodeOf(c)
 			if _, err := g.DB().Exec(ctx, `INSERT INTO gd_node_price
-				(run_date,city,period_type,price,source) VALUES (?,?,?,?,?)`,
-				"2026-11-13", c, tp, 465.0, "官网·节点价"); err != nil {
+				(run_date,city_code,city_name,period_type,price,source) VALUES (?,?,?,?,?,?)`,
+				"2026-11-13", code, c, tp, 465.0, "官网·节点价"); err != nil {
 				t.Fatal(err)
 			}
 		}

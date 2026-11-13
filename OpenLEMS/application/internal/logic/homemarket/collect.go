@@ -225,8 +225,16 @@ func FetchNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceM
 			c_log.Warningf(ctx, "地市节点价出现未知时段 type=%d（%s），跳过", item.Type, item.Name)
 			continue
 		}
+		// 源站只给中文名，编码靠静态表映射。表里没有就跳过并告警：写空编码会撞
+		// 唯一键 (run_date, city_code, period_type)，21 个城市会挤成一行。
+		code, ok := CityCodeOf(item.Name)
+		if !ok {
+			c_log.Warningf(ctx, "地市节点价出现未知地市 %q（无行政区划编码），跳过；请补 city_code.go", item.Name)
+			continue
+		}
 		rows = append(rows, &s_db_model.SNodePriceModel{
 			RunDate:    date,
+			CityCode:   code,
 			City:       item.Name,
 			PeriodType: item.Type,
 			Price:      item.Value,
