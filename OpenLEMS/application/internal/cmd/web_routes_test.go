@@ -48,6 +48,8 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		// 官网主页两路市场数据（24 点分时 / 21 地市节点价），与上面两条都不是一路
 		"GET /api/gd-metric/home-24h",
 		"GET /api/gd-metric/node-price",
+		// 分时研究（第三方 · 非官方，只读冻结快照）
+		"GET /api/research/intraday",
 		"POST /api/spot-report/collect",
 		"POST /api/spot-report/extract",
 		"POST /api/spot-report/extract/batch",

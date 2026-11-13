@@ -658,6 +658,33 @@ const FAKE_SIMILAR = {
 }
 
 
+// ===== 分时研究（第三方 · 非官方，GET /api/research/intraday）=====
+// 夹具口径与真实后端一致：asOf = 最后一天有实际值（不是今天），
+// 区间内 11-12/13 未入库 → 进 missing（页面走空态，不画 0 线）。
+const intradayPoints = (base) =>
+  Array.from({ length: 96 }, (_, i) => {
+    const h = String(Math.floor(i / 4)).padStart(2, '0')
+    const m = String((i % 4) * 15 + 15).padStart(2, '0')
+    const time = i === 95 ? '24:00' : `${h}:${m}`
+    return { time, value: Math.round((base + 60 * Math.sin((i / 96) * Math.PI * 2)) * 100) / 100 }
+  })
+const FAKE_INTRADAY_RESEARCH = {
+  source: { id: 'gdmetric.frozen', name: '第三方分时快照（gd_metric.csv，已停更）', kind: 'thirdparty' },
+  asOf: '2026-10-02',
+  lagDays: 42,
+  stale: true,
+  from: '2026-09-28',
+  to: '2026-10-02',
+  days: [
+    { date: '2026-09-28', points: intradayPoints(420) },
+    { date: '2026-09-29', points: intradayPoints(430) },
+    { date: '2026-10-01', points: intradayPoints(445) },
+    { date: '2026-10-02', points: intradayPoints(452) },
+  ],
+  missing: ['2026-09-30'],
+  available: ['2026-09-28', '2026-09-29', '2026-10-01', '2026-10-02'],
+}
+
 // ===== 官方电力市场指标看板（/api/spot-market/board）=====
 // 日前 3 天、实时 2 天（T+2 发布），这样「日前-实时价差」只有 2 个点 ——
 // 顺带守住「不许拿别的日期的实时价来配」这条口径。
@@ -871,6 +898,8 @@ const requests = []
 let cleaned = false
 /** 手动控制开关（后端默认关闭）：默认给开，专门留一段测停用路径 */
 let manualEnabled = true
+/** 分时研究页的空态开关：true 时后端返回 0 天（验证空态不画 0 线） */
+let intradayEmpty = false
 globalThis.fetch = async (url, init) => {
   requests.push({
     url: String(url),
@@ -1078,6 +1107,11 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/forecast/backtest')) {
     // 粒度决定返回哪个夹具：日频一天一点，96 点是分时
     return json(u.includes('grain=day') ? FAKE_BACKTEST_DAY : FAKE_BACKTEST_RESULT)
+  }
+  if (u.includes('/api/research/intraday')) {
+    // 夹具：滞后 42 天（stale）、区间内 09-30 未入库、asOf 钉在 2026-10-02
+    // 空态分支另由 intradayEmpty 开关驱动
+    return json(intradayEmpty ? { ...FAKE_INTRADAY_RESEARCH, days: [], missing: ['2026-10-01', '2026-10-02'] } : FAKE_INTRADAY_RESEARCH)
   }
   if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
   // 注意顺序：这两个也以 /api/gd-metric 开头，必须排在下面的 gd-metric 兜底之前，
@@ -2331,7 +2365,7 @@ console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
 // 当前 27 = 29 - 「数据保留」- 「时间与时区」
 //   两者都是「后端接口挂在别的功能下」：保留→存储管理，时间→系统操作，不留两个入口
-const EXPECTED_PAGES = 32
+const EXPECTED_PAGES = 33
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 5, `Tab 数量 = ${tabEls.length}（期望 5）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(
@@ -2342,7 +2376,7 @@ check(
 // 按 key 找而不是按序号：Tab 顺序变过一次（加了运行监控），序号断言会跟着一起错
 const marketTab = NAV.find((t) => t.key === 'market')
 const analysisTab = NAV.find((t) => t.key === 'analysis')
-check(marketTab?.pages.length === 4, `市场数据页 4 个（实际 ${marketTab?.pages.length}）`)
+check(marketTab?.pages.length === 5, `市场数据页 5 个（实际 ${marketTab?.pages.length}）`)
 check(analysisTab?.pages.length === 4, `分析预测页 4 个（实际 ${analysisTab?.pages.length}）`)
 check(!NAV.some((t) => t.key === 'scene'), '原「场景」Tab 已拆掉，不留空壳')
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
@@ -2436,6 +2470,57 @@ for (const tab of NAV) {
   }
 }
 check(visited === totalPages, `共访问 ${visited} 页（期望 ${totalPages}）`)
+
+console.log('\n== 分时研究页（第三方 · 非官方，只读）==')
+{
+  const reqBase = requests.length
+  await clickTo('市场数据', '分时研究')
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('第三方'), 2000)
+
+  // 页头角标必须常驻「非官方」+「截至 X」：这是本页存在的前提，不能只写在注释里
+  check(!!doc.querySelector('[data-thirdparty]'), '页头有「第三方 · 非官方」角标')
+  check((doc.querySelector('[data-thirdparty]')?.textContent ?? '').includes('非官方'), '角标文案含「非官方」')
+  check(/截至\s*2026-10-02/.test(doc.querySelector('[data-asof]')?.textContent ?? ''), '页头写「截至 2026-10-02」（数据日，不是今天）', doc.querySelector('[data-asof]')?.textContent ?? '')
+  check(bodyHas('滞后 42 天'), '滞后天数来自后端（stale=42 天），前端不重算')
+
+  // 页内必须明写不参与复盘 MAE：否则同产品出现第二个 MAE 口径
+  check(!!doc.querySelector('[data-no-mae]'), '页内有「本页不参与复盘 MAE」')
+  check(bodyHas('本页不参与复盘 MAE'), '文案明写不进复盘口径')
+
+  // 只读：没有刷新按钮、没有定时器
+  const btns = [...doc.querySelectorAll('button')].map((b) => b.textContent.trim())
+  check(!btns.some((t) => /刷新|重新加载|采集/.test(t)), '没有刷新 / 采集按钮', btns.join('|'))
+  const before = requests.filter((r) => r.url.includes('/api/research/intraday')).length
+  await new Promise((r) => setTimeout(r, 1200))
+  const after = requests.filter((r) => r.url.includes('/api/research/intraday')).length
+  check(after === before, '页面停留 1.2s 不重复取数（没有定时刷新）', `${before} → ${after}`)
+
+  // 曲线：只画入库的 4 天，缺口日不进 series（不连直线、不补 0）
+  const chart = doc.querySelector('.chart')
+  const pts = Number(chart?.dataset.chartPoints ?? 0)
+  check(pts === 4 * 96, `图上 4 天 × 96 点 = ${pts}`, `实际 ${pts}`)
+  check(bodyHas('2026-09-30'), '缺口日 09-30 在「未入库」里列出')
+  check(!bodyHas('0.00\n0.00'), '没有补 0 线')
+
+  // 空态：后端 0 天时整页说「未入库」，且不画图
+  intradayEmpty = true
+  const dateInputs = [...doc.querySelectorAll('.controls input[type=date]')]
+  check(dateInputs.length === 2, '有起 / 止两个日期输入（不是刷新按钮）', String(dateInputs.length))
+  dateInputs[0].value = '2026-10-01'
+  dateInputs[0].dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => !!doc.querySelector('[data-empty]'), 2000)
+  check(!!doc.querySelector('[data-empty]'), '没有数据时走空态（不是空白页、不是报错）')
+  check((doc.querySelector('[data-empty]')?.textContent ?? '').includes('未入库'), '空态写「未入库」')
+  check(!doc.querySelector('.chart'), '空态不画图（不画 0 线）')
+  check((doc.querySelector('[data-missing]')?.textContent ?? '').includes('2026-10-02'), '空态列出未入库日期')
+  intradayEmpty = false
+  // 再改一次日期把数据拉回来（页面只有区间变化才取数，正好也是「无定时器」的侧面证据）
+  dateInputs[1].value = '2026-10-02'
+  dateInputs[1].dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(() => !!doc.querySelector('.chart'), 2000)
+  check(!!doc.querySelector('.chart'), '切回有数据的区间后图重新出现')
+}
 
 console.log('\n== 预测复盘页 ==')
 {

@@ -16,6 +16,7 @@ import (
 	"application/internal/controller/price"
 	"application/internal/controller/protocol"
 	"application/internal/controller/remote"
+	"application/internal/controller/research"
 	"application/internal/controller/setting"
 	"application/internal/controller/spotreport"
 	"application/internal/controller/system"
@@ -147,6 +148,8 @@ func setupAPIRoutes(s *ghttp.Server) {
 		group.Bind(spotreport.NewV1())
 		group.Bind(effect.NewV1())
 		group.Bind(forecast.NewV1())
+		// 分时研究（第三方 · 非官方）：只读冻结快照，不采集、不进复盘 MAE
+		group.Bind(research.NewV1())
 	})
 }
 

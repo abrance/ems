@@ -31,6 +31,12 @@ var allowedGdmetricImporters = map[string]string{
 	"internal/controller/spotreport/gd_metric_similar_days.go": "相似日（已停用，返回停更错误）",
 	"internal/controller/spotreport/gd_metric_supply.go":       "供给曲线（已停用，返回停更错误）",
 	"internal/controller/spotreport/spotreport_v1.go":          "快照 + allowFrozen opt-in",
+	// 分时研究页（第三方 · 非官方）：只读冻结快照，不采集、不进复盘 MAE。
+	// 名字里的 Frozen 就是显式 opt-in 标记：它读的是那条已停更的第三方通道，
+	// 页面必须常驻「第三方 · 非官方 / 截至 X」。
+	"internal/logic/gdmetric/frozen_readonly.go":               "冻结通道的只读入口（分时研究页）",
+	"internal/logic/research/intraday.go":                      "分时研究装配层（只读，无采集）",
+	"internal/controller/research/research_intraday_frozen.go": "GET /api/research/intraday（只读、非官方）",
 	// 预测/回测：96 点能力
 	"internal/logic/forecast/price_intraday.go": "96 点分时预测（官方无此粒度，已停用）",
 	"internal/logic/forecast/backtest.go":       "96 点回测真值（allowStale 的历史演示腿）",
