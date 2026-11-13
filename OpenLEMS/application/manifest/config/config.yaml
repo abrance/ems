@@ -100,6 +100,16 @@ home_market:
   enabled: true
   backfill_days: 7
 
+# 每日电价预测留痕（复盘页「当时预测」腿的数据来源）。
+#
+# 每天在进程内跑一次 day 粒度预测：生成日=当天，目标日=次日，写 gd_price_forecast。
+# 只做日均价 —— 官方没有合规的 96 点分时真值，做了也配不上对。
+# 唯一键 (generated_on, market, grain, target_time) 保证同一天重复执行只覆盖、不堆行。
+# enabled=false 只关定时任务，不动已有留痕，也不影响页面手动预测。
+forecast:
+  daily_record:
+    enabled: true
+
 # PID文件配置
 pid:
   file: "out/ems.pid"  # PID文件路径，支持相对路径和绝对路径
