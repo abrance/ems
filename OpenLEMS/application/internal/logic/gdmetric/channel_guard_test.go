@@ -36,10 +36,14 @@ var allowedGdmetricImporters = map[string]string{
 	// 页面必须常驻「第三方 · 非官方 / 截至 X」。
 	"internal/logic/gdmetric/frozen_readonly.go":               "冻结通道的只读入口（分时研究页）",
 	"internal/logic/research/intraday.go":                      "分时研究装配层（只读，无采集）",
+	"internal/logic/research/intraday_test.go":                 "分时研究空态判定单测（哨兵错误是否被 Wrap）",
 	"internal/controller/research/research_intraday_frozen.go": "GET /api/research/intraday（只读、非官方）",
 	// 预测/回测：96 点能力
 	"internal/logic/forecast/price_intraday.go": "96 点分时预测（官方无此粒度，已停用）",
 	"internal/logic/forecast/backtest.go":       "96 点回测真值（allowStale 的历史演示腿）",
+	// 人工导入：官方 96 点匿名拿不到，这是唯一合规补数路径。
+	// 只读本地候选文件、只写冻结通道 CSV，不联网、不进 API、不进 cron。
+	"cmd/gdmetric-import/main.go": "冻结通道人工导入命令（本地文件 → CSV，不联网）",
 	// 测试
 	"internal/logic/forecast/backtest_freshness_test.go": "96 点真值新鲜度单测",
 	"internal/logic/forecast/backtest_pair_test.go":      "96 点配对回归",

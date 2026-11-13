@@ -2386,6 +2386,11 @@ console.log('\n== 分时研究页（第三方 · 非官方，只读）==')
   check(!!doc.querySelector('[data-no-mae]'), '页内有「本页不参与复盘 MAE」')
   check(bodyHas('本页不参与复盘 MAE'), '文案明写不进复盘口径')
 
+  // 数据来源必须常驻「人工导入，非自动采集」：这一页没有采集链路，
+  // 不写清楚就会被当成「自动更新的行情」，也会让人以为数据会自己变新。
+  check(!!doc.querySelector('[data-manual-import]'), '页头写「数据来自人工导入」')
+  check((doc.querySelector('[data-manual-import]')?.textContent ?? '').includes('非自动采集'), '明写非自动采集')
+
   // 只读：没有刷新按钮、没有定时器
   const btns = [...doc.querySelectorAll('button')].map((b) => b.textContent.trim())
   check(!btns.some((t) => /刷新|重新加载|采集/.test(t)), '没有刷新 / 采集按钮', btns.join('|'))
