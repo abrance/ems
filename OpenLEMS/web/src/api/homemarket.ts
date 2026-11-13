@@ -166,7 +166,15 @@ export function statusNote(st?: DatasetStatus | null): StatusNote | null {
     case 'never':
       return { tone: 'alert', text: '从未采集成功，请检查采集配置' }
     case 'stopped':
-      return { tone: 'alert', text: '源站已连续 3 次返回空数据，疑似停更或页面改版' }
+      // 判据是「滞后越过预期上限」（status.go 里 stopped 的 lag 前置条件），
+      // 「连续 3 次空」只是必要条件 —— 健康的 T-6 滞后每轮都会有日期返回空。
+      // 按连续空轮次说，会让人去查一个没坏的地方。
+      return {
+        tone: 'alert',
+        text: st.asOf
+          ? `源站已 ${st.lagDays} 天没有发布新数据（截至 ${st.asOf}），超出正常滞后，疑似停更或页面改版`
+          : '源站连续返回空数据且库里一条都没有，疑似停更或页面改版',
+      }
     default:
       return null
   }
