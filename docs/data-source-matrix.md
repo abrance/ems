@@ -127,6 +127,29 @@ $ go test ./internal/logic/gdmetric/ -run 'TestNoNewGdmetricImporters|TestRetire
    容器内 `out/gd_metric.csv` 由服务按 `refresh_hours` 刷新。
 5. `gd_metric.enabled=true` + `serve_frozen=true`，重启 ems。页面自动带「第三方 · 非官方」。
 
+### 5.1 补数路径：人工导入（C6，2026-11-13）
+
+分时研究页只读冻结快照，快照停在 2026-10-02 就永远是博物馆展品。官方 96 点匿名拿不到，
+所以补数只有一条合规路径：**人工从电查查导出 → 校验 → 导入**。
+
+```bash
+cd OpenLEMS/application
+go run ./cmd/gdmetric-import --in 导出.csv --check                 # 只校验，不写盘
+go run ./cmd/gdmetric-import --in 导出.csv --out out/gd_metric.csv # 校验通过才写盘（默认合并）
+```
+
+- **不联网、不要 token、不进 API、不进 cron**：命令只在人手跑一次时执行。
+- 校验器（`internal/logic/gdmetric/frozen_import.go`）同时收长表与宽表：电查查将来的导出形状未知，
+  约定只规定「哪些列/哪些点算数」，不规定导出按钮长什么样。
+- 校验项：日期格式、15 分钟整点（96 点/天）、区间内不缺天、`typeId ∈ {21,22}`、
+  单位只收 `元/兆瓦时`、重复行、空单元格占位。**任何一项失败都不动目标文件**。
+- 时间标签两种都收：`00:15 … 24:00`（交易中心口径）与 `00:00 … 23:45`（导出工具口径），
+  按整份文件判定基准后统一成前者 —— 逐格判定会在 `00:15` 撞车，等于把曲线挪错一格。
+- 数值 `999` 是合法价格，**不是**占位符：占位只看 `sourceId`（999）与空单元格。
+- 写盘成功后删掉 `gd_metric.meta.json`（旧文件的行偏移缓存），否则页面会按旧偏移读错位行。
+
+示例文件：`docs/examples/gdmetric-import/{long,wide}.csv`（单测会拿它们跑一遍，README 抄废了会红）。
+
 **官方替代（推荐）**：向广东电力交易中心申请**市场成员账号**，在交易平台导出
 「交易时间单元所有节点的节点边际电价」，那是真正合规的 96 点；拿到后把
 `price_intraday.go` / `backtest.go` 的取数换成该来源，再把 `guard` 摘掉。

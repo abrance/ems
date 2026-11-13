@@ -158,6 +158,7 @@ function num(v: number, digits = 2): string {
         <span data-thirdparty>第三方 · 非官方</span>
       </StatusTag>
       <span class="asof" data-asof>{{ asOfText }}</span>
+      <span class="note" data-manual-import>数据来自人工导入，非自动采集</span>
       <span class="spacer" />
       <span class="note" data-no-mae>本页不参与复盘 MAE</span>
     </div>
@@ -165,7 +166,8 @@ function num(v: number, digits = 2): string {
     <p class="explain">
       96 点（15 分钟）日前电价。官方披露接口只有日频，这一页读的是**第三方冻结快照**
       （<code>gd_metric.csv</code>，已停更），因此只读、不采集、不刷新，也不进复盘口径 ——
-      复盘页的 MAE 只算官方日频。{{ data?.source?.name || '' }}
+      复盘页的 MAE 只算官方日频。新数据靠人工导入（<code>go run ./cmd/gdmetric-import</code>），
+      没有定时任务、没有自动抓取。{{ data?.source?.name || '' }}
     </p>
 
     <div class="controls">
