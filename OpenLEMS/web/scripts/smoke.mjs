@@ -731,6 +731,44 @@ const FAKE_SPOT_MARKET = {
   updatedAt: '2026-09-21',
 }
 
+// ===== 市场总览：24 点分时 + 地市节点价 =====
+// 三个批次日期刻意不同（地市 11-13 / 日频 09-21 / 24 点 11-07），
+// 用来守「页头批次条必须分别标注，不能拿一个日期代表全部」这条。
+const FAKE_HOME_24H = {
+  date: '2026-11-07',
+  empty: false,
+  latestDate: '2026-11-07',
+  lagDays: 6,
+  source: '官网·24点',
+  points: Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    powerMw: 60000 + h * 100,
+    aheadPrice: 400 + h,
+    realtimePrice: 500 + h,
+  })),
+  meanAhead: 411.5,
+  meanRealtime: 511.5,
+  peakPowerMw: 62300,
+  lowPowerMw: 60000,
+}
+
+const FAKE_NODE_PRICE = {
+  date: '2026-11-13',
+  empty: false,
+  latestDate: '2026-11-13',
+  lagDays: 0,
+  source: '官网·节点价',
+  // 21 市 × 2 时段 = 42 条（与源站条数一致）
+  points: ['东莞市', '中山市', '云浮市', '佛山市', '广州市', '惠州市', '揭阳市', '梅州市',
+    '汕头市', '汕尾市', '江门市', '河源市', '深圳市', '清远市', '湛江市', '潮州市',
+    '珠海市', '肇庆市', '茂名市', '阳江市', '韶关市'].flatMap((city, i) => [
+    { city, periodType: 1, price: 465 + i },
+    { city, periodType: 2, price: 409 + i },
+  ]),
+  peakCities: 21,
+  valleyCities: 21,
+}
+
 const FAKE_SUPPLY_BINS = [
   { loadFrom: 500, loadTo: 1500, loadMid: 1000, count: 500, q: uniformQ },
   { loadFrom: 1500, loadTo: 2500, loadMid: 2000, count: 500, q: uniformQ },
@@ -1042,6 +1080,10 @@ globalThis.fetch = async (url, init) => {
     return json(u.includes('grain=day') ? FAKE_BACKTEST_DAY : FAKE_BACKTEST_RESULT)
   }
   if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
+  // 注意顺序：这两个也以 /api/gd-metric 开头，必须排在下面的 gd-metric 兜底之前，
+  // 否则会被兜底桩吞掉，页面拿到的是 96 点快照的形状
+  if (u.includes('/api/gd-metric/home-24h')) return json(FAKE_HOME_24H)
+  if (u.includes('/api/gd-metric/node-price')) return json(FAKE_NODE_PRICE)
   if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
   if (u.includes('/api/gd-metric/supply-curve')) {
@@ -1224,6 +1266,61 @@ console.log('\n== 默认区间的锚点（数据滞后时不能落在空区间�
   check(r.from === '2026-08-25' && r.to === '2026-08-31', '区间右端随锚点回到数据内', JSON.stringify(r))
 }
 
+console.log('\n== 市场数据 · 市场总览（三个批次日期分别标注）==')
+await clickTo('市场数据', '市场总览')
+{
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  await waitFor(() => bodyHas('地市节点价'))
+
+  // 三路数据各自打自己的接口，且都不走 96 点通道（那是另一条已停更的源）
+  const calls = requests.map((r) => r.url)
+  check(calls.some((u) => u.includes('/api/gd-metric/home-24h')), '打了 24 点接口 /api/gd-metric/home-24h')
+  check(calls.some((u) => u.includes('/api/gd-metric/node-price')), '打了地市节点价接口 /api/gd-metric/node-price')
+  check(calls.some((u) => u.includes('/api/spot-market/board')), '日频 KPI 走官方指标接口 /api/spot-market/board')
+  check(
+    !calls.some((u) => u.includes('/api/gd-metric/series') || u.includes('supply-curve')),
+    '不碰 96 点通道（series / supply-curve）',
+    JSON.stringify(calls.filter((u) => u.includes('/api/gd-metric/series'))),
+  )
+  // 24 点必须按「最新一天」取，不能硬传今天（源站 T-6，硬取今天永远是空）
+  const h24 = requests.filter((r) => r.url.includes('/api/gd-metric/home-24h')).pop()?.url ?? ''
+  check(!/date=/.test(h24), '24 点不传日期，由后端给库里最新一天', h24)
+
+  // 页头批次条：三个日期分别出现，且各自带来源角标
+  check(bodyHas('2026-11-13'), '批次条显示地市节点价日期 11-13')
+  check(bodyHas('2026-11-07'), '批次条显示 24 点日期 11-07')
+  check(bodyHas('2026-09-21'), '批次条显示日频最新日 09-21')
+  check(bodyHas('官网·节点价 T+0'), '地市节点价带 T+0 源角标')
+  check(bodyHas('官网·日频 T+2'), '日频带 T+2 源角标')
+  check(bodyHas('官网·24 点 T-6'), '24 点带 T-6 源角标')
+
+  // 页脚写清「数据截至 X」，且三个批次都点到，不挑一个代表全部
+  check(bodyHas('数据截至'), '页脚有「数据截至」')
+  check(
+    bodyHas('地市节点价 2026-11-13') && bodyHas('日频指标 2026-09-21') && bodyHas('24 点分时 2026-11-07'),
+    '页脚三个批次分别写出，不拿一个日期代表全部',
+  )
+
+  // 24 点整 24 个点、地市 42 条
+  const chartPts = [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
+  check(chartPts.length >= 4, `四个图都在（实际 ${chartPts.length} 个）`, JSON.stringify(chartPts))
+  // 24 点电价图 = 2 条线 × 24 点 = 48；负荷图 = 24；地市条形 = 42
+  check(chartPts.includes(48), '24 点电价图画出 2×24=48 个点', JSON.stringify(chartPts))
+  check(chartPts.includes(24), '24 点负荷图画出 24 个点', JSON.stringify(chartPts))
+  check(chartPts.includes(42), '地市条形画出 42 条', JSON.stringify(chartPts))
+
+  // 空日期的文案走 API 层的 empty 标志（夹具是满的，页面上不出现空态），
+  // 这里验「空态文案确实写在页面里、并且带最新日提示」，避免以后被删掉。
+  const marketSrc = readFileSync(resolve(root, 'src/pages/scene/MarketView.vue'), 'utf8')
+  check(marketSrc.includes('该日无数据'), '空日期文案「该日无数据」在页面里')
+  check(
+    marketSrc.includes('home24h?.latestDate') && marketSrc.includes('nodePrice?.latestDate'),
+    '空态提示带上「库里最新到哪天」',
+  )
+  // 三个批次各有独立空态，不会用一个 empty 盖住三块
+  check((marketSrc.match(/该日无数据/g) ?? []).length >= 2, '24 点与地市各有自己的空态文案')
+}
+
 console.log('\n== 市场数据 · 信息披露（官方直采数据，图表确实画出了数据）==')
 await clickTo('市场数据', '信息披露')
 {
@@ -1244,10 +1341,15 @@ await clickTo('市场数据', '信息披露')
     requests.filter((r) => r.url.includes('/api/spot-market/board')).length > 0,
     '走官方指标接口 /api/spot-market/board',
   )
+  // 只看这一页自己发出的请求：市场总览页（前面已测）会打 /api/gd-metric/home-24h 与
+  // node-price，那是官方主页的新接口，不是第三方 96 点通道 —— 不能混为一谈。
+  // 96 点通道的特征是 series / supply-curve / similar-days，以及裸的 /api/gd-metric。
+  const legacy96 = (u) =>
+    /\/api\/gd-metric(\/series|\/supply-curve|\/similar-days)?(\?|$)/.test(u)
   check(
-    requests.filter((r) => r.url.includes('/api/gd-metric')).length === 0,
-    '不再调用第三方 /api/gd-metric',
-    JSON.stringify(requests.filter((r) => r.url.includes('/api/gd-metric')).map((r) => r.url)),
+    requests.filter((r) => legacy96(r.url)).length === 0,
+    '不再调用 96 点通道（/api/gd-metric、series、supply-curve、similar-days）',
+    JSON.stringify(requests.filter((r) => legacy96(r.url)).map((r) => r.url)),
   )
 
   // KPI 是模板绑定，图空白时它们照样有值 —— 所以不能只断言 KPI
@@ -2229,7 +2331,7 @@ console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
 // 当前 27 = 29 - 「数据保留」- 「时间与时区」
 //   两者都是「后端接口挂在别的功能下」：保留→存储管理，时间→系统操作，不留两个入口
-const EXPECTED_PAGES = 31
+const EXPECTED_PAGES = 32
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 5, `Tab 数量 = ${tabEls.length}（期望 5）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(
@@ -2240,7 +2342,7 @@ check(
 // 按 key 找而不是按序号：Tab 顺序变过一次（加了运行监控），序号断言会跟着一起错
 const marketTab = NAV.find((t) => t.key === 'market')
 const analysisTab = NAV.find((t) => t.key === 'analysis')
-check(marketTab?.pages.length === 3, `市场数据页 3 个（实际 ${marketTab?.pages.length}）`)
+check(marketTab?.pages.length === 4, `市场数据页 4 个（实际 ${marketTab?.pages.length}）`)
 check(analysisTab?.pages.length === 4, `分析预测页 4 个（实际 ${analysisTab?.pages.length}）`)
 check(!NAV.some((t) => t.key === 'scene'), '原「场景」Tab 已拆掉，不留空壳')
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
@@ -2607,7 +2709,7 @@ await clickTo('分析预测', '决策支持')
 
   // 电价预测：日均 + 分位，并说明这里不是分时（分时在「长周期电价预测」页）
   check(bodyHas('日前电价预测'), '有电价预测面板')
-  check(bodyHas('96 点分时预测') && bodyHas('日均'), '说明这里是日均、分时在另一页')
+  check(bodyHas('日均') && bodyHas('96 点') && bodyHas('停用'), '说明这里是日均，96 点分时已停用')
   check(bodyHas('历史 60 点'), '展示上下文点数')
   check(bodyHas('缺数据 50 天'), '展示缺失天数（不装作数据齐全）')
 

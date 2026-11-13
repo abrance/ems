@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { EChartsOption } from 'echarts'
 import PanelBox from '@/components/PanelBox.vue'
+import SourceBadge from '@/components/SourceBadge.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import TrendChart from '@/components/TrendChart.vue'
 import { fetchRecordedForecast } from '@/api/forecast'
@@ -422,6 +423,9 @@ onMounted(async () => {
       :loading="loading"
       :foot="`数据来源：官方直采指标（origin=pm-api） · 按运行日分桶（${trend?.grain || 'day'}）`"
     >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·日频 T+2" />
+      </template>
       <TrendChart v-if="points.length" :points="points" />
       <div v-else class="empty">该数据集在当前区间没有已确认数据</div>
       <div v-if="buckets.length < 2" class="tip">
@@ -475,6 +479,9 @@ onMounted(async () => {
       :loading="priceLoading"
       :foot="priceFoot"
     >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·日频 T+2" />
+      </template>
       <div v-if="priceError" class="empty">{{ priceError }}</div>
       <template v-else>
         <div v-if="!recordedDays.length" class="hint">

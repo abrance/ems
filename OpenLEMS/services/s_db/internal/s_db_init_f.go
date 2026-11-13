@@ -402,6 +402,47 @@ func initConfigDatabase() error {
 		return err
 	}
 
+	// 官网主页 24 点分时（日前/实时电价 + 系统负荷）。
+	// 独立于 gd_spot_metric：粒度（24 整点）与滞后（T-6 左右）都不同，混表会破坏 as-of 语义。
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_home_24h (
+			price_date VARCHAR(10) NOT NULL,
+			hour INTEGER NOT NULL,
+			power_mw REAL NOT NULL DEFAULT 0,
+			ahead_price REAL NOT NULL DEFAULT 0,
+			realtime_price REAL NOT NULL DEFAULT 0,
+			source VARCHAR(64) NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (price_date, hour)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
+	// 21 地市节点电价（高峰/低谷两时段，42 条/日，T+0）。
+	_, err = g.DB().Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS gd_node_price (
+			run_date VARCHAR(10) NOT NULL,
+			city VARCHAR(32) NOT NULL,
+			period_type INTEGER NOT NULL DEFAULT 1,
+			price REAL NOT NULL DEFAULT 0,
+			source VARCHAR(64) NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (run_date, city, period_type)
+		)
+	`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+	_, err = g.DB().Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_node_price_date ON gd_node_price (run_date)`)
+	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+
 	c_log.Info(ctx, "Database tables created successfully")
 
 	// 初始化系统设置数据

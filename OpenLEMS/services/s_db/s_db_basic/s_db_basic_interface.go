@@ -219,3 +219,25 @@ type ISpotExtractService interface {
 	GetRun(ctx context.Context, reportDate string) (*s_db_model.SSpotExtractRunModel, error)
 	UpsertRun(ctx context.Context, model *s_db_model.SSpotExtractRunModel) error
 }
+
+// IHomeMarketService 官网主页两路市场数据（24 点分时 + 地市节点价）。
+//
+// 为什么单独一个 service 而不是塞进 ISpotExtractService：这两张表的粒度、
+// 滞后与采集任务都跟 gd_spot_metric 不同（24 点 T-6、地市 T+0、日频 T+2），
+// 采集互不阻塞。混在一个接口里，日后想单独停掉一路就会牵动另一路。
+type IHomeMarketService interface {
+	// UpsertHome24h 覆盖写某天的 24 点（唯一键 price_date+hour，重采幂等）
+	UpsertHome24h(ctx context.Context, rows []*s_db_model.SHome24hModel) (int, error)
+	// ListHome24h 取某天 24 点（按 hour 升序）。该日没有数据时返回空切片而不是错误 ——
+	// 「这天还没出」是正常状态，页面要显示「该日无数据」。
+	ListHome24h(ctx context.Context, date string) ([]*s_db_model.SHome24hModel, error)
+	// LatestHome24hDate 最近一个有数据的运行日；空串表示库里一条都没有
+	LatestHome24hDate(ctx context.Context) (string, error)
+
+	// UpsertNodePrice 覆盖写某天的地市节点价（唯一键 run_date+city+period_type）
+	UpsertNodePrice(ctx context.Context, rows []*s_db_model.SNodePriceModel) (int, error)
+	// ListNodePrice 取某天的地市节点价（按 period_type、city 升序）
+	ListNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceModel, error)
+	// LatestNodePriceDate 最近一个有数据的运行日
+	LatestNodePriceDate(ctx context.Context) (string, error)
+}

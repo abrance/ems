@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import PanelBox from '@/components/PanelBox.vue'
+import SourceBadge from '@/components/SourceBadge.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { DATASET_LABELS, getReportData, isPending, listReports, type SpotMetric } from '@/api/spotreport'
 
@@ -231,8 +232,11 @@ onMounted(async () => {
       sub="表1(二)"
       :span="6"
       :loading="loading"
-      foot="数据来源：日报表1(二)（当日报告口径）"
+      foot="数据来源：广东电力交易中心披露接口直采（origin=pm-api），运行日 = 当日"
     >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·日频 T+2" />
+      </template>
       <table v-if="priceMetrics('day_ahead_trade').length">
         <thead>
           <tr>
@@ -253,8 +257,11 @@ onMounted(async () => {
       sub="表2(二) · 承载滞后运行日"
       :span="6"
       :loading="loading"
-      foot="数据来源：日报表2(二)；运行日为滞后 T-2，别与当日口径混用"
+      foot="数据来源：广东电力交易中心披露接口直采（origin=pm-api）；运行日为滞后 T-2，别与当日口径混用"
     >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·日频 T+2" />
+      </template>
       <div v-if="priceMetrics('realtime_trade').length" class="warn">
         这批数据的运行日可能是滞后运行日（T-2），与上方「运行日」不是同一天。
       </div>

@@ -1,0 +1,92 @@
+package homemarket
+
+import (
+	"context"
+	"time"
+
+	"common/c_log"
+	"github.com/gogf/gf/v2/frame/g"
+)
+
+// 采集调度。
+//
+// 与 gd_spot_metric 的 pm-api 采集**分开**：那套是 tools/gdpm 的 Python 脚本 + 外部 cron，
+// 写 gd_spot_metric 与 gd_pm_fetch_run；这里跑在 ems 进程内，写 gd_home_24h / gd_node_price。
+// 两者不共享定时器、不共享失败语义 —— 一边挂了另一边照常。
+//
+// 间隔定成 30 分钟：24 点 T-6 才出、地市 T+0，一天真正变化的只有一次，
+// 30 分钟足够当天内补上，也不会把源站打得太勤（源站有动态防护）。
+
+const (
+	// DefaultInterval 采集间隔
+	DefaultInterval = 30 * time.Minute
+	// startupDelay 启动后延迟：让数据库与设置先就绪，避免开机瞬间抢资源
+	startupDelay = 90 * time.Second
+)
+
+// Start 启动采集（幂等：重复调用只起一个协程由 ctx 控制生命周期）。
+//
+// 关掉的办法：配置 home_market.enabled=false。默认 true —— 这两路是页面的数据源，
+// 关掉只会让页面报「该日无数据」，不会静默用旧数顶上。
+func Start(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+	enabled := g.Cfg().MustGet(ctx, "home_market.enabled", true).Bool()
+	if !enabled {
+		c_log.Infof(ctx, "官网主页市场数据采集已关闭（home_market.enabled=false）")
+		return
+	}
+	backfillDays := ParseDays(g.Cfg().MustGet(ctx, "home_market.backfill_days", defaultBackfillDays).String())
+
+	go func() {
+		timer := time.NewTimer(startupDelay)
+		defer timer.Stop()
+		first := true
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				runOnce(ctx, backfillDays, first)
+				first = false
+				timer.Reset(interval)
+			}
+		}
+	}()
+	c_log.Infof(ctx, "官网主页市场数据采集已启动：每 %s 一次（首次 %s 后）", interval, startupDelay)
+}
+
+// runOnce 一次采集：24 点取最近有数的一天，地市按最近 N 天回补。
+//
+// first 为 true 时地市做一次回补（覆盖最近 N 天）；之后每次只采当天 ——
+// 回补是「补历史缺口」，每次定时都重扫 7 天既浪费请求也容易触发源站限流。
+func runOnce(ctx context.Context, backfillDays int, first bool) {
+	now := time.Now()
+
+	date, n, err := CollectHome24h(ctx, now)
+	if err != nil {
+		c_log.Warningf(ctx, "采集 24 点分时失败：%+v", err)
+	} else if n > 0 {
+		c_log.BizInfof(ctx, "24 点分时已更新：%s（%d 点）", date, n)
+	} else {
+		c_log.Infof(ctx, "24 点分时最近 %d 天都没有数据（源站未发布）", maxLookbackDays)
+	}
+
+	if first {
+		got := BackfillNodePrice(ctx, now, backfillDays)
+		c_log.BizInfof(ctx, "地市节点价回补完成：%v", got)
+		return
+	}
+	today := now.Format(dateLayout)
+	if m, err := CollectNodePrice(ctx, today); err != nil {
+		c_log.Warningf(ctx, "采集地市节点价 %s 失败：%+v", today, err)
+	} else if m > 0 {
+		c_log.BizInfof(ctx, "地市节点价已更新：%s（%d 条）", today, m)
+	}
+}
+
+// RunOnceNow 供接口/测试手动触发一次（不改变定时器状态）。
+func RunOnceNow(ctx context.Context, backfillDays int) {
+	runOnce(ctx, backfillDays, false)
+}
