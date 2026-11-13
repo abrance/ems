@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"common/c_log"
 	"s_db/s_db_model"
 )
 
@@ -155,6 +156,10 @@ func loadIntradayCached(ctx context.Context, req PriceRequest) (*TPriceForecastR
 }
 
 // recordForecastPoints 把预测点写成留痕行。返回写入条数。
+//
+// 只写 target 严格晚于 generated_on 的点。历史序列止于今天-N 时，nextDates 从最后一条
+// 历史日 +1 起算，会把已经过去的日期也当预测日输出；这些行会被复盘页的
+// IsBackfilledForecast 全部剔除，留着只会让「当时预测」和「事后补算」在同一张表里混住。
 func recordForecastPoints(ctx context.Context, res *TPriceForecastResult) int {
 	if res == nil || len(res.Points) == 0 {
 		return 0
@@ -164,12 +169,18 @@ func recordForecastPoints(ctx context.Context, res *TPriceForecastResult) int {
 		source = "官方直采日均成交价"
 	}
 	rows := make([]*s_db_model.SPriceForecastModel, 0, len(res.Points))
+	skipped := 0
 	for _, p := range res.Points {
+		targetTime := formatTargetTime(res.Grain, p.TargetTime)
+		if !targetAfterGeneratedOn(res.Grain, res.GeneratedOn, targetTime) {
+			skipped++
+			continue
+		}
 		rows = append(rows, &s_db_model.SPriceForecastModel{
 			GeneratedOn: res.GeneratedOn,
 			Market:      res.Market,
 			Grain:       res.Grain,
-			TargetTime:  formatTargetTime(res.Grain, p.TargetTime),
+			TargetTime:  targetTime,
 			Point:       p.Point,
 			Q10:         p.Q10,
 			Q50:         p.Q50,
@@ -179,11 +190,45 @@ func recordForecastPoints(ctx context.Context, res *TPriceForecastResult) int {
 			Source:      source,
 		})
 	}
+	if skipped > 0 {
+		c_log.Infof(ctx, "电价预测留痕跳过 %d 个目标日不晚于生成日 %s 的点（历史序列截止 %s）",
+			skipped, res.GeneratedOn, res.To)
+	}
+	if len(rows) == 0 {
+		c_log.Warningf(ctx, "电价预测留痕无可用目标日：%d 个点全部不晚于生成日 %s（历史序列截止 %s）",
+			skipped, res.GeneratedOn, res.To)
+		return 0
+	}
 	n, err := RecordPriceForecast(ctx, rows)
 	if err != nil {
 		return 0
 	}
 	return n
+}
+
+// targetAfterGeneratedOn 判断一个留痕目标时刻是否值得写。
+//
+// 只比日期部分，与复盘页的 IsBackfilledForecast 同源（它也是拿 generated_on 和
+// target_time 的日期前缀比）—— 否则会出现「写进去了但复盘又剔掉」的割裂。
+// generated_on 本身只有日期精度，所以做不到 brief 说的 intraday 比到分钟。
+//
+// 同日怎么处理，两种粒度不一样：
+//   - day：一个日期就是一个点，日期等于生成日 = 「今天的日均价」，不构成预测，剔；
+//   - intraday：同日剩下的是当天后续时段的点，复盘页也保留，留。
+//     代价是当天已过时段的点也会留下（无生成时刻可判），可接受。
+func targetAfterGeneratedOn(grain, generatedOn, targetTime string) bool {
+	g := strings.TrimSpace(generatedOn)
+	if g == "" {
+		return true
+	}
+	d := forecastDatePart(targetTime)
+	if d > g {
+		return true
+	}
+	if d < g {
+		return false
+	}
+	return grain == s_db_model.ForecastGrainIntraday
 }
 
 // formatTargetTime day 粒度只存日期（便于按日 join 日报实际值）；
