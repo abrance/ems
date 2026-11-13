@@ -1792,12 +1792,31 @@ console.log('\n== 空态分级与首个可配对日（分支逻辑）==')
   check(dailyTier(8, true) === 'stop', 'lag=8 → stop（超过 7 天）')
   check(dailyTier(-1, true) === 'unknown', '日期解析不出（-1）→ unknown，不硬归到某一档')
 
+  // 偏移跟着市场走：日前真值与运行日报同日（T+0）⇒ +1；实时 T+2 ⇒ +3。
+  // 依据在 tools/gdpm/gdpm_sqlite.py 的 report_of()：`实时是 T+2 发布；日前与日报同日`。
   const { firstPairDate } = await vite.ssrLoadModule(resolve(root, 'src/utils/firstPairDate.ts'))
-  check(firstPairDate('2026-11-13') === '2026-11-16', '首个可配对日 = 启用日 + 3（11-13 → 11-16）', firstPairDate('2026-11-13'))
-  check(firstPairDate('2026-11-29') === '2026-12-02', '跨月进位正确（11-29 → 12-02）', firstPairDate('2026-11-29'))
-  check(firstPairDate('2026-12-30') === '2027-01-02', '跨年进位正确（12-30 → 01-02）', firstPairDate('2026-12-30'))
-  check(firstPairDate('') === '' && firstPairDate(null) === '', '没生成日 → 空串（模板回落「—」，不印 NaN-NaN-NaN）')
-  check(firstPairDate('not-a-date') === '', '格式不对 → 空串', firstPairDate('not-a-date'))
+  check(firstPairDate('2026-11-13', 'ahead') === '2026-11-14', '日前 = 启用日 + 1（11-13 → 11-14）', firstPairDate('2026-11-13', 'ahead'))
+  check(firstPairDate('2026-11-13', 'real') === '2026-11-16', '实时 = 启用日 + 3（11-13 → 11-16）', firstPairDate('2026-11-13', 'real'))
+  check(firstPairDate('2026-11-13') === '2026-11-14', '不传 market 按日前 + 1', firstPairDate('2026-11-13'))
+  check(
+    firstPairDate('2026-11-13', 'unknown') === '2026-11-14' && firstPairDate('2026-11-13', '') === '2026-11-14',
+    '未知/空 market 回落到日前 + 1，不许拿实时口径说慢两天',
+    `${firstPairDate('2026-11-13', 'unknown')} / ${firstPairDate('2026-11-13', '')}`,
+  )
+  check(firstPairDate('2026-11-29', 'ahead') === '2026-11-30', '日前跨月进位正确（11-29 → 11-30）', firstPairDate('2026-11-29', 'ahead'))
+  check(firstPairDate('2026-11-29', 'real') === '2026-12-02', '实时跨月进位正确（11-29 → 12-02）', firstPairDate('2026-11-29', 'real'))
+  check(firstPairDate('2026-12-30', 'ahead') === '2026-12-31', '日前跨年进位正确（12-30 → 12-31）', firstPairDate('2026-12-30', 'ahead'))
+  check(firstPairDate('2026-12-30', 'real') === '2027-01-02', '实时跨年进位正确（12-30 → 01-02）', firstPairDate('2026-12-30', 'real'))
+  check(
+    firstPairDate('') === '' && firstPairDate(null) === '' && firstPairDate('', 'real') === '',
+    '没生成日 → 空串（模板回落「—」，不印 NaN-NaN-NaN）',
+  )
+  check(
+    firstPairDate('not-a-date', 'ahead') === '' && firstPairDate('not-a-date', 'real') === '',
+    '格式不对 → 空串（两个市场都一样）',
+  )
+  // 边界：月末 31 日 + 1 落到次月 1 日（Date 自动进位，钉一下别被手写进位改坏）
+  check(firstPairDate('2026-10-31', 'ahead') === '2026-11-01', '月末 10-31 + 1 → 11-01', firstPairDate('2026-10-31', 'ahead'))
 }
 
 // ---- 未入库日期折叠（缺几十天不许铺满版面）----
@@ -3329,20 +3348,75 @@ console.log('\n== 预测复盘页 ==')
 
   // ---- 留痕空态（§7 / §8.1）：两句话各自堵住一种错误处置 ----
   // 这一节在同一个页面里把 pairs 清空（留痕全部没出实际值）→ 走空态分支。
+  // 空态里的「官方实际值 T+2 才发布」与「首个可配对交易日」都跟着市场走：
+  // 日前真值与运行日报同日（T+0 → 生成日 +1），实时才是 T+2（→ +3）。
+  // 页面有市场切换，两边的句子都不许说成另一边的口径。
   console.log('\n== 预测复盘页 · 留痕空态（永久缺失 vs 还没到）==')
   recordedNoActual = true
   await clickTo('分析预测', '长周期电价预测')
   await clickTo('分析预测', '预测复盘')
   await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
   {
+    // happy-dom 下 select.value 走不通（Vue 把值挂在 option 上），按 option 定位改 selectedIndex
+    const marketSelect = [...doc.querySelectorAll('select')].find((s) =>
+      [...s.options].some((o) => o.value === 'real' && o.textContent.trim() === '实时'),
+    )
+    // 页面上有好几个 .empty（「为什么没有峰平谷」那个也在），只取留痕空态那一块
+    const recordedEmpty = () =>
+      [...doc.querySelectorAll('.empty')]
+        .find((el) => (el.textContent ?? '').includes('还没有可复盘的当时预测'))
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim() ?? ''
+    const pickMarket = async (value, expect) => {
+      const opt = [...marketSelect.options].find((o) => o.value === value)
+      marketSelect.selectedIndex = opt.index
+      marketSelect.dispatchEvent(new window.Event('change', { bubbles: true }))
+      // 不能只等「还没有可复盘的」—— 切市场前它就在页面上，会在重新请求前就返回
+      await waitFor(() => recordedEmpty().includes(expect), 3000)
+      return recordedEmpty()
+    }
+    check(!!marketSelect, '找得到市场下拉（日前 / 实时）')
+
+    const emptyAhead = recordedEmpty()
     // §7：「也补不回来」不能省 —— 否则用户以为再等几天数据就齐了
     check(bodyHas('也补不回来'), '留痕空态写明「也补不回来」（留痕是永久缺失，不是等一等就有）')
-    // §7：「首个可配对交易日」必须算出来（生成日 + 3）
-    //   夹具首条留痕生成日 = 2026-09-19 → 首个可配对日 = 2026-09-22
-    check(bodyHas('首个可配对交易日约在 2026-09-22'), '留痕空态给出首个可配对交易日（生成日 + 3）', doc.querySelector('.empty')?.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+    // 默认腿 = 日前：夹具首个生成日 2026-09-19 → 首个可配对日 = 2026-09-20（+1）
+    check(
+      bodyHas('首个可配对交易日约在 2026-09-20'),
+      '日前：首个可配对交易日 = 生成日 + 1（09-19 → 09-20）',
+      emptyAhead,
+    )
+    check(!bodyHas('T+2'), '日前市场不许说「T+2」（那是实时市场的口径）', emptyAhead)
+    check(bodyHas('日前市场的官方实际值当天就出'), '日前市场说清实际值当天就出', emptyAhead)
     check(!/NaN-NaN-NaN/.test(doc.body.textContent ?? ''), '日期算不出来时不许印 NaN-NaN-NaN')
-    // §8.1：「（官方 T+2）」5 个字不能省 —— 否则分不清「在等源站」和「系统坏了」
-    check(bodyHas('条留痕的实际值还没出（官方 T+2）'), '留痕实际值未出时标注「（官方 T+2）」', doc.body.textContent?.match(/另有[^。]*。?/)?.[0] ?? '')
+    // §8.1：「（官方 T+2）」不能省 —— 否则分不清「在等源站」和「系统坏了」；但日前要换成当天发布的说法
+    check(
+      bodyHas('条留痕的实际值还没出（目标日数据待入库）'),
+      '日前：留痕实际值未出时不再说 T+2，改说目标日数据待入库',
+      doc.body.textContent?.match(/另有[^。]*/)?.[0] ?? '',
+    )
+
+    // 切到实时：偏移变 +3（09-19 → 09-22），文案必须改口成 T+2
+    const emptyReal = await pickMarket('real', '2026-09-22')
+    check(
+      bodyHas('首个可配对交易日约在 2026-09-22'),
+      '实时：首个可配对交易日 = 生成日 + 3（09-19 → 09-22）',
+      emptyReal,
+    )
+    check(bodyHas('官方实际值 T+2 才发布'), '实时市场保留「T+2 才发布」的说法', emptyReal)
+    check(
+      bodyHas('条留痕的实际值还没出（官方 T+2）'),
+      '实时：留痕实际值未出时标注「（官方 T+2）」',
+      doc.body.textContent?.match(/另有[^。]*/)?.[0] ?? '',
+    )
+
+    // 切回日前：两个数都要退回去，不能残留实时的 +3（只看留痕空态那一块，页面别处也可能印日期）
+    const backAhead = await pickMarket('ahead', '2026-09-20')
+    check(
+      backAhead.includes('首个可配对交易日约在 2026-09-20') && !backAhead.includes('2026-09-22'),
+      '切回日前：偏移退回 +1，不残留实时的 +3',
+      backAhead,
+    )
   }
 
   // ---- 生成日必须是不早于今天的可用日（后端已过滤回填行，前端不许把过去日期印出来）----
@@ -3359,17 +3433,26 @@ console.log('\n== 预测复盘页 ==')
   await clickTo('分析预测', '预测复盘')
   await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
   {
-    const emptyText = doc.querySelector('.empty')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    // 页面上有好几个 .empty，只取留痕空态那一块（否则断言跟的是「为什么没有峰平谷」那段）
+    const emptyText =
+      [...doc.querySelectorAll('.empty')]
+        .find((el) => (el.textContent ?? '').includes('还没有可复盘的当时预测'))
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim() ?? ''
     check(bodyHas('预测留痕自 2026-11-11 起积累'), '「起积累」跟的是首个可用生成日（2026-11-11），不是回填日 10-07', emptyText)
     check(!bodyHas('2026-10-07') && !bodyHas('2026-10-10'), '页面不出现整批回填的生成日与其推算出的过去日期', emptyText)
-    // 首个可配对日由 [0] 推出：11-11 + 3 = 11-14，不早于今天
-    check(bodyHas('首个可配对交易日约在 2026-11-14'), '首个可配对交易日由首个可用生成日推出（11-11 → 11-14）', emptyText)
+    // 首个可配对日由 [0] 推出，按当前市场（默认日前）取 +1：11-11 → 11-12
+    check(bodyHas('首个可配对交易日约在 2026-11-12'), '首个可配对交易日由首个可用生成日推出（日前 11-11 → 11-12）', emptyText)
     // 首项被剔掉时不能留空：后端全过滤成空数组也要回落「—」，不印 undefined/NaN
     recordedGeneratedDatesOverride = []
     await clickTo('分析预测', '长周期电价预测')
     await clickTo('分析预测', '预测复盘')
     await waitFor(() => bodyHas('还没有可复盘的当时预测'), 3000)
-    const emptyNoDates = doc.querySelector('.empty')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    const emptyNoDates =
+      [...doc.querySelectorAll('.empty')]
+        .find((el) => (el.textContent ?? '').includes('还没有可复盘的当时预测'))
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim() ?? ''
     check(bodyHas('预测留痕自 — 起积累'), '生成日全被过滤时回落「—」，不印 undefined', emptyNoDates)
     check(!/NaN-NaN-NaN|undefined/.test(emptyNoDates), '没有生成日时不许印 NaN-NaN-NaN 或 undefined', emptyNoDates)
   }
