@@ -137,7 +137,11 @@ $EDITOR .env.integration                       # 填本机中间件地址
 | `TEST_MODBUS_TCP_ADDR` | Modbus TCP 从站地址 | 场景需要时必填 |
 | `TEST_HTTP_BASE_URL` | 端到端场景访问的运行实例 | 端到端场景必填 |
 | `TEST_TIMEOUT` | 单次运行超时 | `10m` |
+| `EMS_TOKEN` | 线上/预发接口冒烟用的静态 token，**只从环境变量读，不写进任何文件** | 需要打线上接口时必填 |
 | `TEST_ARTIFACT_DIR` | 失败现场目录 | `out/test-artifacts` |
+
+鉴权：打线上或预发接口一律用静态 token（`X-API-Token` / `Authorization: Bearer`），不要用账号密码登录换会话；
+写法、风险、下发链路与轮换见 [`api-static-token.md`](api-static-token.md)，配套脚本 `tools/api-test/ems_api.sh`。
 
 变量到运行时配置的映射集中在测试工具包里完成，**不要在每个用例里各写一套**：
 
