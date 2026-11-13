@@ -2454,11 +2454,13 @@ check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${
   }
   // 登录页不在导航里，所以 +1；改这里要同时想清楚有没有别的非导航页
   const NON_NAV_PAGES = 1
+  // inference（策略反演）已停用且不再登记 loader：它没有页面 chunk，统一走 PlaceholderView。
+  const PAUSED_WITHOUT_VIEW = 1
   // 比的是**真实导航页数**（totalPages），不是 EXPECTED_PAGES：
   // 后者是「防止有人悄悄改导航」的常量，拿它比就漏掉「加了页没打包」这个场景。
   check(
-    pageChunks.length === totalPages + NON_NAV_PAGES,
-    `dist 里的页面 chunk 数跟上导航（期望 ${totalPages + NON_NAV_PAGES}，实际 ${pageChunks.length}）`,
+    pageChunks.length === totalPages + NON_NAV_PAGES - PAUSED_WITHOUT_VIEW,
+    `dist 里的页面 chunk 数跟上导航（期望 ${totalPages + NON_NAV_PAGES - PAUSED_WITHOUT_VIEW}，实际 ${pageChunks.length}）`,
     '少一个说明有页面没登记到 pages/index.ts，或多了一个没人用的页面',
   )
 }
@@ -2471,6 +2473,16 @@ async function clickTo(tabTitle, pageTitle) {
   if (!(await waitFor(() => !!findSide(pageTitle)))) throw new Error(`切到「${tabTitle}」后侧栏没有「${pageTitle}」`)
   findSide(pageTitle).click()
   await waitFor(() => h1Text() === pageTitle)
+  await tick()
+}
+
+/** 直接按 URL 进页：停用页在侧栏不可点，只能靠旧书签/直链打开（也顺便验这条路径） */
+async function gotoPath(path, pageTitle) {
+  window.history.pushState({}, '', path)
+  window.dispatchEvent(new window.Event('popstate'))
+  if (!(await waitFor(() => h1Text() === pageTitle))) {
+    throw new Error(`直链 ${path} 没有渲染出「${pageTitle}」，实际「${h1Text()}」`)
+  }
   await tick()
 }
 
@@ -2496,19 +2508,33 @@ for (const tab of NAV) {
       continue
     }
     try {
-      item.click()
+      if (page.status === 'paused') {
+        // 停用页 = 侧栏纯文本、不可点；页面本身仍可由旧书签/直链打开。
+        check(
+          item.tagName !== 'A' && !item.getAttribute('href') && item.getAttribute('aria-disabled') === 'true',
+          `${tab.key}/${page.key} 侧栏不可点（不是链接）`,
+          `${item.tagName} href=${item.getAttribute('href') ?? '(无)'} aria-disabled=${item.getAttribute('aria-disabled') ?? '(无)'}`,
+        )
+        window.history.pushState({}, '', page.path)
+        window.dispatchEvent(new window.Event('popstate'))
+      } else {
+        item.click()
+      }
       await waitFor(() => h1Text() === page.title)
       const h1 = h1Text()
       const body = doc.body.textContent ?? ''
       check(h1 === page.title, `${tab.key}/${page.key} 标题`, `期望 ${page.title}，实际 ${h1}`)
-      // paused = 页面是真的（已做过、已停用），只是功能关着。占位面板/状态提示是给
-      // planned / 未做页面用的，不适用于它；这里只钉「侧栏不假装它 ready」。
+      // 停用页：侧栏标「未开放」，页面仍要写清「已停用」原因，不能是空白。
       if (page.status === 'paused') {
         check(
-          (item.textContent ?? '').includes('暂停'),
-          `${tab.key}/${page.key} 侧栏标「暂停」`,
+          (item.textContent ?? '').includes('未开放'),
+          `${tab.key}/${page.key} 侧栏标「未开放」`,
           item.textContent ?? '',
         )
+        // manual 保留了自己的视图：启用态下页面是正常功能，停用态由后面的专段验。
+        if (page.key !== 'manual') {
+          check(body.includes('已停用'), `${tab.key}/${page.key} 停用说明`, body.slice(0, 120))
+        }
       } else if (page.status !== 'ready') {
         const missing = (page.panels ?? []).filter((n) => !body.includes(n))
         check(
@@ -2784,16 +2810,26 @@ console.log('\n== 预测复盘页 ==')
 }
 
 console.log('\n== 策略反演页（已停用）==')
-await clickTo('分析预测', '策略反演')
 {
+  const reqBase = requests.length
+  const sideItem = findSide('策略反演')
+  check(
+    !!sideItem && sideItem.tagName !== 'A' && sideItem.getAttribute('aria-disabled') === 'true',
+    '侧栏「策略反演」不可点（不是链接）',
+    `${sideItem?.tagName} aria-disabled=${sideItem?.getAttribute('aria-disabled') ?? '(无)'}`,
+  )
+  check((sideItem?.textContent ?? '').includes('未开放'), '侧栏「策略反演」标「未开放」', sideItem?.textContent ?? '')
+  await gotoPath('/scene/inference', '策略反演')
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   check(bodyHas('已停用'), '页面说明已停用，不是空白页也不是报错页')
   check(bodyHas('gd_metric.csv') && bodyHas('2026-10-02'), '写明依赖哪条通道、实际值止于哪天')
   check(bodyHas('市场成员账号'), '给出恢复条件（合规 96 点）')
   check(!bodyHas('7 处逆序') && !bodyHas('统计反演'), '停用时不渲染反演结果，不假装还能算')
+  check(!doc.querySelector('.notice.error, .alert.error'), '停用页没有错误提示')
   check(
-    !requests.some((r) => r.url.includes('/api/gd-metric/supply-curve')),
-    '停用时不打供给曲线接口（省一次必然失败的请求）',
+    !requests.slice(reqBase).some((r) => r.url.includes('/api/gd-metric/supply-curve')),
+    '进 /scene/inference 期间没有任何 supply-curve 请求',
+    requests.slice(reqBase).map((r) => r.url).join(' | '),
   )
 }
 
@@ -3495,7 +3531,18 @@ console.log('\n== 手动控制页（已停用）== ')
 {
   manualEnabled = false
   await clickTo('管理', '设备管理')
-  await clickTo('管理', '手动控制')
+  const manualItem = findSide('手动控制')
+  check(
+    !!manualItem && manualItem.tagName !== 'A' && manualItem.getAttribute('aria-disabled') === 'true',
+    '侧栏「手动控制」不可点（不是链接）',
+    `${manualItem?.tagName} aria-disabled=${manualItem?.getAttribute('aria-disabled') ?? '(无)'}`,
+  )
+  check(
+    (manualItem?.textContent ?? '').includes('未开放'),
+    '侧栏给「未开放」标，不假装 ready',
+    manualItem?.textContent ?? '',
+  )
+  await gotoPath('/manage/manual', '手动控制')
   await waitFor(() => (doc.body.textContent ?? '').includes('手动控制已停用'), 2000)
   const bodyText = () => doc.body.textContent ?? ''
   check(bodyText().includes('手动控制已停用'), '停用时显示说明，不是空白页')
@@ -3514,10 +3561,6 @@ console.log('\n== 手动控制页（已停用）== ')
   check(
     requests.filter((r) => r.url.includes('/api/control/custom-services')).length === before,
     '停用时不再去拉可执行服务',
-  )
-  check(
-    [...doc.querySelectorAll('.side-item')].some((a) => a.textContent.includes('手动控制') && a.textContent.includes('暂停')),
-    '侧栏给「暂停」标，不假装 ready',
   )
   manualEnabled = true
 }

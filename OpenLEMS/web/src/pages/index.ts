@@ -20,7 +20,9 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   decision: () => import('./scene/DecisionView.vue'),
   clearing: () => import('./scene/ClearingView.vue'),
   review: () => import('./scene/ReviewView.vue'),
-  inference: () => import('./scene/InferenceView.vue'),
+  // inference（策略反演）已停用：不登记 loader，/scene/inference 统一回落到
+  // PlaceholderView 的「已停用 + note」。InferenceView.vue 文件保留（nav note 承诺
+  // 代码与数据表都保留），只是不再被路由引用，旧书签不会加载它、也不会发请求。
   forecast: () => import('./scene/ForecastView.vue'),
   manual: () => import('./manage/ManualControlView.vue'),
   policies: () => import('./manage/PolicyListView.vue'),

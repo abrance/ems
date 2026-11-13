@@ -9,20 +9,32 @@ const tab = computed(() => findTabByKey(props.tabKey))
 <template>
   <aside class="sidebar" :class="{ collapsed }">
     <div class="side-group">{{ tab?.title }}</div>
-    <RouterLink
-      v-for="page in tab?.pages ?? []"
-      :key="page.key"
-      class="side-item"
-      :class="{ active: page.key === pageKey, 'is-todo': page.status === 'todo' }"
-      :title="page.title"
-      :to="page.path"
-    >
-      <span class="dot" />
-      <span class="side-label">{{ page.title }}</span>
-      <span v-if="page.status === 'todo' || page.status === 'paused'" class="badge">
-        {{ page.status === 'paused' ? '暂停' : 'TODO' }}
+    <template v-for="page in tab?.pages ?? []" :key="page.key">
+      <!-- paused = 已停用：只展示，不渲染成链接，避免点进去加载一个不再维护的页面 -->
+      <span
+        v-if="page.status === 'paused'"
+        class="side-item is-paused"
+        :class="{ active: page.key === pageKey }"
+        :title="`${page.title}（未开放）`"
+        aria-disabled="true"
+        data-paused="true"
+      >
+        <span class="dot" />
+        <span class="side-label">{{ page.title }}</span>
+        <span class="badge">未开放</span>
       </span>
-    </RouterLink>
+      <RouterLink
+        v-else
+        class="side-item"
+        :class="{ active: page.key === pageKey, 'is-todo': page.status === 'todo' }"
+        :title="page.title"
+        :to="page.path"
+      >
+        <span class="dot" />
+        <span class="side-label">{{ page.title }}</span>
+        <span v-if="page.status === 'todo'" class="badge">TODO</span>
+      </RouterLink>
+    </template>
   </aside>
 </template>
 
@@ -57,6 +69,10 @@ const tab = computed(() => findTabByKey(props.tabKey))
 .side-item.active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
 .side-item.is-todo { color: var(--text-3); }
 .side-item.is-todo.active { color: var(--brand-ink); }
+/* 未开放：保留同样的排版与层级，但没有 hover、没有指针、点了也不跳转 */
+.side-item.is-paused { color: var(--text-3); cursor: default; }
+.side-item.is-paused:hover { background: transparent; }
+.side-item.is-paused.active { color: var(--brand-ink); }
 .dot {
   width: 6px;
   height: 6px;
