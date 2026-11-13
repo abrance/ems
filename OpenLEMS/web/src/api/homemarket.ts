@@ -89,3 +89,80 @@ export function periodLabel(type: number): string {
   if (type === 2) return '低谷'
   return `时段 ${type}`
 }
+
+/* ---------- 采集状态（/gd-metric/home-market/status） ---------- */
+
+/**
+ * 与 logic/homemarket/status.go 的四态一一对应。
+ *
+ * 这个端点**不带任何数值**，只回答「这一路现在能不能用、为什么不能用」。
+ * 所以它不能反过来决定图上的数（那是 home-24h / node-price 的事），只决定
+ * 空态怎么说、以及要不要用告警口气。
+ */
+export type MarketState = 'ok' | 'lagging' | 'failed' | 'never' | 'stopped'
+
+export interface DatasetStatus {
+  /** home24h / nodePrice */
+  dataset: string
+  state: MarketState
+  /** 最新有数据的那一天；库里一条都没有时为空串 */
+  asOf: string
+  /** 最近一次成功采集的时间；从没成功过时为空串 */
+  fetchedAt: string
+  /** asOf 距今多少天；无数据时 -1 */
+  lagDays: number
+  rows: number
+  rowsExpected: number
+  lastError: string
+  /** blocked / network / parse */
+  errorKind: string
+}
+
+export interface MarketStatus {
+  home24h: DatasetStatus
+  nodePrice: DatasetStatus
+}
+
+/** GET /api/gd-metric/home-market/status */
+export function fetchMarketStatus(signal?: AbortSignal): Promise<MarketStatus> {
+  return api.get<MarketStatus>('/api/gd-metric/home-market/status', undefined, signal)
+}
+
+/** 三种失败类别处置不同：拦截要换网络/加白名单，网络异常重试，解析失败是页面改版 */
+const ERROR_KIND_LABEL: Record<string, string> = {
+  blocked: '被源站拦截',
+  network: '网络异常',
+  parse: '数据解析失败',
+}
+
+/** 状态 → 页面上的一句话，以及该用哪种口气 */
+export interface StatusNote {
+  /** neutral = 正常语气（滞后：等下一轮就行）；alert = 告警样式 */
+  tone: 'neutral' | 'alert'
+  text: string
+}
+
+/**
+ * 五态里 `ok` 不需要任何提示（有数、滞后在预期内，说话只是噪音）。
+ *
+ * `lagging` **必须是中性语气**：滞后是「源站还没发，等就行」，标成红色会让人
+ * 去排查一个根本没有坏的东西 —— 这是这个功能最容易写反的一条。
+ */
+export function statusNote(st?: DatasetStatus | null): StatusNote | null {
+  if (!st) return null
+  switch (st.state) {
+    case 'lagging':
+      return { tone: 'neutral', text: `源站还没发布 ${st.lagDays} 天前的数据，等下一轮采集` }
+    case 'failed':
+      return {
+        tone: 'alert',
+        text: `采集失败：${ERROR_KIND_LABEL[st.errorKind] ?? '未知原因'}，最近一次成功是 ${st.fetchedAt || '—'}`,
+      }
+    case 'never':
+      return { tone: 'alert', text: '从未采集成功，请检查采集配置' }
+    case 'stopped':
+      return { tone: 'alert', text: '源站已连续 3 次返回空数据，疑似停更或页面改版' }
+    default:
+      return null
+  }
+}

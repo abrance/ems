@@ -12,7 +12,16 @@ import {
   type MarketBoard,
   type MarketSeries,
 } from '@/api/spotmarket'
-import { fetchHome24h, fetchNodePrice, periodLabel, type Home24hDay, type NodePriceDay } from '@/api/homemarket'
+import {
+  fetchHome24h,
+  fetchMarketStatus,
+  fetchNodePrice,
+  periodLabel,
+  statusNote,
+  type Home24hDay,
+  type MarketStatus,
+  type NodePriceDay,
+} from '@/api/homemarket'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 
 /**
@@ -44,6 +53,11 @@ const NODE_SOURCE = '官网·节点价 T+0'
 const daily = ref<MarketBoard | null>(null)
 const home24h = ref<Home24hDay | null>(null)
 const nodePrice = ref<NodePriceDay | null>(null)
+/**
+ * 两路采集状态。**只用来决定空态怎么说**，不参与任何数值（数值只来自
+ * home-24h / node-price）。请求失败时保持 null，页面退回老文案「该日无数据」。
+ */
+const marketStatus = ref<MarketStatus | null>(null)
 const loadingDaily = ref(false)
 const loading24h = ref(false)
 const loadingNode = ref(false)
@@ -86,10 +100,19 @@ async function loadNode() {
   }
 }
 
+async function loadStatus() {
+  try {
+    marketStatus.value = await fetchMarketStatus()
+  } catch {
+    // 状态端点自己挂了不许把整页带到白屏：退回「该日无数据」比什么都不说清楚
+    marketStatus.value = null
+  }
+}
+
 /** 三路并行：任何一路慢/失败都不拖累另外两路（它们的源站本来就互不相关） */
 function reloadAll() {
   errors.value = []
-  void Promise.all([loadDaily(), load24h(), loadNode()])
+  void Promise.all([loadDaily(), load24h(), loadNode(), loadStatus()])
 }
 
 onMounted(reloadAll)
@@ -329,6 +352,27 @@ useECharts(
 
 /* ---------- 图 4：地市横向条形（42 条） ---------- */
 
+/* ---------- 采集状态：四态空态 ---------- */
+
+const note24h = computed(() => statusNote(marketStatus.value?.home24h))
+const noteNode = computed(() => statusNote(marketStatus.value?.nodePrice))
+const state24h = computed(() => marketStatus.value?.home24h.state ?? '')
+const stateNode = computed(() => marketStatus.value?.nodePrice.state ?? '')
+/**
+ * 空态文案：有四态就用状态端点的话，没有（接口自己挂了）就退回原来的
+ * 「该日无数据 + 库里最新到哪天」。两种都不会白屏，区别只在说得多具体。
+ */
+const home24hEmptyText = computed(
+  () =>
+    note24h.value?.text ??
+    `该日无数据：主页 24 点滞后约 6 天才发布，库里最新到 ${home24h.value?.latestDate || '（还没有任何数据）'}。`,
+)
+const nodeEmptyText = computed(
+  () =>
+    noteNode.value?.text ??
+    `该日无数据：地市节点价 T+0 可得，库里最新到 ${nodePrice.value?.latestDate || '（还没有任何数据）'}。`,
+)
+
 const nodePoints = computed(() => nodePrice.value?.points ?? [])
 const nodeEmpty = computed(() => !loadingNode.value && (nodePrice.value?.empty ?? true))
 
@@ -381,7 +425,10 @@ useECharts(
 )
 
 /** 地市条形图要 42 行，容器按行数给高度，否则条被压扁 */
+const NODE_ROWS_EXPECTED = 42
 const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 18 + 60)}px`)
+/** 空态按「该有的 42 行」占位：塌成一条线会让下方内容上下跳 */
+const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 60)}px`)
 </script>
 
 <template>
@@ -483,11 +530,21 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
       <template #actions>
         <StatusTag tone="brand">{{ HOME24H_SOURCE }}</StatusTag>
       </template>
-      <div v-if="home24hEmpty" class="empty">
-        该日无数据：主页 24 点滞后约 6 天才发布，库里最新到
-        {{ home24h?.latestDate || '（还没有任何数据）' }}。
-      </div>
-      <div v-else ref="price24hEl" class="chart" />
+      <div
+        v-if="home24hEmpty"
+        class="empty empty--chart"
+        :class="note24h ? (note24h.tone === 'alert' ? 'is-alert' : 'is-neutral') : ''"
+        :data-state="state24h"
+      >{{ home24hEmptyText }}</div>
+      <template v-else>
+        <div
+          v-if="note24h"
+          class="state-note"
+          :class="note24h.tone === 'alert' ? 'is-alert' : 'is-neutral'"
+          :data-state="state24h"
+        >{{ note24h.text }}</div>
+        <div ref="price24hEl" class="chart" />
+      </template>
     </PanelBox>
 
     <!-- 24 点负荷：单独一张小图，不做双 y 轴 -->
@@ -501,7 +558,12 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
       <template #actions>
         <StatusTag tone="brand">{{ HOME24H_SOURCE }}</StatusTag>
       </template>
-      <div v-if="home24hEmpty" class="empty">该日无数据。</div>
+      <div
+        v-if="home24hEmpty"
+        class="empty empty--chart"
+        :class="note24h ? (note24h.tone === 'alert' ? 'is-alert' : 'is-neutral') : ''"
+        :data-state="state24h"
+      >{{ home24hEmptyText }}</div>
       <div v-else ref="power24hEl" class="chart" />
     </PanelBox>
 
@@ -516,10 +578,22 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
       <template #actions>
         <StatusTag tone="green">{{ NODE_SOURCE }}</StatusTag>
       </template>
-      <div v-if="nodeEmpty" class="empty">
-        该日无数据：地市节点价 T+0 可得，库里最新到 {{ nodePrice?.latestDate || '（还没有任何数据）' }}。
-      </div>
-      <div v-else ref="nodeEl" class="chart" :style="{ height: nodeChartHeight }" />
+      <div
+        v-if="nodeEmpty"
+        class="empty"
+        :class="noteNode ? (noteNode.tone === 'alert' ? 'is-alert' : 'is-neutral') : ''"
+        :data-state="stateNode"
+        :style="{ height: nodeBoxHeight }"
+      >{{ nodeEmptyText }}</div>
+      <template v-else>
+        <div
+          v-if="noteNode"
+          class="state-note"
+          :class="noteNode.tone === 'alert' ? 'is-alert' : 'is-neutral'"
+          :data-state="stateNode"
+        >{{ noteNode.text }}</div>
+        <div ref="nodeEl" class="chart" :style="{ height: nodeChartHeight }" />
+      </template>
     </PanelBox>
   </div>
 
@@ -566,6 +640,32 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
   text-align: center;
   line-height: 1.7;
 }
+/* 空态占住图表原来的高度：塔成一条线会让下方内容往上一跳（切换日期时尤其明显） */
+.empty--chart { min-height: 0; height: 360px; }
+/*
+ * 四态提示。
+ * neutral = 滞后（源站还没发），正常口气、次要样式；
+ * is-alert = 失败 / 从未成功 / 停更，才用告警色。
+ * 这两类红绿一律不混：把「等就行」的东西标红，等于让人去查一个没坏的东西。
+ */
+.state-note {
+  margin-bottom: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+.state-note.is-alert,
+.empty.is-alert {
+  border-left-color: var(--red);
+  background: var(--red-soft);
+  color: var(--red-ink);
+}
+.empty.is-alert,
+.empty.is-neutral { text-align: left; }
 .footer {
   margin-top: var(--s4);
   padding: var(--s2) var(--s1);

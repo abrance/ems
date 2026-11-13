@@ -960,6 +960,46 @@ const FAKE_IGNORE_ALARMS = [
   },
 ]
 
+/**
+ * 采集状态四态夹具。null = 两路都 ok（正常有数）；否则两路都置成该 state，
+ * 且对应的数值接口返回空 —— 真实场景就是「没数 + 状态说清为什么没数」。
+ *
+ * 断言的是**页面真实渲染出来的文案**，不是这里的夹具定义：夹具只是饲料，
+ * 文案写错（比如 lagging 用了告警口气）这里就该红。
+ */
+let marketStatusState = null
+/** failed 的细分原因：blocked / network / parse 三种处置不同，不能都写「采集失败」 */
+let marketStatusKind = 'blocked'
+/** 状态端点自己挂了：页面必须退回「该日无数据」，不许白屏 */
+let marketStatusDown = false
+
+function marketStatusFixture() {
+  const build = (dataset, okLag, rowsExpected) => {
+    const st = marketStatusState ?? 'ok'
+    const noData = noDataState()
+    return {
+      dataset,
+      state: st,
+      // lagging 是「有数据但旧」，asOf 必须非空——空字符串会变成「从未入库」
+      asOf: noData ? '' : st === 'lagging' ? '2026-11-02' : '2026-11-13',
+      // failed 文案要带「最近一次成功是 X」，所以给一个真实时间而不是空
+      fetchedAt: noData && st !== 'never' && st !== 'failed' ? '' : st === 'failed' ? '2026-11-10 09:12:00' : '2026-11-13 09:12:00',
+      lagDays: noData ? -1 : st === 'lagging' ? 11 : okLag,
+      rows: noData ? 0 : rowsExpected,
+      rowsExpected,
+      lastError: st === 'failed' ? 'status 400 blocked by waf' : '',
+      errorKind: st === 'failed' ? marketStatusKind : '',
+    }
+  }
+  return { home24h: build('home24h', 6, 24), nodePrice: build('nodePrice', 0, 42) }
+}
+
+/**
+ * 这一段状态必须**带数**：滞后是「有数据，只是旧了」，图还在，提示在图上头。
+ * 把它也弄成空数据，就测不到「滞后不污图」这条。failed/never/stopped 才是没数。
+ */
+const noDataState = () => marketStatusState !== null && !['ok', 'lagging'].includes(marketStatusState)
+
 const requests = []
 let cleaned = false
 /** 手动控制开关（后端默认关闭）：默认给开，专门留一段测停用路径 */
@@ -1190,10 +1230,23 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/spot-market/board')) return json(FAKE_SPOT_MARKET)
   // 注意顺序：这两个也以 /api/gd-metric 开头，必须排在下面的 gd-metric 兜底之前，
   // 否则会被兜底桩吞掉，页面拿到的是 96 点快照的形状
+  if (u.includes('/api/gd-metric/home-market/status')) {
+    if (marketStatusDown) return json(null, 500)
+    return json(marketStatusFixture())
+  }
   if (u.includes('/api/gd-metric/home-24h')) {
+    // 状态非 ok/lagging 时数值接口也没数（真实后端：没采到就没行）
+    if (noDataState()) {
+      return json({ date: '', empty: true, latestDate: '', lagDays: -1, points: [], source: '官网·24点', pointCount: 0 })
+    }
     return json(home24hPartial ? FAKE_HOME_24H_PARTIAL : FAKE_HOME_24H)
   }
-  if (u.includes('/api/gd-metric/node-price')) return json(FAKE_NODE_PRICE)
+  if (u.includes('/api/gd-metric/node-price')) {
+    if (noDataState()) {
+      return json({ date: '', empty: true, latestDate: '', lagDays: -1, points: [], source: '官网·节点价', peakCities: 0, valleyCities: 0 })
+    }
+    return json(FAKE_NODE_PRICE)
+  }
   if (u.includes('/api/gd-metric/similar-days')) return json(FAKE_SIMILAR)
   if (u.includes('/api/gd-metric/series')) return json(FAKE_SERIES)
   if (u.includes('/api/gd-metric/supply-curve')) {
@@ -1462,6 +1515,107 @@ await clickTo('市场数据', '市场总览')
   check(chartPts.includes(17), '缺点日负荷图仍画出实际 17 个点', JSON.stringify(chartPts))
 }
 home24hPartial = false
+
+// ---- 四态空态：文案与口气（lagging 绝不能告警） ----
+//
+// 只换夹具不够：页面必须重新取数，所以每一态都离开再回来一次。
+// 断言的是**页面真实渲染出来的文字与 class**，不是夹具里的字段。
+console.log('\n== 市场数据 · 四态空态（lagging 不能是告警色）==')
+
+/** 读两路状态提示：面板 data-state 与文字、是否带告警 class */
+function readStateNotes() {
+  // 只看真正带 state 的：状态接口挂了时 data-state 是空串，那退回的是传统
+  // 「该日无数据」文案，不是四态提示，不能算进来
+  return [...doc.querySelectorAll('.state-note, .empty[data-state]')]
+    .filter((el) => (el.dataset.state ?? '') !== '')
+    .map((el) => ({
+    state: el.dataset.state ?? '',
+    text: (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    alert: el.classList.contains('is-alert'),
+    neutral: el.classList.contains('is-neutral'),
+  }))
+}
+
+async function remountMarket() {
+  await clickTo('市场数据', '信息披露')
+  await clickTo('市场数据', '市场总览')
+  await waitFor(() => (doc.body.textContent ?? '').includes('地市节点电价'))
+  // 状态接口是第四路并行请求，等它落地再读文案
+  await waitFor(() => !!(doc.body.textContent ?? '').match(/源站|采集|从未/))
+}
+
+{
+  const expectAlert = (state, mustTexts) => {
+    const notes = readStateNotes().filter((n) => n.state === state)
+    check(notes.length >= 2, `${state}：两路都渲染出提示（实际 ${notes.length} 条）`, JSON.stringify(readStateNotes()))
+    check(
+      notes.every((n) => n.alert && !n.neutral),
+      `${state}：带告警样式 is-alert`,
+      JSON.stringify(notes),
+    )
+    for (const t of mustTexts) {
+      check(notes.some((n) => n.text.includes(t)), `${state}：文案包含「${t}」`, JSON.stringify(notes.map((n) => n.text)))
+    }
+  }
+
+  // ok：有数、滞后在预期内 —— 不弹任何提示，只是噪声
+  marketStatusState = 'ok'
+  await remountMarket()
+  check(readStateNotes().length === 0, 'ok：不渲染任何状态提示', JSON.stringify(readStateNotes()))
+
+  // lagging：有数据只是旧了。**正常口气**，绝不能红 —— 这是本批最容易写反的一条
+  marketStatusState = 'lagging'
+  await remountMarket()
+  {
+    const notes = readStateNotes().filter((n) => n.state === 'lagging')
+    check(notes.length === 2, `lagging：两路都给出提示（实际 ${notes.length}）`, JSON.stringify(readStateNotes()))
+    check(
+      notes.every((n) => !n.alert && n.neutral),
+      'lagging：**不带告警样式**，走中性样式（滞后是「等就行」，标红会让人去查没坏的东西）',
+      JSON.stringify(notes),
+    )
+    check(
+      notes.every((n) => /源站还没发布 \d+ 天前的数据，等下一轮采集/.test(n.text)),
+      'lagging：文案为「源站还没发布 N 天前的数据，等下一轮采集」',
+      JSON.stringify(notes.map((n) => n.text)),
+    )
+    // 滞后是有数据的：图必须照画（不能因为状态不是 ok 就把图换成空态）
+    const chartPts = [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
+    check(chartPts.includes(48) && chartPts.includes(42), 'lagging：数据仍在图上（滞后不污图）', JSON.stringify(chartPts))
+  }
+
+  // failed：三种 errorKind 处置不同，必须分别说清，不能都写「采集失败」
+  marketStatusState = 'failed'
+  for (const [kind, label] of [['blocked', '被源站拦截'], ['network', '网络异常'], ['parse', '数据解析失败']]) {
+    marketStatusKind = kind
+    await remountMarket()
+    expectAlert('failed', [`采集失败：${label}，最近一次成功是 2026-11-10 09:12:00`])
+  }
+  marketStatusKind = 'blocked'
+
+  marketStatusState = 'never'
+  await remountMarket()
+  expectAlert('never', ['从未采集成功，请检查采集配置'])
+
+  marketStatusState = 'stopped'
+  await remountMarket()
+  expectAlert('stopped', ['源站已连续 3 次返回空数据，疑似停更或页面改版'])
+
+  // 状态接口自己挂了：退回「该日无数据」，不许把整页带白
+  marketStatusState = 'never'
+  marketStatusDown = true
+  await remountMarket()
+  {
+    const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+    check(readStateNotes().length === 0, '状态接口 500：不渲染四态提示（没有状态可依）', JSON.stringify(readStateNotes()))
+    check(bodyHas('该日无数据'), '状态接口 500：退回「该日无数据」而不是白屏')
+    check(doc.querySelectorAll('.panel').length >= 4, `状态接口 500：面板仍在（${doc.querySelectorAll('.panel').length} 个）`)
+    check(!bodyHas('部分数据加载失败'), '状态接口 500：不把状态接口的失败当成业务数据失败报红')
+  }
+  marketStatusDown = false
+  marketStatusState = null
+  await remountMarket()
+}
 
 console.log('\n== 市场数据 · 信息披露（官方直采数据，图表确实画出了数据）==')
 await clickTo('市场数据', '信息披露')
