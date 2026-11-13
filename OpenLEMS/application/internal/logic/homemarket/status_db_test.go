@@ -234,6 +234,27 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 			},
 		},
 		{
+			// 全新环境：库里一条数都没有（asOf 为空），源站连续回 200+空。
+			// 必须报 stopped，不能报 never —— 前者说「源站改版了」，后者说「你配置没配好」。
+			name: "stopped_beats_never_on_empty_db",
+			seed: func(t *testing.T) {
+				for i := 0; i < stoppedEmptyRounds; i++ {
+					if _, err := s_db.GetHomeMarketService().RecordFetchRun(context.Background(), &s_db_model.SFetchRunModel{
+						TargetDate: fmtDate(0), Dataset: s_db_model.DatasetHome24h,
+						Status: s_db_model.FetchStatusEmpty, RowsExpected: rowsExpectedHome24h,
+					}); err != nil {
+						t.Fatalf("写 run 失败: %v", err)
+					}
+				}
+			},
+			want: StateStopped,
+			check: func(t *testing.T, st DatasetStatus) {
+				if st.AsOf != "" {
+					t.Errorf("这个用例库里不该有数据，asOf = %q", st.AsOf)
+				}
+			},
+		},
+		{
 			name: "stopped",
 			seed: func(t *testing.T) {
 				seed24h(t, fmtDate(6), 24)

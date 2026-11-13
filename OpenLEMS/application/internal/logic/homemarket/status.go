@@ -137,11 +137,13 @@ func deriveStatus(ctx context.Context, dataset, asOf string, rows int,
 		st.State = StateFailed
 		st.LastError = last.LastError
 		st.ErrorKind = last.ErrorKind
-	case asOf == "":
-		st.State = StateNever
+	// stopped 必须排在 never 前面：全新环境（库里一条数都没有）碰上源站改版时，
+	// asOf 同样是空的，先说「从未采集成功，请检查采集配置」会把用户引去查配置。
 	case last != nil && last.Status == s_db_model.FetchStatusEmpty &&
 		last.ConsecutiveEmpties >= stoppedEmptyRounds:
 		st.State = StateStopped
+	case asOf == "":
+		st.State = StateNever
 	case st.LagDays > expectedLag:
 		st.State = StateLagging
 	default:
