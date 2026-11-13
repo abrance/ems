@@ -136,7 +136,6 @@ func getJSON(ctx context.Context, url string, out any) error {
 	if err != nil {
 		return &collectError{Kind: ErrKindNetwork, Err: err}
 	}
-	// 源站对裸 UA 会返回 400（动态防护），带上正常浏览器的 UA 与 Referer
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "+
 		"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://pm.gd.csg.cn/portal/")
@@ -195,6 +194,11 @@ func FetchHome24h(ctx context.Context, date string) ([]*s_db_model.SHome24hModel
 			Source:        SourceHome24h,
 		})
 	}
+	if err := guardBatch(ctx, "24 点分时", len(resp.Data.Details), len(rows), func(i int) bool {
+		return rows[i].AheadPrice == 0 && rows[i].RealtimePrice == 0
+	}); err != nil {
+		return nil, err
+	}
 	return rows, nil
 }
 
@@ -241,7 +245,43 @@ func FetchNodePrice(ctx context.Context, date string) ([]*s_db_model.SNodePriceM
 			Source:     SourceNodePrice,
 		})
 	}
+	if err := guardBatch(ctx, "地市节点价", len(resp.Data.CurrentPirceAreaVOList), len(rows), func(i int) bool {
+		return rows[i].Price == 0
+	}); err != nil {
+		return nil, err
+	}
 	return rows, nil
+}
+
+// guardBatch 挡两种「结构合法、值没用」的批次。
+//
+// 源站把字段改名后，JSON 照样能解出来，只是价格只剩 0 值：code=200、行数对，
+// 这条路径**不会失败**，于是 0 元被当成真实价格写进库，页面显示「今天全天电价 0 元」。
+// 错误分类抓不到它（不是 blocked/network，也不是 code!=200），必须在这里单独判。
+//
+// 两种形态：①源站有 N 行但价格整批为 0；②源站有 N 行但一条都没解出来
+// （dateTime/name 改名会让全部行被跳过），后者原本会静默退化成「源站没发布」。
+//
+// 价格判据只能是「整批全为 0」，不能用 <=0：线上库实测 gd_node_price 有合法负价
+// （2026-11-08 湛江低谷 -8.523），而 gd_home_24h 的 192 行最小值 53.2、零值 0 行。
+// 真实价格偶尔为 0 是可能的，整批为 0 不可能。
+func guardBatch(ctx context.Context, what string, raw, valid int, isZero func(i int) bool) error {
+	if raw == 0 {
+		return nil // 源站明确没发布，不是本函数管的事
+	}
+	if valid == 0 {
+		c_log.Warningf(ctx, "%s 返回了 %d 行但一条也没解出来，疑似字段改名", what, raw)
+		return &collectError{Kind: ErrKindParse, Err: errors.Errorf(
+			"%s 返回了 %d 行但没有一条可解析（已拒绝写库），疑似字段改名或页面改版", what, raw)}
+	}
+	for i := 0; i < valid; i++ {
+		if !isZero(i) {
+			return nil
+		}
+	}
+	c_log.Warningf(ctx, "%s 返回了 %d 行但价格全为 0，疑似字段改名或页面改版", what, valid)
+	return &collectError{Kind: ErrKindParse, Err: errors.Errorf(
+		"%s 返回了 %d 行但全为 0，疑似字段改名或页面改版（已拒绝写库）", what, valid)}
 }
 
 // CollectHome24h 采集「最近一个有数据的 24 点」并落库。
