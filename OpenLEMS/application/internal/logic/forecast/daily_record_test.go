@@ -107,6 +107,80 @@ func TestBuildDailyRecordRowSkipsMissingOrZero(t *testing.T) {
 	}
 }
 
+// 跨零点：23:59:5x 触发，loadDaily 里取时刻时已经过了 00:00。
+// 生成日必须用「真正算出结果」的那天（loadDaily 打的戳），不是触发日 ——
+// 否则留痕会被标成早一天生成，凭空多出一天的提前量，复盘配对也跟着错位。
+func TestRunDailyRecordUsesComputeDateAcrossMidnight(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "daily-record-midnight.sqlite3")
+	gdb.SetConfig(gdb.Config{
+		"default": gdb.ConfigGroup{{Type: "sqlite", Link: "sqlite::@file(" + path + ")"}},
+	})
+	t.Cleanup(func() { gdb.SetConfig(gdb.Config{}) })
+
+	if _, err := g.DB().Exec(ctx, `
+		CREATE TABLE gd_price_forecast (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			generated_on TEXT NOT NULL,
+			market TEXT NOT NULL,
+			grain TEXT NOT NULL,
+			target_time TEXT NOT NULL,
+			point REAL NOT NULL DEFAULT 0,
+			q10 REAL NOT NULL DEFAULT 0,
+			q50 REAL NOT NULL DEFAULT 0,
+			q90 REAL NOT NULL DEFAULT 0,
+			model TEXT NOT NULL DEFAULT '',
+			unit TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (generated_on, market, grain, target_time)
+		)`); err != nil {
+		t.Fatalf("建表: %v", err)
+	}
+
+	// 触发时刻：D 日 23:59:58
+	trigger := time.Date(2026, 11, 13, 23, 59, 58, 0, priceLocation())
+	// loadDaily 内部取时刻：已跨到 D+1 00:00:03，所以 res.GeneratedOn = D+1
+	load := func(_ context.Context, req PriceRequest) (*TPriceForecastResult, error) {
+		return &TPriceForecastResult{
+			Market:      req.Market,
+			Grain:       s_db_model.ForecastGrainDay,
+			Model:       "timesfm-3.0",
+			Unit:        "元/MWh",
+			To:          "2026-11-11",
+			GeneratedOn: "2026-11-14",
+			Points: []TPriceForecastPoint{
+				{TargetTime: parseDayTarget("2026-11-14"), Point: 401.3},
+				{TargetTime: parseDayTarget("2026-11-15"), Point: 412.7},
+			},
+		}, nil
+	}
+
+	runDailyRecord(ctx, trigger, load)
+
+	rows, err := g.DB().GetAll(ctx, `SELECT generated_on, target_time FROM gd_price_forecast`)
+	if err != nil {
+		t.Fatalf("读取留痕: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("留痕行数 = %d，want 2（每个市场一行）", len(rows))
+	}
+	for _, row := range rows {
+		generatedOn := row["generated_on"].String()
+		target := row["target_time"].String()
+		if generatedOn != "2026-11-14" {
+			t.Errorf("generated_on = %s，want 2026-11-14（算出结果的时刻，不是触发日 2026-11-13）", generatedOn)
+		}
+		if generatedOn >= target {
+			t.Errorf("写入了 target_time=%s ≤ generated_on=%s 的行", target, generatedOn)
+		}
+		if IsBackfilledForecast(generatedOn, target) {
+			t.Errorf("留痕会被复盘剔除: generated_on=%s target_time=%s", generatedOn, target)
+		}
+	}
+}
+
 // 同一目标日执行两次，库里仍只有一行：唯一键 + UpsertBatch 覆盖，不堆重复。
 func TestRunDailyRecordIsIdempotent(t *testing.T) {
 	ctx := context.Background()

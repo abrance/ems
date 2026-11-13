@@ -82,9 +82,7 @@ func runDailyRecord(ctx context.Context, now time.Time, load dailyRecordLoader) 
 	written := make(map[string]int, len(dailyRecordMarkets))
 
 	loc := priceLocation()
-	local := now.In(loc)
-	generatedOn := local.Format(priceDateLayout)
-	targetDate := local.AddDate(0, 0, 1).Format(priceDateLayout)
+	triggerDate := now.In(loc).Format(priceDateLayout)
 
 	for _, market := range dailyRecordMarkets {
 		// ForceRefresh=true：不读页面那层 5 分钟缓存，按这次执行时刻能拿到的最新数据重算。
@@ -95,6 +93,19 @@ func runDailyRecord(ctx context.Context, now time.Time, load dailyRecordLoader) 
 		})
 		if err != nil {
 			c_log.Warningf(ctx, "每日留痕跳过 %s：预测失败，不写假数（%+v）", market, err)
+			continue
+		}
+
+		// 生成日取「真正算出结果」的时刻，不是触发时刻：23:59:5x 触发、模型算完已过零点时，
+		// 用触发日会把留痕标成早一天生成，等于凭空多出一天的提前量。
+		// loadDaily 在拿到模型结果后才打这个戳，是权威值；为空才回落到触发日。
+		generatedOn := strings.TrimSpace(res.GeneratedOn)
+		if generatedOn == "" {
+			generatedOn = triggerDate
+		}
+		targetDate := nextDate(generatedOn)
+		if targetDate == "" {
+			c_log.Warningf(ctx, "每日留痕跳过 %s：生成日 %q 不是合法日期", market, generatedOn)
 			continue
 		}
 
@@ -115,6 +126,15 @@ func runDailyRecord(ctx context.Context, now time.Time, load dailyRecordLoader) 
 	}
 
 	return written
+}
+
+// nextDate 返回 date 的次日；date 不是 YYYY-MM-DD 时返回空串，调用方据此跳过不写假数。
+func nextDate(date string) string {
+	d := parseDayTarget(date)
+	if d.IsZero() {
+		return ""
+	}
+	return d.AddDate(0, 0, 1).Format(priceDateLayout)
 }
 
 // BuildDailyRecordRow 从一次日频预测结果里取出目标日那一点，拼成一条留痕。
