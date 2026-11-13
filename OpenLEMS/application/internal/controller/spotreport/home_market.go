@@ -38,6 +38,13 @@ func (c *ControllerV1) GetNodePrice(ctx context.Context, req *v1.GetNodePriceReq
 // 自动采集只能保证「首次启动补一次窗口 + 每轮采最新」：某天采集失败后，
 // 下一轮的 CollectHome24h 会探到更新的日子停手，失败那天不会自己回来。
 // 这个接口把那个洞补上，窗口与首次启动同一份实现（homemarket.RunBackfill）。
+//
+// 注意 days 只约束地市（T+0）；24 点源站 T-6 才发布，窗口由
+// homemarket.Home24hWindowDays 单独换算，不会因为 days=7 就只剩一天有数。
+//
+// 同步阻塞：窗口上限 30 天 × 两路，最坏一个请求会跑很久，且没有并发保护
+// （启动回补同时再调一次会对源站打双倍请求）。落库是 ON CONFLICT 幂等，不会写坏数据。
+// 这是已知遗留项，改异步或加互斥另开 PR。
 func (c *ControllerV1) BackfillHomeMarket(ctx context.Context, req *v1.BackfillHomeMarketReq) (*v1.BackfillHomeMarketRes, error) {
 	days := req.Days
 	if days <= 0 {
@@ -46,8 +53,9 @@ func (c *ControllerV1) BackfillHomeMarket(ctx context.Context, req *v1.BackfillH
 	}
 	home24h, node := homemarket.RunBackfill(ctx, time.Now(), days)
 	return &v1.BackfillHomeMarketRes{
-		Days:      min(days, homemarket.MaxBackfillDays),
-		Home24h:   home24h,
-		NodePrice: node,
+		Days:        min(days, homemarket.MaxBackfillDays),
+		Home24hDays: homemarket.Home24hWindowDays(days),
+		Home24h:     home24h,
+		NodePrice:   node,
 	}, nil
 }

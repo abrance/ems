@@ -32,6 +32,9 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  * 页头批次条把三个日期**分别**标出来（含来源与滞后），就是为了让人一眼看出
  * 「这三个数不是同一天的东西」，而不是拿其中一个当「最新数据」。
  *
+ * 页脚另有一句口径警告：24 点日均（463.27）与官方日频日均（456.55）不可互校，
+ * 差约 1.5% 且无换算关系 —— 实测值写死在页面里，不从任一侧推导。
+ *
  * 每个面板右上角有源角标；空日期给明确的「该日无数据」而不是空图。
  */
 const HOME24H_SOURCE = '官网·24 点 T-6'
@@ -504,7 +507,14 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
     </PanelBox>
   </div>
 
-  <div class="footer">数据截至 {{ dataAsOf }}。三个批次的滞后不同，不能互相当作「最新数据」。</div>
+  <div class="footer">
+    <div>数据截至 {{ dataAsOf }}。三个批次的滞后不同，不能互相当作「最新数据」。</div>
+    <div class="footer-caliber">
+      口径差异：24 点日均 463.27 ≠ 官方日频日均 456.55（同为 2026-11-07 实测），不可互校。
+      两者一个是主页 24 个整点的算术均值、一个是披露口径日频加权均价，差约 1.5%；
+      这是 11-07 的实测对照，不是可以从任一侧算出来的换算关系。
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -545,6 +555,12 @@ const nodeChartHeight = computed(() => `${Math.max(320, nodeBars.value.length * 
   padding: var(--s2) var(--s1);
   color: var(--text-3);
   font-size: var(--fs-12);
+}
+.footer-caliber {
+  margin-top: var(--s1);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 1.7;
 }
 .notice {
   display: flex;
