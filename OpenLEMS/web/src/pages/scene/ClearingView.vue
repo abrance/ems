@@ -235,7 +235,7 @@ onMounted(async () => {
       foot="数据来源：广东电力交易中心披露接口直采（origin=pm-api），运行日 = 当日"
     >
       <template #actions>
-        <SourceBadge tone="blue" label="官网·日频 T+2" />
+        <SourceBadge tone="blue" label="官网·披露接口" />
       </template>
       <table v-if="priceMetrics('day_ahead_trade').length">
         <thead>

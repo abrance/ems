@@ -1513,7 +1513,11 @@ await clickTo('市场数据', '市场总览')
   check(bodyHas('2026-11-07'), '批次条显示 24 点日期 11-07')
   check(bodyHas('2026-09-21'), '批次条显示日频最新日 09-21')
   check(bodyHas('官网·节点价 T+0'), '地市节点价带 T+0 源角标')
-  check(bodyHas('官网·日频 T+2'), '日频带 T+2 源角标')
+  check(bodyHas('官网·披露接口'), '日频带「官网·披露接口」源角标（不写单一 T+n）')
+  check(
+    !bodyHas('官网·日频 T+2'),
+    '日频角标不再写 T+2（日前当日发布，一个数字罩不住两条腿）',
+  )
   check(bodyHas('官网·24 点 T-6'), '24 点带 T-6 源角标')
 
   // 页脚写清「数据截至 X」，且三个批次都点到，不挑一个代表全部
@@ -1759,6 +1763,22 @@ console.log('\n== 市场数据 · 日频空态三档（采集停了不许说成 
   await remountMarket()
   expectDaily(1, '该日无数据', 'neutral')
 
+  // 日前当日发布：lag=2 已经不是「还没发」，是漏了两天 → 中性偏提醒。
+  // 这就是改成按腿分档的行为差异（旧阈值 2 会把它说成正常）。
+  dailyLagOverride = 2
+  await remountMarket()
+  expectDaily(2, '采集滞后', 'neutral')
+  check(
+    !dailyNotes().some((n) => n.text.includes('还没发布') || n.text.includes('T+2 才发布')),
+    '日前 lag=2：不许再说「官方还没发布」',
+    JSON.stringify(dailyNotes().map((n) => n.text)),
+  )
+  check(
+    dailyNotes().some((n) => n.text.includes('官方日前当日发布')),
+    '日前 lag=2：说明官方日前当日发布（不是 T+2）',
+    JSON.stringify(dailyNotes().map((n) => n.text)),
+  )
+
   // 3~7 天：超出预期，要留意 → 中性偏提醒（不是红色）
   dailyLagOverride = 3
   await remountMarket()
@@ -1788,10 +1808,19 @@ console.log('\n== 市场数据 · 日频空态三档（采集停了不许说成 
 console.log('\n== 空态分级与首个可配对日（分支逻辑）==')
 {
   const { dailyTier } = await vite.ssrLoadModule(resolve(root, 'src/utils/dailyLag.ts'))
-  check(dailyTier(0, true) === 'never', '空库 + lag=0 → never（board.date 回落不能当 T+2）')
+  check(dailyTier(0, true) === 'never', '空库 + lag=0 → never（board.date 回落不能当「还没发布」）')
   check(dailyTier(0, false) === 't2', '有数据 + lag=0 → t2')
-  check(dailyTier(2, true) === 't2', 'lag=2 → t2（官方 T+2 是正常节奏）')
-  check(dailyTier(3, true) === 'lag', 'lag=3 → lag（超出 T+2）')
+  check(dailyTier(1, false) === 't2', '日前 lag=1 → t2（当日发布，隔一天仍是逐日常态）')
+  check(dailyTier(2, false) === 'lag', '日前 lag=2 → lag（日前当日发布，漏两天就超出节奏）')
+  check(dailyTier(2, false, 'real') === 't2', '实时 lag=2 → t2（实时腿官方就是 T+2 发布）')
+  check(dailyTier(3, false, 'real') === 'lag', '实时 lag=3 → lag（超出 T+2）')
+  // 同一 lag 在两条腿上必须分档不同 —— 这是本次要钉住的差异，阈值回退到 2 会当场变红
+  check(
+    dailyTier(2, false, 'ahead') !== dailyTier(2, false, 'real'),
+    'lag=2 在日前是滞后、在实时腿是正常（两条腿阈值不同）',
+    `ahead=${dailyTier(2, false, 'ahead')} real=${dailyTier(2, false, 'real')}`,
+  )
+  check(dailyTier(3, true) === 'lag', 'lag=3 → lag（超出正常节奏）')
   check(dailyTier(7, true) === 'lag', 'lag=7 → lag（档位边界包含 7）')
   check(dailyTier(8, true) === 'stop', 'lag=8 → stop（超过 7 天）')
   check(dailyTier(-1, true) === 'unknown', '日期解析不出（-1）→ unknown，不硬归到某一档')

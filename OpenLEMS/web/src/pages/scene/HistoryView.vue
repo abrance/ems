@@ -424,7 +424,7 @@ onMounted(async () => {
       :foot="`数据来源：官方直采指标（origin=pm-api） · 按运行日分桶（${trend?.grain || 'day'}）`"
     >
       <template #actions>
-        <SourceBadge tone="blue" label="官网·日频 T+2" />
+        <SourceBadge tone="blue" label="官网·披露接口" />
       </template>
       <TrendChart v-if="points.length" :points="points" />
       <div v-else class="empty">该数据集在当前区间没有已确认数据</div>
@@ -480,7 +480,9 @@ onMounted(async () => {
       :foot="priceFoot"
     >
       <template #actions>
-        <SourceBadge tone="blue" label="官网·日频 T+2" />
+        <!-- 这块同时画日前与实时两条腿，滞后不一样（日前 T+0、实时 T+2），
+             一个数字罩住两条腿必然把其中一条说错 —— 只标来源，滞后交给每条腿自己的文案。 -->
+        <SourceBadge tone="blue" label="官网·披露接口" />
       </template>
       <div v-if="priceError" class="empty">{{ priceError }}</div>
       <template v-else>

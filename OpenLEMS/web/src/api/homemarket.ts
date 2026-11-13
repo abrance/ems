@@ -5,7 +5,7 @@ import { api } from './client'
  *
  * **与 gdmetric.ts 不是一路**：
  *   - gdmetric.ts 读的是第三方 CSV 的 96 点通道（已停更，默认入口 fail-closed）；
- *   - spotmarket.ts 读的是披露接口的日频指标（gd_spot_metric，T+2）；
+ *   - spotmarket.ts 读的是披露接口的日频指标（gd_spot_metric，日前 T+0 / 实时腿 T+2）；
  *   - 这里读的是主页的 24 个整点（T-6 左右）与 21 地市节点价（T+0）。
  *
  * 三者的粒度与滞后都不同，所以是三张表、三个接口，绝不混用：
