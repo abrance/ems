@@ -151,7 +151,23 @@ func TestGeneratedDatesEmptyWhenNoUsableDay(t *testing.T) {
 	}
 }
 
-// ④ market / grain 过滤不能因为换了分组查询就丢掉。
+// ④ generated_on 带时间部分时（脏值）不能因为字符串比较而误判成回填。
+// '2026-11-11' >= '2026-11-11 08:55:15' 是假 —— 不截前 10 位会把当天的可用留痕整批剔掉。
+func TestGeneratedDatesToleratesGeneratedOnWithTime(t *testing.T) {
+	ctx := newPriceForecastTestDB(t)
+
+	// 关键形态：同一生成日里，target 的时刻**早于** generated_on 的时刻。
+	// '2026-11-11 08:00' >= '2026-11-11 23:00:00' 是假 —— 不截前 10 位就会把这一整天剔掉。
+	seedForecast(t, ctx, "2026-11-11 23:00:00", "ahead", "intraday", "2026-11-11 08:00")
+	seedForecast(t, ctx, "2026-11-12 01:29:25", "ahead", "intraday", "2026-11-12 06:00")
+
+	got := generatedDatesOf(t, ctx, "ahead", "intraday")
+	if len(got) != 2 || got[0] != "2026-11-11" || got[1] != "2026-11-12" {
+		t.Fatalf("生成日 = %v，期望 [2026-11-11 2026-11-12]（带时间的值要按日期部分比，且返回值截到 10 位）", got)
+	}
+}
+
+// ⑤ market / grain 过滤不能因为换了分组查询就丢掉。
 func TestGeneratedDatesFiltersByMarketAndGrain(t *testing.T) {
 	ctx := newPriceForecastTestDB(t)
 

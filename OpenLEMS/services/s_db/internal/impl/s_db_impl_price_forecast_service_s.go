@@ -87,6 +87,8 @@ func (s *sPriceForecastServiceImpl) GeneratedDates(
 	// 于是空态文案算出「首个可配对交易日约在 2026-10-10」——一个多月前的日子。
 	//
 	// intraday 同日不算回填（复盘页保留当天后续时段的点），用 >= 正好覆盖，不需要按 grain 分支。
+	// 两边都截前 10 位：generated_on 可能有带时间的脏值，不截的话同一天会因为
+	// '2026-11-11' >= '2026-11-11 08:55:15' 为假而被误判成回填。
 	where := "1=1"
 	args := make([]any, 0, 2)
 	if strings.TrimSpace(market) != "" {
@@ -108,7 +110,7 @@ func (s *sPriceForecastServiceImpl) GeneratedDates(
 		  FROM `+s_db_model.TablePriceForecast+`
 		 WHERE `+where+`
 		 GROUP BY generated_on
-		HAVING SUM(CASE WHEN substr(target_time, 1, 10) >= generated_on THEN 1 ELSE 0 END) > 0
+		HAVING SUM(CASE WHEN substr(target_time, 1, 10) >= substr(generated_on, 1, 10) THEN 1 ELSE 0 END) > 0
 		 ORDER BY generated_on ASC`, args...); err != nil {
 		return nil, errors.Wrap(err, "查询预测留痕生成日失败")
 	}
