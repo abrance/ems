@@ -558,3 +558,81 @@ func newSimLagStub(t *testing.T, today *time.Time, lag int) {
 		}
 	})
 }
+
+// ④ 源站字段改名：200 + 24 行但价格全 0。这条路径本来不失败，0 元会被当真实价格写库。
+// 必须 run 表记 failed/parse、数据表一行不多，且下次别把它判成「源站未发布」。
+func TestCollectAllZeroBatchRecordsFailedParseAndWritesNoData(t *testing.T) {
+	newTestDB(t)
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		date := r.URL.Query().Get("date")
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+		for h := 0; h < 24; h++ {
+			if h > 0 {
+				fmt.Fprint(w, ",")
+			}
+			fmt.Fprintf(w, `{"powerNum":0,"currentPrice":0,"realTimePrice":0,"dateTime":"%s %02d:00:00"}`, date, h)
+		}
+		fmt.Fprint(w, `]}}`)
+	})
+
+	if _, _, err := CollectHome24h(context.Background(), time.Now()); err == nil {
+		t.Fatal("全 0 批次应返回 error（否则 0 元会被写成真实价格）")
+	} else if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
+	}
+
+	rows := fetchRunRows(t, s_db_model.DatasetHome24h)
+	if len(rows) == 0 {
+		t.Fatal("run 表一行都没写，排障时看不出发生过什么")
+	}
+	for _, r := range rows {
+		if r.Status != s_db_model.FetchStatusFailed {
+			t.Errorf("%s 状态 = %q，期望 %q", r.TargetDate, r.Status, s_db_model.FetchStatusFailed)
+		}
+		if r.ErrorKind != string(ErrKindParse) {
+			t.Errorf("%s error_kind = %q，期望 %q", r.TargetDate, r.ErrorKind, ErrKindParse)
+		}
+		if r.RowsWritten != 0 {
+			t.Errorf("%s 记了 %d 行写入，全 0 批次应为 0", r.TargetDate, r.RowsWritten)
+		}
+	}
+	if got := countRows(t, s_db_model.TableHome24h); got != 0 {
+		t.Fatalf("全 0 批次往数据表写了 %d 行，期望 0 行（页面会显示全天 0 元）", got)
+	}
+}
+
+// ⑤ 地市全 0 批次同样不写库，但含合法负价的批次照常写入。
+func TestCollectNodePriceAllZeroRejectedButNegativeAccepted(t *testing.T) {
+	newTestDB(t)
+
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[
+			{"name":"广州市","value":0,"type":1},
+			{"name":"广州市","value":0,"type":2}]}}`)
+	})
+	if _, err := CollectNodePrice(context.Background(), "2026-11-13"); err == nil {
+		t.Fatal("全 0 批次应返回 error")
+	}
+	if got := countRows(t, s_db_model.TableNodePrice); got != 0 {
+		t.Fatalf("全 0 批次写了 %d 行地市数据，期望 0", got)
+	}
+	runRows := fetchRunRows(t, s_db_model.DatasetNodePrice)
+	if len(runRows) != 1 || runRows[0].Status != s_db_model.FetchStatusFailed ||
+		runRows[0].ErrorKind != string(ErrKindParse) {
+		t.Fatalf("run 行 = %+v，期望 1 行 failed/parse", runRows)
+	}
+
+	// 合法负电价（线上 2026-11-08 湛江低谷 -8.523）必须照常落库
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[
+			{"name":"湛江市","value":-8.523,"type":2},
+			{"name":"广州市","value":610.5,"type":1}]}}`)
+	})
+	n, err := CollectNodePrice(context.Background(), "2026-11-08")
+	if err != nil {
+		t.Fatalf("含合法负价的批次不该失败: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("写入条数 = %d，期望 2", n)
+	}
+}

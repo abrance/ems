@@ -242,3 +242,94 @@ func TestGetJSONClassifiesParseError(t *testing.T) {
 		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
 	}
 }
+
+// 源站把字段改名后，返回 200 + 24 行结构完整但价格全 0。
+// 只判 code/len 时这条路径根本不失败，0 元会被当成真实价格写进库，
+// 页面显示「今天全天电价 0 元」。判据只能是「整批全为 0」。
+func TestFetchHome24hAllZeroBatchIsParseError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"msg":"ok","data":{"details":[`)
+		for h := 0; h < 24; h++ {
+			if h > 0 {
+				fmt.Fprint(w, ",")
+			}
+			// 字段名从 currentPrice 改名后，解码得到 0 值：结构合法、值是 0
+			fmt.Fprintf(w, `{"powerNum":0,"currentPrice":0,"realTimePrice":0,"dateTime":"2026-11-07 %02d:00:00"}`, h)
+		}
+		fmt.Fprint(w, `]}}`)
+	})
+
+	rows, err := FetchHome24h(context.Background(), "2026-11-07")
+	if err == nil {
+		t.Fatalf("24 行全 0 应报错，实际返回 %d 行且 err=nil", len(rows))
+	}
+	if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
+	}
+	if !strings.Contains(err.Error(), "全为 0") {
+		t.Errorf("错误文案要说清是「全为 0」而不是泛泛的解析失败：%v", err)
+	}
+}
+
+func TestFetchNodePriceAllZeroBatchIsParseError(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[
+			{"name":"广州市","value":0,"type":1},
+			{"name":"广州市","value":0,"type":2},
+			{"name":"深圳市","value":0,"type":1},
+			{"name":"深圳市","value":0,"type":2}]}}`)
+	})
+
+	rows, err := FetchNodePrice(context.Background(), "2026-11-13")
+	if err == nil {
+		t.Fatalf("全 0 批次应报错，实际返回 %d 行且 err=nil", len(rows))
+	}
+	if got := classifyErr(err); got != ErrKindParse {
+		t.Errorf("错误类别 = %q，期望 %q（原文 %v）", got, ErrKindParse, err)
+	}
+}
+
+// 合法负电价必须照常写入。线上库实测 2026-11-08 湛江 period_type=2 是 -8.523，
+// 用 <=0 做判据会把这一条误杀 —— 这条用例就是那条判据的守卫。
+func TestFetchNodePriceKeepsLegalNegativePrice(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"currentPirceAreaVOList":[
+			{"name":"湛江市","value":-8.523,"type":2},
+			{"name":"广州市","value":610.5,"type":1},
+			{"name":"深圳市","value":0,"type":2}]}}`)
+	})
+
+	rows, err := FetchNodePrice(context.Background(), "2026-11-08")
+	if err != nil {
+		t.Fatalf("含合法负价 -8.523 的批次不该报错（说明判据误用了 <=0）：%v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("条数 = %d，期望 3", len(rows))
+	}
+	var got float64
+	for _, r := range rows {
+		if r.City == "湛江市" && r.PeriodType == 2 {
+			got = r.Price
+		}
+	}
+	if got != -8.523 {
+		t.Errorf("湛江低谷价 = %v，期望 -8.523 原样保留", got)
+	}
+}
+
+// 单点为 0 不算整批异常：只要批次里存在非 0 的有效值就照常写入。
+func TestFetchHome24hSingleZeroPointIsNotRejected(t *testing.T) {
+	withStub(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"data":{"details":[
+			{"powerNum":60000,"currentPrice":0,"realTimePrice":0,"dateTime":"2026-11-07 00:00:00"},
+			{"powerNum":60000,"currentPrice":412.5,"realTimePrice":433.1,"dateTime":"2026-11-07 01:00:00"}]}}`)
+	})
+
+	rows, err := FetchHome24h(context.Background(), "2026-11-07")
+	if err != nil {
+		t.Fatalf("批次内有非 0 值就不该整批判失败：%v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("条数 = %d，期望 2", len(rows))
+	}
+}
