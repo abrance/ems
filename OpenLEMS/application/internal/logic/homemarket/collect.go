@@ -194,8 +194,15 @@ func FetchHome24h(ctx context.Context, date string) ([]*s_db_model.SHome24hModel
 			Source:        SourceHome24h,
 		})
 	}
-	if err := guardBatch(ctx, "24 点分时", len(resp.Data.Details), len(rows), func(i int) bool {
-		return rows[i].AheadPrice == 0 && rows[i].RealtimePrice == 0
+	// ahead 与 realtime 必须**各判各的**：源站只改名其中一列时，另一列照常非 0，
+	// 合在一个 && 里会放行，0 元写库后页面把该列画成全天 0 元。
+	if err := guardBatch(ctx, "24 点分时(日前)", len(resp.Data.Details), len(rows), func(i int) bool {
+		return rows[i].AheadPrice == 0
+	}); err != nil {
+		return nil, err
+	}
+	if err := guardBatch(ctx, "24 点分时(实时)", len(resp.Data.Details), len(rows), func(i int) bool {
+		return rows[i].RealtimePrice == 0
 	}); err != nil {
 		return nil, err
 	}
