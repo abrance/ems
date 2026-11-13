@@ -268,3 +268,75 @@ func TestRunDailyRecordIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// 自然日对齐：nextDailyRun 必须返回 Asia/Shanghai 的下一个 00:05，
+// 不依赖进程启动时刻（旧实现固定 24h，节奏 = 重启频率，11-09/11-10 缺、11-13 双写）。
+func TestNextDailyRunAlignsToNaturalDay(t *testing.T) {
+	loc := priceLocation()
+	at := func(y int, mo time.Month, d, h, mi, s int) time.Time {
+		return time.Date(y, mo, d, h, mi, s, 0, loc)
+	}
+
+	cases := []struct {
+		name string
+		now  time.Time
+		want time.Time
+	}{
+		{"普通日", at(2026, 11, 13, 15, 0, 0), at(2026, 11, 14, 0, 5, 0)},
+		{"跨月", at(2026, 10, 31, 23, 59, 59), at(2026, 11, 1, 0, 5, 0)},
+		{"跨年", at(2026, 12, 31, 23, 59, 59), at(2027, 1, 1, 0, 5, 0)},
+		{"闰年 2 月 28 日", at(2028, 2, 28, 23, 59, 59), at(2028, 2, 29, 0, 5, 0)},
+		{"闰年 2 月 29 日", at(2028, 2, 29, 23, 59, 59), at(2028, 3, 1, 0, 5, 0)},
+		{"23:59:58 归次日不归当天", at(2026, 11, 13, 23, 59, 58), at(2026, 11, 14, 0, 5, 0)},
+		{"恰好 00:05:00 归次日", at(2026, 11, 14, 0, 5, 0), at(2026, 11, 15, 0, 5, 0)},
+		{"00:04:59 归当天", at(2026, 11, 14, 0, 4, 59), at(2026, 11, 14, 0, 5, 0)},
+		// UTC 16:30 = CST 次日 00:30：必须按 CST 的自然日算，不是 UTC/Local 的「自然日」。
+		{"UTC 输入按 CST 自然日算", time.Date(2026, 11, 13, 16, 30, 0, 0, time.UTC), at(2026, 11, 15, 0, 5, 0)},
+	}
+
+	for _, c := range cases {
+		got := nextDailyRun(c.now)
+		if !got.Equal(c.want) {
+			t.Errorf("%s: nextDailyRun(%s) = %s，want %s",
+				c.name, c.now.Format(time.RFC3339), got.Format(time.RFC3339), c.want.Format(time.RFC3339))
+		}
+		// 用 CST 时钟读数比对，不硬绑 Location 字符串（无 tzdata 环境会退化成 FixedZone）。
+		if gh, wh := got.In(loc).Format("2006-01-02 15:04:05"), c.want.In(loc).Format("2006-01-02 15:04:05"); gh != wh {
+			t.Errorf("%s: CST 读数 = %s，want %s", c.name, gh, wh)
+		}
+		if !got.After(c.now) {
+			t.Errorf("%s: 返回值 %s 不晚于 now %s", c.name, got, c.now)
+		}
+	}
+}
+
+// 间隔由 nextDailyRun 推出来：同一时刻反复算，延迟落在 (0, 24h] 内且每天恰好一次。
+func TestDailyRecordDelayMatchesNextDailyRun(t *testing.T) {
+	loc := priceLocation()
+	now := time.Date(2026, 11, 13, 15, 0, 0, 0, loc)
+	want := nextDailyRun(now).Sub(now)
+	if got := dailyRecordDelay(now); got != want {
+		t.Errorf("dailyRecordDelay = %s，want %s", got, want)
+	}
+	// 15:00 → 次日 00:05 = 9h5m。钉绝对值，固定 24h 的旧行为在这里必红。
+	if want != 9*time.Hour+5*time.Minute {
+		t.Errorf("15:00 的延迟 = %s，want 9h5m（次日 00:05）", want)
+	}
+	// 一整天里每个整点算一次，延迟都必须是正的、不超过 24h（旧实现固定 24h 无法满足 00:05 对齐）。
+	for h := 0; h < 24; h++ {
+		n := time.Date(2026, 11, 13, h, 0, 0, 0, loc)
+		if d := dailyRecordDelay(n); d <= 0 || d > 24*time.Hour {
+			t.Errorf("%02d:00 的延迟 = %s，不在 (0, 24h] 内", h, d)
+		}
+	}
+}
+
+// 启动补跑保留：首次等待仍是 90s，且 Start 用的就是这个值。
+func TestDailyRecordFirstWaitIsStartupDelay(t *testing.T) {
+	if got := dailyRecordFirstWait(); got != 90*time.Second {
+		t.Errorf("dailyRecordFirstWait = %s，want 90s", got)
+	}
+	if dailyRecordFirstWait() != dailyRecordStartupDelay {
+		t.Errorf("首次等待与 dailyRecordStartupDelay 不一致")
+	}
+}

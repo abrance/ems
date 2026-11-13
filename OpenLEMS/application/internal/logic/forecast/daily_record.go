@@ -33,12 +33,43 @@ import (
 const (
 	// dailyRecordStartupDelay 启动后延迟：等数据库与设置就绪，避免和首次数据加载抢资源。
 	dailyRecordStartupDelay = 90 * time.Second
-	// dailyRecordInterval 每天一次。进程长期运行时按启动时刻每 24h 跑一次；
-	// 重启会补跑一次，唯一键保证不会堆重复行。
-	dailyRecordInterval = 24 * time.Hour
+	// dailyRecordDailyOffset 每天的执行偏移：Asia/Shanghai 自然日 00:05 跑一次。
+	//
+	// 原来是固定 24h（按进程启动时刻起算），实际节奏等于重启频率而不是自然日：
+	// 线上 11-09、11-10 一天留痕都没有，11-13 一天写了两次，复盘页
+	// 「预测留痕自 X 起积累」的承诺因此不成立。改成自然日对齐后，只要进程活着，
+	// 每天固定一条；重启仍由 90s 补跑兜住，唯一键保证不堆重复行。
+	dailyRecordDailyOffset = 5 * time.Minute
 	// dailyRecordSource 留痕来源说明，与页面手动预测保持同一口径。
 	dailyRecordSource = "官方直采日均成交价"
 )
+
+// dailyRecordNow 取「现在」，生产用 time.Now，单测替换成固定时刻。
+var dailyRecordNow = time.Now
+
+// dailyRecordFirstWait 启动后的首次等待：90s 补跑，重启也能补上当天那条。
+func dailyRecordFirstWait() time.Duration { return dailyRecordStartupDelay }
+
+// nextDailyRun 返回 now 之后的下一次执行时刻：Asia/Shanghai 自然日 00:05。
+//
+// 严格 After：now 恰好是 00:05:00 时返回次日 00:05，不会原地重跑。
+// 跨月/跨年/闰日靠 time.Date 的归一化（day+1 由它自己进位），不手算月份天数。
+func nextDailyRun(now time.Time) time.Time {
+	loc := priceLocation()
+	local := now.In(loc)
+	next := time.Date(local.Year(), local.Month(), local.Day(),
+		0, int(dailyRecordDailyOffset/time.Minute), 0, 0, loc)
+	if !next.After(local) {
+		next = time.Date(local.Year(), local.Month(), local.Day()+1,
+			0, int(dailyRecordDailyOffset/time.Minute), 0, 0, loc)
+	}
+	return next
+}
+
+// dailyRecordDelay 距下一次自然日执行还有多久。
+func dailyRecordDelay(now time.Time) time.Duration {
+	return nextDailyRun(now).Sub(now)
+}
 
 // dailyRecordMarkets 与预测页/预测接口支持的市场一致（resolvePriceSpec 只认这两个）。
 var dailyRecordMarkets = []string{"ahead", "real"}
@@ -57,19 +88,21 @@ func Start(ctx context.Context) {
 	}
 
 	go func() {
-		timer := time.NewTimer(dailyRecordStartupDelay)
+		timer := time.NewTimer(dailyRecordFirstWait())
 		defer timer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				RunDailyRecordOnce(ctx, time.Now())
-				timer.Reset(dailyRecordInterval)
+				RunDailyRecordOnce(ctx, dailyRecordNow())
+				// 跑完再取时刻算间隔：一轮耗时长也不会算出负延迟导致立刻重跑。
+				timer.Reset(dailyRecordDelay(dailyRecordNow()))
 			}
 		}
 	}()
-	c_log.Infof(ctx, "每日电价预测留痕已启动：每 %s 一次（首次 %s 后）", dailyRecordInterval, dailyRecordStartupDelay)
+	c_log.Infof(ctx, "每日电价预测留痕已启动：每天 Asia/Shanghai %02d:%02d 跑一次（首次 %s 后补跑）",
+		int(dailyRecordDailyOffset/time.Hour), int(dailyRecordDailyOffset/time.Minute)%60, dailyRecordStartupDelay)
 }
 
 // RunDailyRecordOnce 跑一轮：每个市场各写一条「生成日次日」的 day 粒度留痕。
