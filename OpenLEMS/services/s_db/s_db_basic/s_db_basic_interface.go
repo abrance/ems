@@ -203,6 +203,14 @@ type ISpotExtractService interface {
 	ConfirmMetrics(ctx context.Context, reportDate, dataset, operator string) (int, error)
 	// CountMetricsByReport 按日报日一次性统计未复核/已确认条数（列表页用，避免 N+1）
 	CountMetricsByReport(ctx context.Context) (map[string]SpotMetricCounts, error)
+	// CountMetricsByOrigin 按 origin 分组数全表行数，**不加任何 origin 白名单**，
+	// 用来回答「库里到底有多少行」。
+	//
+	// 为什么必须单独一个方法而不是复用 CountMetricsByReport / ListMetricsByRunDateRange：
+	// 那两个是业务口径（只看 manual / pm-api），拿它们数行数会把 ocr/cv 漏掉。
+	// 2026-11-14 就因为用业务白名单数档位行，得出「453 行 cv 数据丢了」的错结论
+	// （线上一直在位）。数据面统计只能用这个。
+	CountMetricsByOrigin(ctx context.Context) (map[string]int, error)
 	// ListMetricAudit 查询某份日报的指标变更审计
 	ListMetricAudit(ctx context.Context, reportDate string, limit int) ([]*s_db_model.SSpotMetricAuditModel, error)
 	// ListMetrics 按日报查询指标（含该日报里滞后运行日的数据）
