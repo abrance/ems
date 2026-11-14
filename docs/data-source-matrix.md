@@ -173,7 +173,15 @@ GDPM_DB=/tmp/lems-db.sqlite3 go test ./internal/logic/forecast/ \
   -run TestDailyBacktestAgainstRealDB -v -timeout 270s
 ```
 
-真值：`gd_spot_metric` 官方日前加权均价，**最新到 2026-11-11**（滞后 2 天，实时 T+2）。
+真值：`gd_spot_metric` 官方日前加权均价。**下表是 2026-11-13 取数的快照：当时库里最新到 2026-11-11，
+相对查询日滞后 2 天。** 这 2 天**不是**「在等实时腿的 T+2」：那一列是日前腿，源站按
+`report_of()` 把日前与日报挂在同一天（`report_date = run_date`），实时腿才是 T+2。
+所以这里用「采集滞后」描述，不用「T+2」。
+
+腿与滞后上限以 `docs/truth-lag-calibration.md` 的实测结论与
+`OpenLEMS/web/src/utils/dailyLag.ts` 的 `NORMAL_LAG`（日前 1 / 实时 2）为准，本条不另立一套。
+注意那份手册同时写明：日前是不是真的 T+0 发布时刻上**尚未跑满 3 天增量样本验证**，
+能确认的只是 `report_date = run_date` 这个常量。
 
 | 目标日 | 预测 | 实际 | 误差 |
 |---|---|---|---|
