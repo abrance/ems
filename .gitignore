@@ -20,3 +20,6 @@ venv/
 # 编辑器 / 系统
 .DS_Store
 *.swp
+
+# tools/gdpm 的文章链接清单：本地数据，不入库
+/tools/gdpm/links.tsv
