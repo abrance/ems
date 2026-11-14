@@ -1,14 +1,29 @@
 name: Go CI
 
 on:
+  # 只跑 OpenLEMS/ 下的改动。docs/、deploy/、tools/ 之类的改动不需要编 C++/前端/25 个 Go 模块。
+  # web/ 也算在内：go-ci 里有 //go:embed web.zip，前端一改它就必须重编。
   pull_request:
+    paths:
+      - "OpenLEMS/**"
+      - ".github/workflows/go-ci.yml"
   push:
     branches:
       - main
       - master
+    paths:
+      - "OpenLEMS/**"
+      - ".github/workflows/go-ci.yml"
 
 permissions:
   contents: read
+
+# PR 上连推时取消上一次：这个 workflow 要编 hexlib + 前端 + 跑全部工作区模块，
+# 不取消的话一次 force-push 就把旧的三套跑完，白烧额度。
+# main 上不取消：每个合入 commit 的结论都要留痕。
+concurrency:
+  group: go-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go-ci:

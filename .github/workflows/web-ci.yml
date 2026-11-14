@@ -1,14 +1,30 @@
 name: Web CI
 
 on:
+  # 只跑前端相关改动。纯 Go 改动（application/ services/ ...）不需要跑前端 CI。
+  # script/ 算在内：docker-web-stage 构建的是 OpenLEMS/script/Dockerfile.dev。
   pull_request:
+    paths:
+      - "OpenLEMS/web/**"
+      - "OpenLEMS/script/**"
+      - ".github/workflows/web-ci.yml"
   push:
     branches:
       - main
       - master
+    paths:
+      - "OpenLEMS/web/**"
+      - "OpenLEMS/script/**"
+      - ".github/workflows/web-ci.yml"
 
 permissions:
   contents: read
+
+# PR 上连推时取消上一次：这里光 web-ci 一个 job 就要 npm ci + build，
+# browser-check 与 docker-web-stage 又各重跑一遍，不取消就是成倍烧额度。
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   web-ci:
@@ -85,8 +101,31 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # 需要 base 提交才能 diff 出本次改了哪些文件
+          fetch-depth: 0
+
+      # 这个 job 验的是 Dockerfile 的 node 阶段与 alpine/musl 上的 npm ci，
+      # 与业务源码无关——只有 Dockerfile 或前端依赖清单动了才需要重建。
+      - name: 判断是否需要构建
+        id: gate
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE}" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          if git diff --name-only "${BASE}" HEAD \
+            | grep -qE '^(OpenLEMS/script/Dockerfile\.dev|OpenLEMS/web/package(-lock)?\.json)$'; then
+            echo "docker=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "docker=false" >> "${GITHUB_OUTPUT}"
+            echo "Dockerfile 与前端依赖清单都没动，跳过 docker web 阶段构建"
+          fi
 
       - name: Build web stage
+        if: steps.gate.outputs.docker == 'true'
         run: |
           docker build \
             --target web \
@@ -98,6 +137,7 @@ jobs:
       # 而宿主（ubuntu runner）有 python3 —— 顺带用另一个独立实现再验一遍我们的 zip 写入
       # （打包脚本是手写的 zip 结构，值得让 python 的 zipfile 也读一遍）。
       - name: 取出产物并校验（在宿主上用 python）
+        if: steps.gate.outputs.docker == 'true'
         run: |
           cid=$(docker create lems-web-stage:pr)
           docker cp "$cid:/out/web.zip" /tmp/web.zip

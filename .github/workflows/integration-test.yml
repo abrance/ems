@@ -4,10 +4,17 @@ name: Integration (test_plan)
 # 托管 runner 上不需要任何中间件或 secret。将来出现真依赖中间件的场景时，
 # 在 "生成 .env.integration" 一步接 secrets，并把该场景挪到夜间。
 on:
+  # 只跑 OpenLEMS/ 下的改动（集成脚本在 OpenLEMS/script 里，模块在 OpenLEMS/ 下）。
   pull_request:
+    paths:
+      - "OpenLEMS/**"
+      - ".github/workflows/integration-test.yml"
   push:
     branches:
       - main
+    paths:
+      - "OpenLEMS/**"
+      - ".github/workflows/integration-test.yml"
   schedule:
     - cron: "0 18 * * *" # 02:00 Asia/Shanghai
   workflow_dispatch:
