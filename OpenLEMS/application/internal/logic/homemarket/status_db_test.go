@@ -226,9 +226,9 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 				if st.FetchedAt == "" {
 					t.Error("lagging 应给出上次成功时间 fetchedAt")
 				}
-				// *gtime.Time.Format 是 PHP 风格："Y-m-d H:i:s" 才是真日期，传 Go 的
-				// layout（"2006-01-02 15:04:05"）会被当成字面量原样吐出来。两种写法都不报错，
-				// 只是页面印出一串假日期。
+				// *gtime.Time.Format 是 PHP 风格，正确写法就是 "Y-m-d H:i:s"（status.go 用的
+				// 就是这个，不要改成 Go layout）。若误写成 Go 的 layout（"2006-01-02 15:04:05"），
+				// 它不报错，而是把格式串当字面量原样印出来 —— 页面于是显示一串假日期。
 				//
 				// 只比对这两个字面量不够，两道关都要过：
 				//  1. 形态必须是 YYYY-MM-DD HH:MM:SS（拦住 "Y-m-d"、"Y-m-d H:i" 这类错 layout）；
@@ -236,7 +236,7 @@ func TestMarketStatusDerivesFourStates(t *testing.T) {
 				//     形态合法、也能解析，但它是 2006 年 —— 只靠形态拦不住）。
 				// seed 里的 last_ok_at 就是 gtime.Now()，所以真值必然贴着 now。
 				if !fetchedAtRe.MatchString(st.FetchedAt) {
-					t.Errorf("fetchedAt = %q，不是 YYYY-MM-DD HH:MM:SS（*gtime.Time.Format 要 PHP 风格 Y-m-d H:i:s）", st.FetchedAt)
+					t.Errorf("fetchedAt = %q，不是 YYYY-MM-DD HH:MM:SS（*gtime.Time.Format 是 PHP 风格，正确写法就是 Y-m-d H:i:s；写成 Go layout 才会印出假日期）", st.FetchedAt)
 				} else if got, err := time.ParseInLocation("2006-01-02 15:04:05", st.FetchedAt, time.Local); err != nil {
 					t.Errorf("fetchedAt = %q 解析不回时间: %v", st.FetchedAt, err)
 				} else if d := time.Since(got); d < 0 || d > time.Hour {
