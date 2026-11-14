@@ -16,20 +16,20 @@ import (
 type sSpotExtractServiceImpl struct{}
 
 // spotOriginManual 人工确认/修订过的 origin 值。
-// 口径：origin 在 spotOriginConfirmed 内才算「有权威值」——
 //
-//	manual  = 人工确认或修订过；
-//	pm-api  = 广东电力交易中心官方接口直采（2026-11-11 起唯一权威源，取代 OCR）。
-//
-// ocr/cv/void 以及老库空串都是未复核或已作废。
+// 取值与三组口径都在 s_db_model 里定（SpotOriginsTrusted / Unreviewed / Inventory），
+// 本文件只做别名 —— 原先这里自己存一份字符串常量，导致「业务白名单」与「数据面统计」
+// 两套口径散在包与包之间，2026-11-14 因此漏读 453 行 origin=cv。
 const (
-	spotOriginManual = "manual"
-	spotOriginPmAPI  = "pm-api"
+	spotOriginManual = s_db_model.SpotOriginManual
+	spotOriginPmAPI  = s_db_model.SpotOriginPmAPI
 	// spotOriginVoid 已被官方直采值取代的旧值：保留可查，但**永远**不再参与确认/统计
-	spotOriginVoid = "void"
+	spotOriginVoid = s_db_model.SpotOriginVoid
 )
 
-var spotOriginConfirmed = []string{spotOriginManual, spotOriginPmAPI}
+// spotOriginConfirmed 业务口径白名单：能进聚合的那两个 origin。
+// **不得**用它做行数/覆盖率统计（那会把 ocr/cv 漏掉，见 s_db_model 里的 const 注释）。
+var spotOriginConfirmed = s_db_model.SpotOriginsTrusted
 
 // isConfirmedOrigin 该 origin 是否已是可信值（无需再复核）。与 application 侧
 // spotreport.IsConfirmed 同一口径；两边都能"确认"数据，口径必须一致。
@@ -131,7 +131,7 @@ func (s *sSpotExtractServiceImpl) ReplaceMetrics(ctx context.Context, reportDate
 		rows := make([]g.Map, 0, len(metrics))
 		for _, m := range metrics {
 			if m.Origin == "" {
-				m.Origin = "ocr"
+				m.Origin = s_db_model.SpotOriginOCR
 			}
 			rows = append(rows, g.Map{
 				s_db_model.FieldSpotMetricReportDate:    m.ReportDate,
@@ -320,6 +320,32 @@ func (s *sSpotExtractServiceImpl) CountMetricsByReport(ctx context.Context) (map
 			c.Pending += r.N
 		}
 		out[r.ReportDate] = c
+	}
+	return out, nil
+}
+
+// CountMetricsByOrigin 按 origin 分组数全表行数，**不加任何白名单**。
+//
+// 这个方法是「数据面」专用的：库里有几行就读出几行。业务口径的白名单定义在
+// s_db_model.SpotOriginsTrusted，拿它做行数统计会漏掉 ocr/cv（2026-11-14 因此
+// 误报 453 行 cv 档位价丢失）。老库里 origin 为 NULL 的行归入空串 key，不丢。
+func (s *sSpotExtractServiceImpl) CountMetricsByOrigin(ctx context.Context) (map[string]int, error) {
+	var rows []struct {
+		Origin string `orm:"origin"`
+		N      int    `orm:"n"`
+	}
+	// 用 COALESCE 把 NULL 归一成空串：gf 的 Scan 对 NULL string 会报错或给零值，
+	// 而这两种都看不出「有行没被归组」—— 空串 key 至少能让它显形。
+	err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+		Fields("COALESCE(" + s_db_model.FieldSpotMetricOrigin + ", '') AS origin, count(*) as n").
+		Group("COALESCE(" + s_db_model.FieldSpotMetricOrigin + ", '')").
+		Scan(&rows)
+	if err != nil {
+		return nil, errors.Wrap(err, "按 origin 统计指标行数失败")
+	}
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		out[r.Origin] += r.N
 	}
 	return out, nil
 }

@@ -26,6 +26,41 @@ const (
 	FieldSpotMetricExtractorVers = "extractor_version"
 )
 
+// gd_spot_metric.origin 的全部取值，与「哪些 origin 算数」的三组口径。
+//
+// **为什么要提到 model 层写成一处常量**：origin 是复核状态机（见 logic/spotreport/review.go），
+// 而它被两类完全不同的查询消费，两类口径必须分开，混用就会得出相反结论：
+//
+//	SpotOriginsTrusted    = {manual, pm-api}      业务口径：趋势/复盘真值/均价统计只认这两个
+//	SpotOriginsUnreviewed = {ocr, cv}             待人工复核，不进业务口径
+//	SpotOriginsInventory  = 上面四个 + void       数据面：库里到底有多少行
+//
+// 踩过的坑（2026-11-14）：用业务口径的白名单去数「库里还剩多少行」，cv 的 453 行档位价
+// 全被漏掉，得出「数据丢了」的错误结论（线上 453 行一直在位）。所以：
+//
+//   - 「数据有没有丢 / 一共多少行 / 覆盖率」→ 只能用 SpotOriginsInventory
+//   - 「这条值能不能进聚合」→ 用 SpotOriginsTrusted
+//
+// 新增 origin 时三组都要过一遍：只加进 Trusted 会让它凭空出现在业务口径里，
+// 只加进 Inventory 会让它永久停在待复核。
+const (
+	SpotOriginOCR    = "ocr"
+	SpotOriginCV     = "cv"
+	SpotOriginManual = "manual"
+	SpotOriginPmAPI  = "pm-api"
+	// SpotOriginVoid 已被官方直采值取代的旧值：保留可查，但永远不进业务口径
+	SpotOriginVoid = "void"
+)
+
+var (
+	// SpotOriginsTrusted 业务口径：这些行可以进趋势聚合、复盘真值、日均价统计
+	SpotOriginsTrusted = []string{SpotOriginManual, SpotOriginPmAPI}
+	// SpotOriginsUnreviewed 待复核：既不进业务口径，也不属于作废
+	SpotOriginsUnreviewed = []string{SpotOriginOCR, SpotOriginCV}
+	// SpotOriginsInventory 数据面：统计行数/覆盖率时用这个，**不许**用 Trusted 代替
+	SpotOriginsInventory = []string{SpotOriginOCR, SpotOriginCV, SpotOriginManual, SpotOriginPmAPI, SpotOriginVoid}
+)
+
 // SSpotMetricModel 现货日报结构化指标。
 //
 // 指标归属「产出它的那份日报」，唯一键为 (report_date, run_date, dataset, scope, metric)。
