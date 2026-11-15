@@ -22,9 +22,11 @@ on:
 permissions:
   contents: read
 
+# PR 上连推时取消上一次：集成场景要起服务 + 跑全链路，不取消就是每推一次全跑完。
+# main / schedule 上不取消：每个合入 commit 与定时跑的结论都要留痕，不能被后一次推送抹掉。
 concurrency:
   group: integration-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   integration:
