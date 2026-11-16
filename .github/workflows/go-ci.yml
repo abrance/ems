@@ -44,8 +44,6 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: OpenLEMS/go.work
-          cache: true
-          cache-dependency-path: OpenLEMS/application/go.sum
 
       - name: Build hexlib
         working-directory: OpenLEMS/@cpp/hexlib
@@ -57,8 +55,6 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: OpenLEMS/web/package.json
-          cache: npm
-          cache-dependency-path: OpenLEMS/web/package-lock.json
 
       - name: Build frontend (产出 application/manifest/web.zip)
         working-directory: OpenLEMS/web
@@ -103,10 +99,6 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: OpenLEMS/go.work
-          cache: true
-          cache-dependency-path: |
-            OpenLEMS/go.work.sum
-            OpenLEMS/**/go.sum
 
       - name: Build hexlib
         working-directory: OpenLEMS/@cpp/hexlib

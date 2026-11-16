@@ -45,10 +45,6 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: OpenLEMS/go.work
-          cache: true
-          cache-dependency-path: |
-            OpenLEMS/go.work.sum
-            OpenLEMS/**/go.sum
 
       # 脚本会先构建 @cpp/hexlib；这里只预热模块缓存，避免首次跑脚本超时
       - name: Download dependencies
