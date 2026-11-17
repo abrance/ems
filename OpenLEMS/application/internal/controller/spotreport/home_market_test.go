@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"application/api/spotreport/v1"
 	"application/internal/logic/homemarket"
@@ -79,6 +80,22 @@ func setupHomeMarketDB(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+// shiftHomeMarketDates 把夹具的两路数据平移到「homeDays/nodeDays 天前」，
+// 供依赖 now 的滞后判定类用例使用。夹具的派生用例（断言具体日期字符串的）
+// 不要调它。
+func shiftHomeMarketDates(t *testing.T, homeDays, nodeDays int) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := g.DB().Exec(ctx, `UPDATE gd_home_24h SET price_date = ?`,
+		time.Now().AddDate(0, 0, -homeDays).Format("2006-01-02")); err != nil {
+		t.Fatalf("平移 home24h 日期失败: %v", err)
+	}
+	if _, err := g.DB().Exec(ctx, `UPDATE gd_node_price SET run_date = ?`,
+		time.Now().AddDate(0, 0, -nodeDays).Format("2006-01-02")); err != nil {
+		t.Fatalf("平移 nodePrice 日期失败: %v", err)
 	}
 }
 
@@ -239,6 +256,11 @@ func TestGetHome24hPartialDayOmitsAllDayStats(t *testing.T) {
 // 一旦有人顺手把 points/price 塞进来，页面就有机会在失败时画出 0 元的曲线。
 func TestGetHomeMarketStatusShape(t *testing.T) {
 	setupHomeMarketDB(t)
+	// 状态里的 lagDays 是相对 now 现算的，而夹具用的是固定日期，跑到某天就必然
+	// 超出 expectedLag（home24h 8 天、nodePrice 2 天），断言「state=ok」会自然过期。
+	// 这里把两路数据落到最近，让本用例只验形状与「滞后在预期内」的口径。
+	shiftHomeMarketDates(t, 3, 1)
+
 	c := &ControllerV1{}
 	res, err := c.GetHomeMarketStatus(context.Background(), &v1.GetHomeMarketStatusReq{})
 	if err != nil {
