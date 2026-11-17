@@ -22,7 +22,7 @@ jobs:
       cache: false
       buildkit-config: |
         [registry."docker.io"]
-          mirrors = ["https://ghcr.chenby.cn", "https://mirror.ccs.tencentyun.com"]
+          mirrors = ["https://mirror.ccs.tencentyun.com"]
       context: tools/gdpm
       file: tools/gdpm/Dockerfile
       image-name: abrance/ems-gdpm
