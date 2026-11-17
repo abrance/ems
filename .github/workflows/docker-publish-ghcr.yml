@@ -14,15 +14,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: abrance/yoc/.github/workflows/docker-publish-ghcr.yml@v1.1.0
+    uses: abrance/yoc/.github/workflows/docker-publish-ghcr.yml@v1.1.1
     with:
-      # 自托管 runner 的 buildkit 容器不继承宿主 daemon.json 的 registry-mirrors，
-      # 必须显式注入；GitHub 缓存后端从 cloud2 上行仅 30 KB/s，故关闭 gha 缓存。
-      runs-on: '["self-hosted","linux","x64","ems"]'
-      cache: false
-      buildkit-config: |
-        [registry."docker.io"]
-          mirrors = ["https://mirror.ccs.tencentyun.com"]
       context: OpenLEMS
       file: OpenLEMS/script/Dockerfile.dev
       image-name: ${{ github.repository }}

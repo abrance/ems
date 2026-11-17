@@ -28,7 +28,7 @@ concurrency:
 jobs:
   go-ci:
     name: Go CI
-    runs-on: [self-hosted, linux, x64, ems]
+    runs-on: ubuntu-latest
     env:
       CGO_ENABLED: "1"
       CGO_LDFLAGS: "-lm"
@@ -83,7 +83,7 @@ jobs:
   # 而不一致的表现是「新模块静默不受保护」——正是这个 job 要防的事。
   workspace-ci:
     name: Workspace CI（其它模块）
-    runs-on: [self-hosted, linux, x64, ems]
+    runs-on: ubuntu-latest
     env:
       CGO_ENABLED: "1"
       CGO_LDFLAGS: "-lm"
