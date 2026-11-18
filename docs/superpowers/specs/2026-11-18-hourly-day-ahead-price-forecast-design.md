@@ -7,9 +7,15 @@
 
 「分析预测 → 决策支持 → 日前电价预测」目前只有一张**日均**图：
 
-- 接口：`GET /api/forecast/price`（默认 `grain=day`）
+- 接口：`GET /api/forecast/price`（不传 `grain`，落到 `day`）
 - 序列源：`gd_spot_metric` 的官方直采日均成交价，1 点/天
 - 前端：`OpenLEMS/web/src/pages/scene/DecisionView.vue`
+
+现状的问题：**数据源靠 `grain` 隐式决定**（`day` → `gd_spot_metric`，`intraday` → `gd_metric.csv`）。
+两个数据源的锚点规则、缺失判定、可预测长度、留痕来源都不同，`grain` 一词把
+「多细的时间粒度」和「哪份数据」混成了一件事，再加第三路（官网 24 点）就会开始靠约定猜。
+所以本设计把数据源提升成**显式请求参数 `source`**，`grain` 只表达采样步长，
+两者交叉校验，不一致直接报参数错误。
 
 15 分钟（96 点）分时预测已停用：它依赖第三方 `gd_metric.csv`，实际值止于 2026-10-02，官方信息披露匿名接口没有 96 点出清价。
 
@@ -27,8 +33,9 @@
 ### 目标
 
 1. 在决策支持页「日前电价预测」下方新增一张图：**D+1 日 24 个整点**的日前电价预测（含 10%/90% 分位）。
-2. 后端扩 `/api/forecast/price`，新增 `grain=hour`，复用现有缓存、`forceRefresh`、分位与留痕链路。
+2. 后端扩 `/api/forecast/price`：新增 `grain=hour` 与显式 `source` 参数，复用现有缓存、`forceRefresh`、分位与留痕链路。
 3. 图上和文案明确：锚点是库内最新完整 24 点日 D，预测的是 D+1，不是“今天/明天”的实时滚动预测。
+4. `source` 与 `grain` 一一对应、交叉校验；三路数据源各有独立 loader，不共用序列构造逻辑。
 
 ### 非目标
 
@@ -37,6 +44,8 @@
 - 不加 1/3/5 天切换；`hour` 只出 D+1 的 24 点。
 - 不新增独立接口，不新增前端路由。
 - 不改 `gd_spot_metric` 的日均预测口径。
+- 不把三路数据源合并成一份「统一序列」再喂模型；合并会掩盖各自的缺口语义。
+- 不为兼容性删除 `grain` 的隐式推导：不传 `source` 时仍按 `grain` 推导，老调用方不受影响。
 
 ## 3. 数据源与口径
 
@@ -49,6 +58,7 @@
 | 锚点 D | 区间内**最后一个 24 点齐全**的自然日 |
 | 预测目标 | D+1 的 `00:00 … 23:00`，共 24 点 |
 | 历史输入 | 结束于 D 的连续 `historyDays` 个完整日，每天 24 点；默认 14 天，最多 30 天，至少 7 天 |
+| 数据源参数 | `source=home24h`、`grain=hour`（见 §4.1） |
 | 来源角标 | 官网·24点 |
 
 口径约束：
@@ -59,12 +69,38 @@
 
 ## 4. API 契约
 
-`GET /api/forecast/price?market=ahead&grain=hour&historyDays=14&horizonDays=1&quantiles=0.1,0.5,0.9&forceRefresh=false`
+### 4.1 请求参数：数据源 + 粒度
 
-响应沿用 `GetPriceForecastRes`，关键字段：
+`source` 决定**读哪份数据、用哪套预测逻辑**；`grain` 决定**采样步长**。两者必须自洽。
+
+| `source` | 含义 | 数据表 / 源 | 允许的 `grain` | loader |
+|---|---|---|---|---|
+| `spot_metric` | 官方披露接口直采（pm-api）日均成交价 | `gd_spot_metric` | `day` | `LoadPrice` |
+| `home24h` | 官方主页网关 24 点分时 | `gd_home_24h` | `hour` | `loadHourCached`（新增） |
+| `gd_metric_csv` | 第三方电网日指标 CSV（已停更） | `gd_metric.csv` | `intraday` | `loadIntradayCached` |
+
+规则：
+
+- `source` 与 `grain` 同时给且不匹配（如 `source=home24h&grain=day`）→ `400 CodeInvalidParameter`，消息列出该 source 允许的 grain。
+- 只给 `grain` 不给 `source` → 按上表反推 source（保持现有调用方行为：`day` / `intraday` 不变，`hour` → `home24h`）。
+- 只给 `source` 不给 `grain` → 按上表取唯一合法 grain。
+- 都不给 → `source=spot_metric`、`grain=day`。
+- 未知取值 → `400`，不回落到默认值（静默回退会让人以为在看官方日频数据）。
+- 响应里回显 `source`，前端据此决定角标文案，不靠猜 `grain`。
+
+请求示例：
+
+```
+GET /api/forecast/price?market=ahead&source=home24h&grain=hour&historyDays=14&horizonDays=1&quantiles=0.1,0.5,0.9&forceRefresh=false
+```
+
+### 4.2 响应
+
+响应沿用 `GetPriceForecastRes`，新增 `source` 字段；`hour` 粒度关键字段：
 
 | 字段 | hour 粒度取值 |
 |---|---|
+| `source` | `home24h` |
 | `grain` | `hour` |
 | `stepMinutes` | `60` |
 | `from` / `to` | 历史首日 / 锚点 D |
@@ -80,15 +116,18 @@
 
 `horizonDays` 在 `hour` 粒度下固定为 1；传 0 或其他值都按 1 处理，API 注释写明。
 
+
 ## 5. 后端设计
 
 ### 5.1 粒度常量与解析
 
 - `services/s_db/s_db_model/s_db_model_price_forecast_s.go`
   - 新增 `ForecastGrainHour = "hour"`。
-- `application/internal/logic/forecast/price.go` 的 `ParseGrain`
-  - 接受 `hour` / `hourly` / `24`，归一化为 `ForecastGrainHour`。
-  - 现有 `day` / `intraday` 行为不变。
+  - 新增数据源常量：`PriceSourceSpotMetric = "spot_metric"`、`PriceSourceHome24h = "home24h"`、`PriceSourceGdMetricCSV = "gd_metric_csv"`。
+- `application/internal/logic/forecast/price.go`
+  - `ParseGrain`：接受 `hour` / `hourly` / `24`，归一化为 `ForecastGrainHour`；现有 `day` / `intraday` 行为不变。
+  - 新增 `ParsePriceSource(source, grain string) (source, grain string, err error)`：按 §4.1 的对应表做推导与交叉校验，是唯一的校验入口，控制器不复制这套规则。
+  - 新增 `priceSourceSpec` 表：`source → { 数据表/数据集名, 允许 grain, loader 分派标记 }`，`LoadPriceAny` 只认这张表。
 
 ### 5.2 区间查询
 
@@ -124,17 +163,26 @@ ListHome24hRange(ctx context.Context, from, to string) ([]*s_db_model.SHome24hMo
 
 改 `application/internal/logic/forecast/price_any.go`：
 
-- `LoadPriceAny`：`grain == hour` 走 `loadHourCached`，其余分支不变。
-- `loadHourCached`：缓存键 `forecast:price24:<market>:<historyDays>:1:<quantiles>`，复用 `withForecastCache` 和 `ForceRefresh`。
+- `LoadPriceAny`：先 `ParsePriceSource` 得到 `(source, grain)`，再按 `source` 分派：
+  `spot_metric → loadDaily`、`home24h → loadHourCached`、`gd_metric_csv → loadIntradayCached`。
+  分派写在一处，`if grain == ...` 的隐式判断删掉。
+- `loadHourCached`：缓存键 `forecast:price:<source>:<market>:<historyDays>:1:<quantiles>`，复用 `withForecastCache` 和 `ForceRefresh`；
+  同一次改造把 `loadDaily` / `loadIntradayCached` 的缓存键也补上 `source` 段，避免以后两条源出同一键。
+- `TPriceForecastResult` 新增 `Source` 字段，一路带到 DTO。
 - `formatTargetTime`：`day` 仍是 `YYYY-MM-DD`；`hour` 与 `intraday` 一样输出 `YYYY-MM-DD HH:MM`，整点即 `HH:00`。
 - `targetAfterGeneratedOn`：`hour` 与 `intraday` 同样保留同日后续时段（虽然本次只出 D+1，不会触发）。
-- `recordForecastPoints`：`hour` 的 `source` 写 `官网主页24点分时`，不再落到默认的 `gd_metric.csv`。
+- `recordForecastPoints`：`hour` 的留痕来源文案写 `官网主页24点分时`（对应库里 `gd_price_forecast.source` 列），不再落到默认的 `gd_metric.csv`。
+  注：留痕的 `source` 列是给人看的来源文案，与请求参数 `source`（`home24h`）不是一个东西，别合并。
 
 `generatedOn` 用锚点 D，不用今天；这样留痕的“当时预测”语义才成立。
 
 ### 5.5 DTO 注释
 
-`application/api/forecast/v1/forecast_price.go` 更新注释：`grain=hour` = 官网主页 24 点、`TargetTime` 为 `YYYY-MM-DD HH:00`、`AtTime` 为 `HH:00`。不改字段结构。
+`application/api/forecast/v1/forecast_price.go`：
+
+- 请求新增 `Source string`（`dc:"数据源：spot_metric（默认）/ home24h / gd_metric_csv，与 grain 交叉校验"`）。
+- 响应 `PriceForecast` 新增 `Source string`。
+- 更新注释：`grain=hour` = 官网主页 24 点、`TargetTime` 为 `YYYY-MM-DD HH:00`、`AtTime` 为 `HH:00`。
 
 ## 6. 前端设计
 
@@ -142,9 +190,9 @@ ListHome24hRange(ctx context.Context, from, to string) ([]*s_db_model.SHome24hMo
 
 `OpenLEMS/web/src/api/forecast.ts`：
 
-- `PriceForecast.grain` / `fetchPriceForecast` 参数注释补 `hour`。
+- `PriceForecast` 新增 `source: string`；`fetchPriceForecast` 参数补 `source?: 'spot_metric' | 'home24h' | 'gd_metric_csv'`，并补 `grain` 的 `hour` 取值。
 - `PriceForecastPoint.atTime` 注释补 `hour`。
-- 不改类型形状，不新增请求函数。
+- 不改其他类型形状，不新增请求函数。
 
 ### 6.2 决策支持页
 
@@ -152,8 +200,8 @@ ListHome24hRange(ctx context.Context, from, to string) ([]*s_db_model.SHome24hMo
 
 - 新增 `priceHour = ref<PriceForecast | null>(null)`、`loading.priceHour`、`errors.priceHour`。
 - `loadForecast(force)` 从 `Promise.allSettled([load, dayPrice])` 扩成三路：
-  - `fetchPriceForecast({ historyDays: 60, horizonDays: 5, ... })`（原日均图）
-  - `fetchPriceForecast({ grain: 'hour', historyDays: 14, horizonDays: 1, ... })`（新小时图）
+  - `fetchPriceForecast({ source: 'spot_metric', historyDays: 60, horizonDays: 5, ... })`（原日均图，显式带 source）
+  - `fetchPriceForecast({ source: 'home24h', grain: 'hour', historyDays: 14, horizonDays: 1, ... })`（新小时图）
 - 「刷新预测（跳过缓存）」同时穿透两路缓存。
 - 原「日前电价预测」PanelBox 保持不变，只在它下面加一个新 PanelBox：
   - 标题：`日前电价预测 · 小时（24 点）`
@@ -175,6 +223,7 @@ ListHome24hRange(ctx context.Context, from, to string) ([]*s_db_model.SHome24hMo
 
 | 场景 | 行为 |
 |---|---|
+| `source` 与 `grain` 不匹配 / 取值未知 | `400`，消息列出 source 允许的 grain；不静默回落到日频 |
 | `gd_home_24h` 没有完整 24 点日 | 后端报“24 点电价数据不足：没有完整的 24 点运行日”，前端面板显示空态 |
 | D 前连续窗口缺某天/某小时 | 后端报具体日期，前端显示该错误；不静默跳过 |
 | 预测服务不可用 | 沿用现有 `预测服务失败` 错误；日均图不受影响 |
@@ -200,9 +249,17 @@ ListHome24hRange(ctx context.Context, from, to string) ([]*s_db_model.SHome24hMo
 4. `market=ahead` 取 `AheadPrice`，`market=real` 取 `RealtimePrice`。
 5. 输出 24 点，`targetTime` 为 D+1 `00:00…23:00`，`stepMinutes=60`。
 6. `formatTargetTime(hour, ts)` → `YYYY-MM-DD HH:00`。
-7. `recordForecastPoints` 的 `hour` source 不是 `gd_metric.csv`。
+7. `recordForecastPoints` 的 `hour` 留痕来源文案不是 `gd_metric.csv`（是 `官网主页24点分时`）。
 
 `price_any_test.go` 补 `hour` 解析与格式断言；现有 day/intraday 断言不改。
+
+`price_source_test.go`（新建）覆盖参数校验：
+
+1. 只给 `grain=hour` → `source=home24h`；只给 `source=home24h` → `grain=hour`。
+2. `source=home24h&grain=day` → 报错，消息含允许的 grain。
+3. 都不给 → `spot_metric` + `day`。
+4. 未知 source / 未知 grain → 报错，不回落默认。
+5. 三路 source 各自分派到对应 loader（用注入的假 loader 断言命中哪一个）。
 
 ### 前端检查
 
@@ -231,6 +288,7 @@ node web/scripts/browser-check.mjs
 - `OpenLEMS/application/internal/logic/forecast/price_any.go`
 - `OpenLEMS/application/internal/logic/forecast/price_hour.go`（新增）
 - `OpenLEMS/application/internal/logic/forecast/price_hour_test.go`（新增）
+- `OpenLEMS/application/internal/logic/forecast/price_source_test.go`（新增）
 - `OpenLEMS/application/internal/logic/forecast/price_any_test.go`
 
 前端：
