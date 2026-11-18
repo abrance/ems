@@ -26,7 +26,7 @@ export interface PriceForecastPoint {
   point: number
   /** 键为分位字符串，如 "0.1" / "0.5" / "0.9" */
   quantiles: Record<string, number>
-  /** 仅 intraday：HH:MM，便于按天分组绘图（day 粒度不下发） */
+  /** 仅 intraday / hour：HH:00，便于按天分组绘图（day 粒度不下发） */
   atTime?: string
 }
 
@@ -100,9 +100,13 @@ export interface PriceBacktest {
 
 export interface PriceForecast {
   market: string
-  /** day=日均（官方直采 pm-api）/ intraday=96 点（电网日指标 CSV） */
+  /** 数据源：spot_metric=官方日频 / home24h=官网主页 24 点 / gd_metric_csv=第三方 96 点（已停更） */
+  source: string
+  /** day=日均 / hour=24 点 / intraday=96 点 */
   grain: string
-  /** 采样步长（分钟）：day=1440，intraday=15 */
+  /** 目标日（仅 hour）：预测终止日，可能晚于锚点 to */
+  targetDate?: string
+  /** 采样步长（分钟）：day=1440，hour=60，intraday=15 */
   stepMinutes: number
   dataset: string
   scope: string
@@ -114,6 +118,8 @@ export interface PriceForecast {
   historyDates: string[]
   historyValues: number[]
   forecast: PriceForecastPoint[]
+  /** 仅 hour：目标日 24 点实际值；该日不满 24 点时为 [] */
+  actual?: number[]
   contextPoints: number
   inputTruncated: boolean
   /** 送入模型的通道数：1=只用本市场历史；实时电价=3（实时价+日前价+负荷） */
@@ -146,14 +152,19 @@ function normalizeForecast(f: PriceForecast): PriceForecast {
     historyDates: f.historyDates ?? [],
     historyValues: f.historyValues ?? [],
     forecast: f.forecast ?? [],
+    actual: f.actual ?? [],
   }
 }
 
 export function fetchPriceForecast(
   params: {
     market?: string
-    /** day=日均（官方直采 pm-api）/ intraday=96 点（电网日指标 CSV） */
+    /** 数据源；与 grain 交叉校验（不传则按 grain 反推，见后端 ParsePriceSource） */
+    source?: 'spot_metric' | 'home24h' | 'gd_metric_csv'
+    /** day=日均 / hour=24 点 / intraday=96 点 */
     grain?: string
+    /** 目标日 YYYY-MM-DD（仅 grain=hour，默认今天） */
+    targetDate?: string
     historyDays?: number
     horizonDays?: number
     quantiles?: string

@@ -74,7 +74,7 @@ func (s *sReportDailyServiceImpl) UpsertBatch(ctx context.Context, rows []*s_db_
 			INSERT INTO gd_report_daily
 				(run_date, report_date, dataset, scope, metric, value, unit, source, origin,
 				 extractor_version, report_title, collected_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(run_date, dataset, scope, metric) DO UPDATE SET
 				report_date = excluded.report_date,
 				value = excluded.value,
@@ -84,7 +84,7 @@ func (s *sReportDailyServiceImpl) UpsertBatch(ctx context.Context, rows []*s_db_
 				extractor_version = excluded.extractor_version,
 				report_title = excluded.report_title,
 				collected_at = excluded.collected_at,
-				updated_at = datetime('now')
+				updated_at = CURRENT_TIMESTAMP
 		`, row.RunDate, row.ReportDate, row.Dataset, row.Scope, row.Metric, row.Value, row.Unit,
 			row.Source, row.Origin, row.ExtractorVersion, row.ReportTitle, row.CollectedAt)
 		if err != nil {

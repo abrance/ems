@@ -12,6 +12,7 @@ import (
 	"s_db/s_db_basic"
 	"s_db/s_db_model"
 
+	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -22,6 +23,8 @@ import (
 var DefaultSqliteDbPath = gcmd.GetOpt("db-path", "./out/db.sqlite3").String()
 
 func Init() error {
+	// 连接串优先取环境变量（见 s_db_dialect_f.go）：必须在任何 g.DB() 之前设置。
+	applyDBLinkFromEnv()
 	return initConfigDatabase()
 }
 
@@ -41,13 +44,13 @@ func initConfigDatabase() error {
 	}
 
 	// 测试数据库连接（如果文件不存在，SQLite会自动创建）
-	if _, err := g.DB().Exec(ctx, "SELECT 1"); err != nil {
+	if _, err := execSchema(ctx, "SELECT 1"); err != nil {
 		c_log.Errorf(ctx, "数据库连接失败: %+v", err)
 		return err
 	}
 
 	// 创建协议表
-	_, err := g.DB().Exec(ctx, `
+	_, err := execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS protocol (
 			id VARCHAR(255) PRIMARY KEY ,
 			name VARCHAR(255) NOT NULL,
@@ -68,7 +71,7 @@ func initConfigDatabase() error {
 	}
 
 	// 创建设备表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS device (
 			id VARCHAR(255) PRIMARY KEY ,
 			pid VARCHAR(255) NOT NULL DEFAULT '0',
@@ -93,7 +96,7 @@ func initConfigDatabase() error {
 	}
 
 	// 创建设置表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS setting (
 			id VARCHAR(255) PRIMARY KEY,
 			group_name VARCHAR(255) DEFAULT 'system',
@@ -112,7 +115,7 @@ func initConfigDatabase() error {
 	}
 
 	// 创建告警历史表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS alarm_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			device_id VARCHAR(255) NOT NULL,
@@ -138,14 +141,14 @@ func initConfigDatabase() error {
 		`CREATE INDEX IF NOT EXISTS idx_alarm_history_trigger_at ON alarm_history (trigger_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_alarm_history_device_trigger ON alarm_history (device_id, trigger_at DESC)`,
 	} {
-		if _, err = g.DB().Exec(ctx, stmt); err != nil {
+		if _, err = execSchema(ctx, stmt); err != nil {
 			c_log.Error(ctx, err)
 			return err
 		}
 	}
 
 	// 创建告警忽略表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS alarm_ignore (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			device_id VARCHAR(255) NOT NULL,
@@ -161,7 +164,7 @@ func initConfigDatabase() error {
 	}
 
 	// 创建日志表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			type VARCHAR(255) NOT NULL,
@@ -182,14 +185,14 @@ func initConfigDatabase() error {
 		`CREATE INDEX IF NOT EXISTS idx_log_created_at ON log (created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_log_device_id ON log (device_id)`,
 	} {
-		if _, err = g.DB().Exec(ctx, stmt); err != nil {
+		if _, err = execSchema(ctx, stmt); err != nil {
 			c_log.Error(ctx, err)
 			return err
 		}
 	}
 
 	// 创建自动化表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS automation (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
@@ -211,7 +214,7 @@ func initConfigDatabase() error {
 	}
 
 	// 创建储能策略表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS energy_storage (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name VARCHAR(255) NOT NULL,
@@ -233,7 +236,7 @@ func initConfigDatabase() error {
 	}
 
 	// 创建电价表
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS price (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			description VARCHAR(255),
@@ -253,7 +256,7 @@ func initConfigDatabase() error {
 		return err
 	}
 
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_spot_report (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			run_date VARCHAR(10) NOT NULL UNIQUE,
@@ -270,7 +273,7 @@ func initConfigDatabase() error {
 		return err
 	}
 
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_spot_metric (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			report_date VARCHAR(10) NOT NULL,
@@ -308,7 +311,7 @@ func initConfigDatabase() error {
 		return err
 	}
 
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_spot_metric_audit (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			report_date VARCHAR(10) NOT NULL,
@@ -329,7 +332,7 @@ func initConfigDatabase() error {
 		return err
 	}
 
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_spot_extract_run (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			report_date VARCHAR(10) NOT NULL UNIQUE,
@@ -352,7 +355,7 @@ func initConfigDatabase() error {
 	// 官方 API 采集元数据：哪天采过、成功/失败、源站原始数值。
 	// 与 gd_spot_extract_run 分开：那边是 OCR 日报（ocr_model/page_count/ocr_ms），
 	// 这边是官方披露接口抓取，混表会让两边的列永远一半是空。
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_pm_fetch_run (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			target_date VARCHAR(10) NOT NULL,
@@ -375,7 +378,7 @@ func initConfigDatabase() error {
 
 	// 电价预测留痕：复盘要回答「当时发的预测准不准」，所以必须落库。
 	// 唯一键 (generated_on, market, grain, target_time)：同一天对同一目标时刻只留一条。
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_price_forecast (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			generated_on TEXT NOT NULL,
@@ -398,7 +401,7 @@ func initConfigDatabase() error {
 		c_log.Error(ctx, err)
 		return err
 	}
-	_, err = g.DB().Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_price_forecast_target ON gd_price_forecast (market, grain, target_time)`)
+	_, err = execSchema(ctx, `CREATE INDEX IF NOT EXISTS idx_price_forecast_target ON gd_price_forecast (market, grain, target_time)`)
 	if err != nil {
 		c_log.Error(ctx, err)
 		return err
@@ -406,7 +409,7 @@ func initConfigDatabase() error {
 
 	// 官网主页 24 点分时（日前/实时电价 + 系统负荷）。
 	// 独立于 gd_spot_metric：粒度（24 整点）与滞后（T-6 左右）都不同，混表会破坏 as-of 语义。
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_home_24h (
 			price_date VARCHAR(10) NOT NULL,
 			hour INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
@@ -431,7 +434,7 @@ func initConfigDatabase() error {
 	// 21 地市节点电价（高峰/低谷两时段，42 条/日，T+0）。
 	// city_code 是 GB/T 2260 行政区划编码（源站只给中文名，编码由应用层静态表映射），
 	// city_name 是展示用中文名。唯一键建在 city_code 上：中文名可能被源站改写，编码不会。
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_node_price (
 			run_date VARCHAR(10) NOT NULL,
 			city_code VARCHAR(16) NOT NULL,
@@ -447,7 +450,7 @@ func initConfigDatabase() error {
 		c_log.Error(ctx, err)
 		return err
 	}
-	_, err = g.DB().Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_node_price_date ON gd_node_price (run_date)`)
+	_, err = execSchema(ctx, `CREATE INDEX IF NOT EXISTS idx_node_price_date ON gd_node_price (run_date)`)
 	if err != nil {
 		c_log.Error(ctx, err)
 		return err
@@ -460,7 +463,7 @@ func initConfigDatabase() error {
 	// 每次改代码就多一组行，状态判定（最近一次尝试是哪条）立刻失效。
 	//
 	// 失败只写本表、不写数据表：源站挂了页面宁可显示「暂无数据」，也不要写 0 或复制前一日。
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_home_market_fetch_run (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			target_date VARCHAR(10) NOT NULL,
@@ -492,7 +495,7 @@ func initConfigDatabase() error {
 	//
 	// 唯一键为什么含 dataset：核对页要算差值的两行（日前均价 / 实时均价）run_date、scope、
 	// metric 完全相同，只有 dataset 不同；不含 dataset 它们会互相覆盖，差值恒为一行。
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_report_daily (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			run_date VARCHAR(10) NOT NULL,
@@ -516,7 +519,7 @@ func initConfigDatabase() error {
 		c_log.Error(ctx, err)
 		return err
 	}
-	_, err = g.DB().Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_report_daily_run_date ON gd_report_daily (run_date)`)
+	_, err = execSchema(ctx, `CREATE INDEX IF NOT EXISTS idx_report_daily_run_date ON gd_report_daily (run_date)`)
 	if err != nil {
 		c_log.Error(ctx, err)
 		return err
@@ -545,11 +548,11 @@ func migrateSpotMetricUniqueKey(ctx context.Context) error {
 		return nil
 	}
 	c_log.Warning(ctx, "检测到 gd_spot_metric 旧唯一键，删除重建（数据可由重新解析恢复）")
-	_, err = g.DB().Exec(ctx, `DROP TABLE IF EXISTS gd_spot_metric`)
+	_, err = execSchema(ctx, `DROP TABLE IF EXISTS gd_spot_metric`)
 	if err != nil {
 		return err
 	}
-	_, err = g.DB().Exec(ctx, `
+	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS gd_spot_metric (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			report_date VARCHAR(10) NOT NULL,
@@ -596,7 +599,7 @@ func migrateSpotMetricEditColumns(ctx context.Context) error {
 		case "text_value":
 			ddl = `ALTER TABLE gd_spot_metric ADD COLUMN text_value VARCHAR(32) NOT NULL DEFAULT ''`
 		}
-		if _, err := g.DB().Exec(ctx, ddl); err != nil {
+		if _, err := execSchema(ctx, ddl); err != nil {
 			return err
 		}
 		c_log.Infof(ctx, "gd_spot_metric 补充列 %s", name)

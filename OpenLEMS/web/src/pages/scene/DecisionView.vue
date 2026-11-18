@@ -43,11 +43,19 @@ const summary = ref<EffectSummary | null>(null)
 const backtest = ref<EffectBacktest | null>(null)
 const load = ref<LoadForecast | null>(null)
 const price = ref<PriceForecast | null>(null)
+/** 小时粒度：目标日 24 点预测。默认今天；数据滞后 T-6，锚点会早于目标日（见面板文案）。 */
+const priceHour = ref<PriceForecast | null>(null)
+const hourDate = ref(todayStr())
 
 const app = useAppStore()
 
-const loading = reactive({ summary: false, backtest: false, load: false, price: false })
+const loading = reactive({ summary: false, backtest: false, load: false, price: false, priceHour: false })
 const errors = reactive<Record<string, string>>({})
+
+function todayStr(): string {
+  const d = new Date()
+  return fmt(d)
+}
 
 function fmt(d: Date): string {
   const loc = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
@@ -92,11 +100,21 @@ async function loadBacktest() {
 async function loadForecast(force = false) {
   loading.load = true
   loading.price = true
+  loading.priceHour = true
   errors.load = ''
   errors.price = ''
-  const [l, p] = await Promise.allSettled([
+  errors.priceHour = ''
+  const [l, p, h] = await Promise.allSettled([
     fetchLoadForecast({ historyHours: 24, horizon: 96, forceRefresh: force }),
-    fetchPriceForecast({ historyDays: 60, horizonDays: 5, forceRefresh: force }),
+    fetchPriceForecast({ source: 'spot_metric', historyDays: 60, horizonDays: 5, forceRefresh: force }),
+    // 目标日默认今天：锚点会落在数据最新的完整日（T-6 左右），两者不同是正常的
+    fetchPriceForecast({
+      source: 'home24h',
+      grain: 'hour',
+      targetDate: hourDate.value,
+      historyDays: 14,
+      forceRefresh: force,
+    }),
   ])
   if (l.status === 'fulfilled') load.value = l.value
   else {
@@ -108,8 +126,34 @@ async function loadForecast(force = false) {
     price.value = null
     errors.price = p.reason instanceof Error ? p.reason.message : '电价预测失败'
   }
+  if (h.status === 'fulfilled') priceHour.value = h.value
+  else {
+    priceHour.value = null
+    errors.priceHour = h.reason instanceof Error ? h.reason.message : '小时电价预测失败'
+  }
   loading.load = false
   loading.price = false
+  loading.priceHour = false
+}
+
+/** 只重取小时这一路：改目标日不该连带重算日均与负荷 */
+async function loadHour(force = false) {
+  loading.priceHour = true
+  errors.priceHour = ''
+  try {
+    priceHour.value = await fetchPriceForecast({
+      source: 'home24h',
+      grain: 'hour',
+      targetDate: hourDate.value,
+      historyDays: 14,
+      forceRefresh: force,
+    })
+  } catch (err) {
+    priceHour.value = null
+    errors.priceHour = err instanceof Error ? err.message : '小时电价预测失败'
+  } finally {
+    loading.priceHour = false
+  }
 }
 
 function refreshAll(force = false) {
@@ -337,6 +381,74 @@ useECharts(priceEl, (): EChartsOption => {
   }
 }, [price])
 
+/* ---------- 小时粒度：目标日 24 点 + 实际值 ---------- */
+const hourEl = ref<HTMLElement>()
+useECharts(
+  hourEl,
+  (): EChartsOption => {
+    const f = priceHour.value
+    const atTimes = (f?.forecast ?? []).map((p) => p.atTime ?? p.runDate)
+    const actual = f?.actual ?? []
+    const series: EChartsOption['series'] = []
+    if (actual.length) {
+      series.push({
+        name: '实际（官网主页 24 点）',
+        type: 'line',
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        itemStyle: { color: CHART_COLORS.gray },
+        data: actual,
+      })
+    }
+    series.push(
+      {
+        name: '预测 10%',
+        type: 'line',
+        showSymbol: false,
+        lineStyle: { type: 'dotted', width: 1 },
+        itemStyle: { color: CHART_COLORS.gray },
+        data: (f?.forecast ?? []).map((p) => p.quantiles?.['0.1'] ?? null),
+      },
+      {
+        name: '预测 90%',
+        type: 'line',
+        showSymbol: false,
+        lineStyle: { type: 'dotted', width: 1 },
+        itemStyle: { color: CHART_COLORS.gray },
+        data: (f?.forecast ?? []).map((p) => p.quantiles?.['0.9'] ?? null),
+      },
+      {
+        name: '预测中位',
+        type: 'line',
+        showSymbol: true,
+        symbolSize: 5,
+        lineStyle: { type: 'dashed', width: 2 },
+        itemStyle: { color: CHART_COLORS.brand },
+        data: (f?.forecast ?? []).map((p) => p.point),
+      },
+    )
+    return {
+      grid: { left: 56, right: 20, top: 32, bottom: 40 },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : `${v} ${f?.unit ?? ''}`) },
+      legend: { top: 0, icon: 'rect', itemWidth: 12, itemHeight: 3, textStyle: { fontSize: 12 } },
+      xAxis: {
+        type: 'category',
+        data: atTimes,
+        axisLabel: { fontSize: 12, color: CHART_COLORS.gray, interval: 2 },
+      },
+      yAxis: {
+        type: 'value',
+        name: f?.unit ?? '',
+        nameTextStyle: { fontSize: 12 },
+        axisLabel: { fontSize: 12, color: CHART_COLORS.gray },
+        splitLine: { lineStyle: { color: '#eef0f3' } },
+      },
+      series,
+    }
+  },
+  [priceHour],
+)
+
 onMounted(() => {
   applyPreset()
   refreshAll(false)
@@ -430,6 +542,39 @@ watch(
           两者<strong>不是同一份数据</strong>，不要互相换算。
         </div>
         <div ref="priceEl" class="chart" />
+      </template>
+    </PanelBox>
+
+    <PanelBox
+      title="日前电价预测 · 小时（24 点）"
+      :sub="priceHour ? `目标日 ${priceHour.targetDate} · 锚点 ${priceHour.to}` : 'TimesFM · 目标日 24 个整点'"
+      :span="12"
+      :loading="loading.priceHour"
+      :foot="priceHour ? `锚点 D=${priceHour.to} · 历史 ${priceHour.contextPoints} 点 · 模型 ${priceHour.model} · 步长 ${priceHour.stepMinutes} 分钟 · 耗时 ${priceHour.timeMs.toFixed(0)}ms` : '数据来源：官网主页 24 点分时（gd_home_24h）'"
+    >
+      <template #actions>
+        <SourceBadge tone="blue" label="官网·24点" />
+      </template>
+      <div class="toolbar">
+        <label class="field">
+          目标日
+          <input v-model="hourDate" type="date" :max="todayStr()" @change="loadHour(false)" />
+        </label>
+        <span class="spacer" />
+        <button class="btn" type="button" :disabled="loading.priceHour" @click="loadHour(true)">
+          刷新本图（跳过缓存）
+        </button>
+      </div>
+      <div v-if="errors.priceHour" class="empty">{{ errors.priceHour }}</div>
+      <template v-else>
+        <div class="warn">
+          24 点数据<strong>滞后约 T-6</strong>：锚点 <strong>{{ priceHour?.to || '—' }}</strong>
+          与目标日 <strong>{{ priceHour?.targetDate || hourDate }}</strong>
+          不同是正常的 —— 预测从锚点 D 滚动到目标日，不是“明日电价”。
+          口径也与上方日均图不同（主页日前价 ≠ 发电侧日前加权平均电价），
+          <strong>两图不可对齐、不可加总、不可互相换算</strong>。
+        </div>
+        <div ref="hourEl" class="chart" />
       </template>
     </PanelBox>
 
