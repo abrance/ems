@@ -179,7 +179,15 @@ func normalizeBoolColumns(table string, rows []gdb.Record) []gdb.Record {
 
 // resetSequence 把自增列序列推到 max(id)，否则后续插入会撞主键。
 func resetSequence(ctx context.Context, db gdb.DB, table string) error {
-	// 只有自增列才有序列：device/protocol/setting 的主键是 VARCHAR id，没有 serial。
+	// 没有 id 列的表（如 gd_node_price 用复合唯一键）直接跳过；
+	// 有 id 但不是自增（device/protocol/setting 是 VARCHAR 主键）时下面会取到 NULL。
+	hasID, err := db.GetValue(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = ? AND column_name = 'id'", table)
+	if err != nil {
+		return err
+	}
+	if hasID.Int() == 0 {
+		return nil
+	}
 	seq, err := db.GetValue(ctx, "SELECT pg_get_serial_sequence(?, 'id')", table)
 	if err != nil {
 		return err
