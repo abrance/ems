@@ -38,11 +38,11 @@ func (s *sPriceForecastServiceImpl) UpsertBatch(ctx context.Context, rows []*s_d
 		_, err := g.DB().Exec(ctx, `
 			INSERT INTO gd_price_forecast
 				(generated_on, market, grain, target_time, point, q10, q50, q90, model, unit, source, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 			ON CONFLICT(generated_on, market, grain, target_time) DO UPDATE SET
 				point = excluded.point, q10 = excluded.q10, q50 = excluded.q50, q90 = excluded.q90,
 				model = excluded.model, unit = excluded.unit, source = excluded.source,
-				updated_at = datetime('now')
+				updated_at = CURRENT_TIMESTAMP
 		`, row.GeneratedOn, row.Market, row.Grain, row.TargetTime,
 			row.Point, row.Q10, row.Q50, row.Q90, row.Model, row.Unit, row.Source)
 		if err != nil {

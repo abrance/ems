@@ -38,13 +38,13 @@ func (s *sHomeMarketServiceImpl) UpsertHome24h(ctx context.Context, rows []*s_db
 		}
 		_, err := g.DB().Exec(ctx, `
 			INSERT INTO gd_home_24h (price_date, hour, power_mw, ahead_price, realtime_price, source, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+			VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(price_date, hour) DO UPDATE SET
 				power_mw = excluded.power_mw,
 				ahead_price = excluded.ahead_price,
 				realtime_price = excluded.realtime_price,
 				source = excluded.source,
-				updated_at = datetime('now')
+				updated_at = CURRENT_TIMESTAMP
 		`, row.PriceDate, row.Hour, row.PowerMw, row.AheadPrice, row.RealtimePrice, row.Source)
 		if err != nil {
 			return n, errors.Wrap(err, "写入 24 点分时失败")
@@ -114,12 +114,12 @@ func (s *sHomeMarketServiceImpl) UpsertNodePrice(ctx context.Context, rows []*s_
 		}
 		_, err := g.DB().Exec(ctx, `
 			INSERT INTO gd_node_price (run_date, city_code, city_name, period_type, price, source, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+			VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(run_date, city_code, period_type) DO UPDATE SET
 				city_name = excluded.city_name,
 				price = excluded.price,
 				source = excluded.source,
-				updated_at = datetime('now')
+				updated_at = CURRENT_TIMESTAMP
 		`, row.RunDate, row.CityCode, row.City, row.PeriodType, row.Price, row.Source)
 		if err != nil {
 			return n, errors.Wrap(err, "写入地市节点价失败")
@@ -204,7 +204,7 @@ func (s *sHomeMarketServiceImpl) RecordFetchRun(ctx context.Context, run *s_db_m
 			(target_date, dataset, status, error_kind, rows_written, rows_expected,
 			 attempt_count, consecutive_failures, consecutive_empties, last_error,
 			 first_seen_at, last_ok_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, datetime('now'))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(target_date, dataset) DO UPDATE SET
 			status = excluded.status,
 			error_kind = excluded.error_kind,
@@ -215,7 +215,7 @@ func (s *sHomeMarketServiceImpl) RecordFetchRun(ctx context.Context, run *s_db_m
 			consecutive_empties = excluded.consecutive_empties,
 			last_error = excluded.last_error,
 			last_ok_at = excluded.last_ok_at,
-			updated_at = datetime('now')
+			updated_at = CURRENT_TIMESTAMP
 	`, run.TargetDate, run.Dataset, run.Status, run.ErrorKind, run.RowsWritten, run.RowsExpected,
 		run.AttemptCount, run.ConsecutiveFailures, run.ConsecutiveEmpties, run.LastError,
 		nullableTime(run.LastOkAt))

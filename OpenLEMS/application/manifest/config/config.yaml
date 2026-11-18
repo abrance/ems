@@ -42,6 +42,11 @@ database:
     link: "sqlite::@file(out/db.sqlite3)?journal_mode=WAL"
     timezone: "Local"
 
+# 环境变量 EMS_DB_LINK 非空时覆盖上面的 default 连接（部署切 pgsql 用；支持
+# postgresql://user:pass@host:5432/db 与 gf 的 pgsql:user:pass@tcp(host:5432)/db）。
+# 连接串带口令，不写进仓库。pgsql 的时区固定 Asia/Shanghai（PG 不接受 Local）。
+# 存量数据迁移：services/s_db/cmd/sqlite2pg。
+
 # 电网电价自动同步配置
 # 数据来源：公开的分时电价查询接口，按当前月拉取并写入电价表
 price_sync:

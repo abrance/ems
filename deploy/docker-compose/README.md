@@ -15,6 +15,7 @@ cp .env.example .env
 
 | 变量 | 用途 | 留空时 |
 | --- | --- | --- |
+| `EMS_DB_LINK` | 关系库连接串（sqlite 或 pgsql）。支持 `postgresql://user:pass@host:5432/db` 与 gf 的 `pgsql:user:pass@tcp(host:5432)/db` 两种写法 | 用 `config.yaml` 里的本地 sqlite |
 | `PRICE_SYNC_BASE_URL` | 电网分时电价数据源 | 同步任务跳过 |
 | `HOME_MARKET_GATEWAY_BASE` | 官网主页 24 点/地市网关 | 采集不启动 |
 | `GD_METRIC_URL` | 第三方 `gd_metric.csv` 下载地址 | 不联网下载 |
@@ -22,6 +23,18 @@ cp .env.example .env
 | `QINIU_*` | 日报图片对象存储 | 存本地 |
 
 `FORECAST_BASE_URL` 只影响插件默认值，实际以策略配置 `forecastBaseUrl` 为准。
+
+**切 PostgreSQL**：设 `EMS_DB_LINK` 后重启即可，建表语句会按方言自动转换（`AUTOINCREMENT`→`BIGSERIAL`、
+`DATETIME`→`TIMESTAMP`、`BOOLEAN DEFAULT 1/0`→`TRUE/FALSE`）。时区固定 `Asia/Shanghai`——PG 不接受 `Local`。
+存量数据从本地 sqlite 搬过去：
+
+```bash
+cd OpenLEMS/services/s_db
+EMS_DB_LINK=postgresql://user:pass@host:5432/db \
+  go run ./cmd/sqlite2pg -src ../../application/out/db.sqlite3 -truncate
+```
+
+先让服务带着 `EMS_DB_LINK` 起一次（建表），再跑工具；`-dry-run` 先看行数对比。
 
 GHCR 包如果是私有的，先登录：
 
