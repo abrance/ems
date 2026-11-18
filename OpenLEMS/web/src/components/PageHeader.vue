@@ -33,7 +33,9 @@ const sceneHint = computed(() =>
            以前做成可选，但切换不改变任何数据（没有页面按场景过滤），
            另外两个场景也没有数据源 —— 那是假控件。标题里写清要接入什么。 -->
       <span class="scene-label" data-scene :title="sceneHint">数据场景：{{ SCENE }}</span>
-      <label class="field">
+      <!-- 市场总览自己有 24 点区块日期框；页头这个全局「运行日」在那里是假控件，
+           只服务决策支持的相似日重算，所以只在那一页收起来。 -->
+      <label v-if="String(route.meta.page ?? '') !== 'market'" class="field">
         运行日
         <input v-model="app.runDate" type="date" />
       </label>

@@ -39,8 +39,8 @@ import { dailyTier } from '@/utils/dailyLag'
  *   日频指标     gd_spot_metric  /api/spot-market/board         T+0（实时腿 T+2）  日均价/成交量/申报均价…
  *   24 点分时    gd_home_24h     /api/gd-metric/home-24h        T-6   24 个整点
  *
- * 页头批次条把三个日期**分别**标出来（含来源与滞后），就是为了让人一眼看出
- * 「这三个数不是同一天的东西」，而不是拿其中一个当「最新数据」。
+ * 页头批次条标两批固定日期，24 点日期与「查看日期」框放在自己的区块标题，
+ * 就是为了让人一眼看出「这三个数不是同一天的东西」，而不是拿一个当「最新数据」。
  *
  * 页脚另有一句口径警告：24 点日均（463.27）与官方日频日均（456.55）不可互校，
  * 差约 1.5% 且无换算关系 —— 实测值写死在页面里，不从任一侧推导。
@@ -59,6 +59,8 @@ const nodePrice = ref<NodePriceDay | null>(null)
  * home-24h / node-price）。请求失败时保持 null，页面退回老文案「该日无数据」。
  */
 const marketStatus = ref<MarketStatus | null>(null)
+/** 24 点区块自己的查看日。空 = 后端最新日；组件卸载即失效（切页回默认）。 */
+const selected24hDate = ref('')
 const loadingDaily = ref(false)
 const loading24h = ref(false)
 const loadingNode = ref(false)
@@ -79,8 +81,8 @@ async function loadDaily() {
 async function load24h() {
   loading24h.value = true
   try {
-    // 不传 date：让后端给库里最新一天（源站 T-6，硬取今天永远是空）
-    home24h.value = await fetchHome24h({})
+    // 不选日期才让后端给库里最新一天（源站 T-6，硬取今天永远是空）
+    home24h.value = await fetchHome24h({ date: selected24hDate.value || undefined })
   } catch (err) {
     errors.value.push(`24 点分时：${err instanceof Error ? err.message : '加载失败'}`)
     home24h.value = null
@@ -118,8 +120,9 @@ function reloadAll() {
 
 onMounted(reloadAll)
 
-/* ---------- 批次条：三个日期分别标注 ---------- */
+/* ---------- 批次条：两批固定日期 + 页脚三批汇总；24 点日期在区块标题 ---------- */
 
+// 页脚要三批都点到；页头批次条只留两批固定日期，24 点的日期移到自己的区块标题。
 const batches = computed(() => [
   {
     key: 'node',
@@ -146,6 +149,16 @@ const batches = computed(() => [
     tone: 'brand' as const,
   },
 ])
+
+const visibleBatches = computed(() => batches.value.filter((b) => b.key !== 'home24h'))
+
+/** 区块标题的滞后：默认日沿用后端口径；回溯日按所选日算，不能拿最新日的滞后冒充。 */
+const home24hViewLag = computed(() => {
+  const d = home24h.value
+  if (!d) return -1
+  if (!selected24hDate.value || selected24hDate.value === d.latestDate) return d.lagDays
+  return lagOf(d.date)
+})
 
 function lagOf(date?: string): number {
   if (!date) return -1
@@ -476,9 +489,9 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
     <button type="button" @click="reloadAll">重试</button>
   </div>
 
-  <!-- 批次条：三个日期分别标注来源与滞后，不拿一个日期代表全部 -->
+  <!-- 批次条：两批固定日期；24 点日期跟着自己的区块走 -->
   <div class="batches">
-    <div v-for="b in batches" :key="b.key" class="batch">
+    <div v-for="b in visibleBatches" :key="b.key" class="batch">
       <span class="batch-label">{{ b.label }}</span>
       <strong class="batch-date">{{ b.date }}</strong>
       <StatusTag :tone="b.tone">{{ b.source }}</StatusTag>
@@ -487,7 +500,11 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
     </div>
   </div>
 
-  <div class="grid">
+  <section class="zone">
+    <div class="zone-head">
+      <h2>多日指标与趋势</h2>
+    </div>
+    <div class="grid">
     <!-- 6 张日频 KPI -->
     <PanelBox
       title="日频指标"
@@ -559,14 +576,31 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       <div v-else-if="dailyNever" class="empty is-alert" data-daily-state>{{ dailyEmptyText }}</div>
       <div v-else ref="trendEl" class="chart" />
     </PanelBox>
+    </div>
+  </section>
 
+  <section class="zone">
+    <div class="zone-head" data-home24h-zone>
+      <h2>24 点分时</h2>
+      <strong class="batch-date">{{ home24h?.date || '—' }}</strong>
+      <span v-if="home24hViewLag >= 0" class="batch-lag">滞后 {{ home24hViewLag }} 天</span>
+      <span v-else class="batch-lag">无数据</span>
+      <span v-if="home24h?.date && home24h.date !== home24h.latestDate" class="batch-lag">
+        库里最新 {{ home24h.latestDate }}
+      </span>
+      <label class="zone-date">
+        查看日期
+        <input v-model="selected24hDate" type="date" data-home24h-date @change="load24h()" />
+      </label>
+    </div>
+    <div class="grid">
     <!-- 24 点电价 -->
     <PanelBox
       title="24 点电价曲线"
       sub="日前 / 实时电价 · 整点"
       :span="8"
       :loading="loading24h"
-      :foot="`数据来源：官方主页 24 点 · 运行日 ${home24h?.latestDate || '—'}（源站滞后约 6 天）`"
+      :foot="`数据来源：官方主页 24 点 · 运行日 ${home24h?.date || '—'}（源站滞后约 6 天）`"
     >
       <template #actions>
         <StatusTag tone="brand">{{ HOME24H_SOURCE }}</StatusTag>
@@ -607,7 +641,14 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       >{{ home24hEmptyText }}</div>
       <div v-else ref="power24hEl" class="chart" />
     </PanelBox>
+    </div>
+  </section>
 
+  <section class="zone">
+    <div class="zone-head">
+      <h2>地市节点价</h2>
+    </div>
+    <div class="grid">
     <!-- 地市横向条形 -->
     <PanelBox
       title="地市节点电价"
@@ -636,7 +677,8 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
         <div ref="nodeEl" class="chart" :style="{ height: nodeChartHeight }" />
       </template>
     </PanelBox>
-  </div>
+    </div>
+  </section>
 
   <div class="footer">
     <div>数据截至 {{ dataAsOf }}。三个批次的滞后不同，不能互相当作「最新数据」。</div>
@@ -669,6 +711,32 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
 .batch-label { color: var(--text-3); font-size: var(--fs-12); }
 .batch-date { font-variant-numeric: tabular-nums; }
 .batch-lag { color: var(--text-3); font-size: var(--fs-12); }
+.zone + .zone { margin-top: var(--s5); }
+.zone-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s3);
+  margin-bottom: var(--s3);
+}
+.zone-head h2 { margin: 0; font-size: var(--fs-14); font-weight: 600; }
+.zone-date {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.zone-date input {
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-12);
+}
 .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--s4); }
 .chart { height: 360px; }
 .empty {

@@ -813,7 +813,7 @@ const FAKE_SPOT_MARKET = {
 
 // ===== 市场总览：24 点分时 + 地市节点价 =====
 // 三个批次日期刻意不同（地市 11-13 / 日频 09-21 / 24 点 11-07），
-// 用来守「页头批次条必须分别标注，不能拿一个日期代表全部」这条。
+// 用来守「固定批次在批次条、24 点日期在区块标题，不能拿一个日期代表全部」这条。
 const FAKE_HOME_24H = {
   date: '2026-11-07',
   empty: false,
@@ -1298,7 +1298,10 @@ globalThis.fetch = async (url, init) => {
     if (noDataState()) {
       return json({ date: '', empty: true, latestDate: '', lagDays: -1, points: [], source: '官网·24点', pointCount: 0 })
     }
-    return json(home24hPartial ? FAKE_HOME_24H_PARTIAL : FAKE_HOME_24H)
+    const base = home24hPartial ? FAKE_HOME_24H_PARTIAL : FAKE_HOME_24H
+    // 日期框选历史日时回显所选日，latestDate 仍是库里最新日 —— 和后端契约一致
+    const picked = new URL(u, 'http://localhost').searchParams.get('date')
+    return json(picked ? { ...base, date: picked } : base)
   }
   if (u.includes('/api/gd-metric/node-price')) {
     if (noDataState()) {
@@ -1508,9 +1511,9 @@ await clickTo('市场数据', '市场总览')
   const h24 = requests.filter((r) => r.url.includes('/api/gd-metric/home-24h')).pop()?.url ?? ''
   check(!/date=/.test(h24), '24 点不传日期，由后端给库里最新一天', h24)
 
-  // 页头批次条：三个日期分别出现，且各自带来源角标
+  // 批次条留两批固定日期；24 点日期回到自己的区块标题
   check(bodyHas('2026-11-13'), '批次条显示地市节点价日期 11-13')
-  check(bodyHas('2026-11-07'), '批次条显示 24 点日期 11-07')
+  check(bodyHas('2026-11-07'), '24 点区块显示日期 11-07')
   check(bodyHas('2026-09-21'), '批次条显示日频最新日 09-21')
   check(bodyHas('官网·节点价 T+0'), '地市节点价带 T+0 源角标')
   check(bodyHas('官网·披露接口'), '日频带「官网·披露接口」源角标（不写单一 T+n）')
@@ -1543,7 +1546,7 @@ await clickTo('市场数据', '市场总览')
   const marketSrc = readFileSync(resolve(root, 'src/pages/scene/MarketView.vue'), 'utf8')
   check(marketSrc.includes('该日无数据'), '空日期文案「该日无数据」在页面里')
   check(
-    marketSrc.includes('home24h?.latestDate') && marketSrc.includes('nodePrice?.latestDate'),
+    marketSrc.includes('home24h.value?.latestDate') && marketSrc.includes('nodePrice?.latestDate'),
     '空态提示带上「库里最新到哪天」',
   )
   // 三个批次各有独立空态，不会用一个 empty 盖住三块
@@ -1555,6 +1558,33 @@ await clickTo('市场数据', '市场总览')
       .find((el) => (el.querySelector('.panel-title')?.textContent ?? '').includes('24 点系统负荷'))
       ?.querySelector('.panel-foot')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
   check(loadPanelFoot().includes('峰值 62,300 MW'), '满 24 点时页脚给峰谷', loadPanelFoot())
+
+  // 页头那个全局「运行日」在市场总览是假控件；真正能选的是 24 点区块自己的日期框
+  check(!doc.querySelector('.pagehead input[type=date]'), '市场总览页头没有全局运行日框')
+  const pick = doc.querySelector('[data-home24h-date]')
+  check(!!pick && pick.value === '', '24 点区块有日期框，默认留空=库里最新日')
+}
+
+console.log('\n== 市场数据 · 市场总览：24 点日期框只切这一批 ==')
+{
+  const before = requests.length
+  const pick = doc.querySelector('[data-home24h-date]')
+  pick.value = '2026-11-05'
+  pick.dispatchEvent(new window.Event('input', { bubbles: true }))
+  pick.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await waitFor(
+    () =>
+      (doc.querySelector('[data-home24h-zone]')?.textContent ?? '').includes('2026-11-05') &&
+      requests.slice(before).some((r) => r.url.includes('/api/gd-metric/home-24h?date=2026-11-05')),
+    2000,
+  )
+  const fresh = requests.slice(before).map((r) => r.url)
+  check(fresh.some((u) => u.includes('home-24h?date=2026-11-05')), '选历史日重新拉 24 点', JSON.stringify(fresh))
+  check(!fresh.some((u) => u.includes('/api/spot-market/board')), '日频不跟着重拉', JSON.stringify(fresh))
+  check(!fresh.some((u) => u.includes('/api/gd-metric/node-price')), '地市不跟着重拉', JSON.stringify(fresh))
+  const zone = doc.querySelector('[data-home24h-zone]')?.textContent ?? ''
+  check(zone.includes('2026-11-05'), '区块标题显示所选日', zone)
+  check(zone.includes('库里最新 2026-11-07'), '回溯日仍告诉库里最新日', zone)
 }
 
 // 缺点日（17/24）：后端不下发峰谷，页脚必须说清「没算」而不是印「峰值 —」。
