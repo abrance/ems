@@ -19,9 +19,20 @@ type stubHourSource struct {
 	to   string
 }
 
+// load 按 [from, to] 过滤，与真实实现一致 —— 不然「查询窗口漏了某天」这类 bug
+// 在测试里看不见（stub 把整份 rows 都返回了）。
 func (s *stubHourSource) load(_ context.Context, from, to string) ([]*s_db_model.SHome24hModel, error) {
 	s.from, s.to = from, to
-	return s.rows, s.err
+	if s.err != nil {
+		return nil, s.err
+	}
+	out := make([]*s_db_model.SHome24hModel, 0, len(s.rows))
+	for _, r := range s.rows {
+		if r.PriceDate >= from && r.PriceDate <= to {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 type stubForecastClient struct {
@@ -155,26 +166,63 @@ func TestLoadPriceHourTargetTimesLandOnTargetDay(t *testing.T) {
 	}
 }
 
-// 历史窗口中间缺一天要报错并点名，不能跳过去凑数。
-func TestLoadPriceHourRejectsGapInHistory(t *testing.T) {
+// 某天有行但不满 24 点 = 源站只返回了部分小时，是数据缺陷：必须报错点名，不能拿它凑数。
+func TestLoadPriceHourRejectsPartialDayInHistory(t *testing.T) {
 	target := mustDay(t, "2026-11-18")
 	anchor := mustDay(t, "2026-11-16")
 	var rows []*s_db_model.SHome24hModel
 	for i := 6; i >= 0; i-- {
 		d := anchor.AddDate(0, 0, -i)
-		if i == 3 { // 缺一整天
-			continue
+		day := hourRows(dayStr(d), 100, 200)
+		if i == 3 { // 只回来 17 个点
+			day = day[:17]
 		}
-		rows = append(rows, hourRows(dayStr(d), 100, 200)...)
+		rows = append(rows, day...)
 	}
 	src := &stubHourSource{rows: rows}
 	_, err := loadPriceHourWith(context.Background(), &stubForecastClient{}, src.load, "ahead", "2026-11-18", 7,
 		defaultQuantiles, priceLocation(), target)
 	if err == nil {
-		t.Fatal("窗口缺一天应报错")
+		t.Fatal("不满 24 点的历史日应报错")
 	}
-	if !strings.Contains(err.Error(), "不足 24 点") {
-		t.Errorf("错误信息应说明缺点，实际 %v", err)
+	if !strings.Contains(err.Error(), "只有 17 点") {
+		t.Errorf("错误信息应点名缺点的那天，实际 %v", err)
+	}
+}
+
+// 整天没有行 = 采集窗口的边界（库里只留最近 N 天）：到边界就停，用已有一天数。
+// 线上就是这种形态：24 点只留最近 14 天，请求 14 天时正好差一天。
+func TestLoadPriceHourStopsAtHistoryBoundary(t *testing.T) {
+	target := mustDay(t, "2026-11-19")
+	anchor := mustDay(t, "2026-11-12")
+	rows := historyWindow(anchor, 13) // 只有 13 天，请求 14
+	src := &stubHourSource{rows: rows}
+	got, err := loadPriceHourWith(context.Background(), &stubForecastClient{}, src.load, "ahead", "2026-11-19", 14,
+		defaultQuantiles, priceLocation(), target)
+	if err != nil {
+		t.Fatalf("边界外缺天不该失败: %v", err)
+	}
+	if len(got.HistoryValues) != 13*home24hPointsPerDay {
+		t.Errorf("历史点数 = %d，期望 %d（用已有的 13 天）", len(got.HistoryValues), 13*home24hPointsPerDay)
+	}
+	if got.To != "2026-11-12" || got.TargetDate != "2026-11-19" {
+		t.Errorf("锚点/目标日 = %s/%s", got.To, got.TargetDate)
+	}
+}
+
+// 连 7 天都凑不出：报错，且说明实际只有几天。
+func TestLoadPriceHourRejectsTooShortHistory(t *testing.T) {
+	target := mustDay(t, "2026-11-19")
+	anchor := mustDay(t, "2026-11-12")
+	rows := historyWindow(anchor, 5)
+	src := &stubHourSource{rows: rows}
+	_, err := loadPriceHourWith(context.Background(), &stubForecastClient{}, src.load, "ahead", "2026-11-19", 14,
+		defaultQuantiles, priceLocation(), target)
+	if err == nil {
+		t.Fatal("历史不足 7 天应报错")
+	}
+	if !strings.Contains(err.Error(), "至少需要 7 天") {
+		t.Errorf("错误信息应说明下限，实际 %v", err)
 	}
 }
 

@@ -133,9 +133,11 @@ func loadPriceHourWith(
 		return nil, errors.Errorf("目标日 %s 晚于今天", targetDate)
 	}
 
-	// 下界要能覆盖「anchor 再往前 historyDays 天」；上界到目标日前一天。
+	// 下界要能覆盖「anchor 再往前 historyDays 天」；上界**含目标日** ——
+	// 目标日的 24 点既是 actual 的来源，锚点选择又只取严格早于目标日的日子，
+	// 多取这一天不会污染历史（少取会让 actual 永远是空的）。
 	from := target.AddDate(0, 0, -(historyDays + 32)).Format(priceDateLayout)
-	to := target.AddDate(0, 0, -1).Format(priceDateLayout)
+	to := targetDate
 	rows, err := source(ctx, from, to)
 	if err != nil {
 		return nil, errors.Wrap(err, "读取 24 点分时失败")
@@ -154,15 +156,28 @@ func loadPriceHourWith(
 		return nil, err
 	}
 
-	// 从锚点往前取连续 historyDays 个完整日；中间缺一天就报错，不跳过去凑数。
+	// 从锚点往前取连续完整日，最多 historyDays 天。
+	//
+	// 两种「不完整」要分开处理：
+	//   - 整天没有行：多半是采集窗口边界（库里只留最近 N 天），到边界就停，
+	//     用已有的天数（太短则报错）。这不是数据缺陷，不该让整张图挂掉。
+	//   - 有行但不满 24 点：源站当天只返回了部分小时，是数据缺陷，报错点名，不拿残缺日凑数。
 	days := make([]string, 0, historyDays)
 	for i := 0; i < historyDays; i++ {
 		d := anchor.AddDate(0, 0, -i).Format(priceDateLayout)
-		if len(valuesByDate[d]) != home24hPointsPerDay {
-			return nil, errors.Errorf("24 点电价数据不足：锚点 %s 之前的 %s 不足 24 点（需要连续 %d 个完整日）",
-				anchor.Format(priceDateLayout), d, historyDays)
+		hours, seen := valuesByDate[d]
+		if !seen || len(hours) == 0 {
+			break
+		}
+		if len(hours) != home24hPointsPerDay {
+			return nil, errors.Errorf("24 点电价数据不足：%s 只有 %d 点（需要完整 24 点）",
+				d, len(hours))
 		}
 		days = append(days, d)
+	}
+	if len(days) < minHourHistoryDays {
+		return nil, errors.Errorf("24 点电价数据不足：锚点 %s 往前只有 %d 个完整日（至少需要 %d 天）",
+			anchor.Format(priceDateLayout), len(days), minHourHistoryDays)
 	}
 	// days 是倒序（锚点在前），反转成时间升序
 	for i, j := 0, len(days)-1; i < j; i, j = i+1, j-1 {
