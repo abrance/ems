@@ -31,7 +31,7 @@ concurrency:
 jobs:
   integration:
     name: test_plan 集成场景
-    runs-on: [self-hosted, linux, x64, ems]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
