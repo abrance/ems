@@ -117,6 +117,12 @@ type Board struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+// LatestDate 库里最近一个有日前数据的运行日；空串表示库里没有。
+// 前端日频回看窗口拿它当右端，避免数据滞后时默认落在空档。
+func LatestDate(ctx context.Context) (string, error) {
+	return s_db.GetSpotExtractService().LatestMetricDate(ctx, DatasetAhead)
+}
+
 // LoadBoard 读 [date-days+1, date] 的日频 + 全量月频/年频，并算好基础统计。
 func LoadBoard(ctx context.Context, date string, days int) (*Board, error) {
 	if days <= 0 {

@@ -64,6 +64,14 @@ export interface MarketBoard {
   updatedAt: string
 }
 
+/**
+ * GET /api/spot-market/latest
+ * 库里最近一个有日前数据的运行日；空串表示没有。信息披露页用它锚定默认区间右端。
+ */
+export function fetchSpotMarketLatest(signal?: AbortSignal): Promise<{ date: string }> {
+  return api.get<{ date: string }>('/api/spot-market/latest', undefined, signal)
+}
+
 /** GET /api/spot-market/board */
 export function fetchSpotMarketBoard(
   params: { date?: string; days?: number },

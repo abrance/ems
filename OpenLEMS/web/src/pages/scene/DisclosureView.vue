@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import type { EChartsOption } from 'echarts'
+import { RangePicker } from '@arco-design/web-vue'
+import '@arco-design/web-vue/es/date-picker/style/css.js'
 import PanelBox from '@/components/PanelBox.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import {
@@ -9,12 +11,15 @@ import {
   fmtNum,
   fmtPct,
   fetchSpotMarketBoard,
+  fetchSpotMarketLatest,
   seriesLabel,
   type MarketBoard,
   type MarketSeries,
   type SeriesPoint,
 } from '@/api/spotmarket'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
+import { dailyTier } from '@/utils/dailyLag'
+import { isoDate, lagDaysFrom, rangeEndingAt, todayInShanghai } from '@/utils/latestRange'
 
 /**
  * 场景 · 信息披露 —— 广东电力市场官方指标。
@@ -35,22 +40,63 @@ const tabs = [
   { v: 'daily', t: '日频（现货）' },
   { v: 'periodic', t: '月频 / 年频' },
 ] as const
-const ranges = [30, 90, 365]
+const DEFAULT_DAYS = 90
+const MAX_DAYS = 730
 
 const tab = ref<'daily' | 'periodic'>('daily')
-const days = ref(90)
+/** 日频图/表窗口。右端锚到库里最新有数日，不锚「今天」。 */
+const range = ref<[string, string]>(['', ''])
+const rangeHint = ref('')
+/** KPI 固定看全局最新（不受下方范围影响），单独一张快照。 */
+const kpiBoard = ref<MarketBoard | null>(null)
 const board = ref<MarketBoard | null>(null)
 const loading = ref(false)
 const error = ref('')
-let controller: AbortController | null = null
+let boardController: AbortController | null = null
+let kpiController: AbortController | null = null
 
-async function load() {
-  controller?.abort()
-  controller = new AbortController()
+const DAY_MS = 86400_000
+function parseDay(s: string): number {
+  return Date.parse(`${s}T00:00:00Z`)
+}
+function spanDays(from: string, to: string): number {
+  return Math.round((parseDay(to) - parseDay(from)) / DAY_MS) + 1
+}
+function dayString(v: unknown): string {
+  if (v instanceof Date) return isoDate(v)
+  if (typeof v === 'number') return isoDate(new Date(v))
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : ''
+}
+function disabledFutureDate(date: Date): boolean {
+  return isoDate(date) > todayInShanghai()
+}
+
+function onRangeChange(v: unknown) {
+  if (!Array.isArray(v) || v.length < 2) return
+  let from = dayString(v[0])
+  const to = dayString(v[1])
+  if (!from || !to || parseDay(from) > parseDay(to)) return
+  rangeHint.value = ''
+  if (spanDays(from, to) > MAX_DAYS) {
+    from = rangeEndingAt(new Date(`${to}T00:00:00Z`), MAX_DAYS - 1).from
+    rangeHint.value = `范围超过 ${MAX_DAYS} 天，已按 ${MAX_DAYS} 天取数`
+  }
+  range.value = [from, to]
+  void loadBoard()
+}
+
+async function loadBoard() {
+  const [from, to] = range.value
+  if (!from || !to) return
+  boardController?.abort()
+  boardController = new AbortController()
   loading.value = true
   error.value = ''
   try {
-    board.value = await fetchSpotMarketBoard({ days: days.value }, controller.signal)
+    board.value = await fetchSpotMarketBoard(
+      { date: to, days: spanDays(from, to) },
+      boardController.signal,
+    )
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') return
     error.value = err instanceof Error ? err.message : '加载失败'
@@ -60,39 +106,84 @@ async function load() {
   }
 }
 
-onMounted(load)
-
-function setDays(d: number) {
-  if (days.value === d) return
-  days.value = d
-  void load()
+function reload() {
+  void Promise.all([loadBoard(), loadKpi()])
 }
+
+async function loadKpi() {
+  kpiController?.abort()
+  kpiController = new AbortController()
+  try {
+    kpiBoard.value = await fetchSpotMarketBoard({ days: MAX_DAYS }, kpiController.signal)
+  } catch {
+    // KPI 失败不拖垮图/表；error 由 loadBoard 负责说
+    kpiBoard.value = null
+  }
+}
+
+onMounted(async () => {
+  let end = todayInShanghai()
+  try {
+    const latest = await fetchSpotMarketLatest()
+    if (latest.date) end = latest.date
+  } catch {
+    error.value = '最新运行日获取失败，默认按今天回看 90 天'
+  }
+  range.value = [rangeEndingAt(new Date(`${end}T00:00:00Z`), DEFAULT_DAYS - 1).from, end]
+  await Promise.all([loadBoard(), loadKpi()])
+})
 
 /* ---------- 日频取数 ---------- */
 
 const daily = computed<MarketSeries[]>(() => board.value?.daily ?? [])
+const kpiDaily = computed<MarketSeries[]>(() => kpiBoard.value?.daily ?? [])
 
 /** 按数据集 + 指标名片段取一条序列（指标名是源站原名，只能按片段匹配） */
-function pick(dataset: string, metricPart: string): MarketSeries | undefined {
-  return daily.value.find((s) => s.dataset === dataset && s.metric.includes(metricPart))
+function pick(dataset: string, metricPart: string, from: MarketSeries[]): MarketSeries | undefined {
+  return from.find((s) => s.dataset === dataset && s.metric.includes(metricPart))
 }
 
-const aheadAvg = computed(() => pick(DATASET.ahead, '加权平均电价'))
-const realAvg = computed(() => pick(DATASET.realtime, '加权平均电价'))
-const declPrice = computed(() => pick(DATASET.ahead, '申报均价'))
-const aheadVolGen = computed(() => pick(DATASET.ahead, '发电侧日前总成交电量'))
-const aheadVolCon = computed(() => pick(DATASET.ahead, '用电侧日前总成交电量'))
+// 图/表用区间内的数据；KPI 单独用全局最新快照，两者不能混用同一变量
+const aheadAvg = computed(() => pick(DATASET.ahead, '加权平均电价', daily.value))
+const realAvg = computed(() => pick(DATASET.realtime, '加权平均电价', daily.value))
+const aheadVolGen = computed(() => pick(DATASET.ahead, '发电侧日前总成交电量', daily.value))
+const aheadVolCon = computed(() => pick(DATASET.ahead, '用电侧日前总成交电量', daily.value))
 
-const priceUnit = computed(() => aheadAvg.value?.unit || '元/兆瓦时')
-const volUnit = computed(() => aheadVolGen.value?.unit || 'MWh')
+const aheadAvgKpi = computed(() => pick(DATASET.ahead, '加权平均电价', kpiDaily.value))
+const realAvgKpi = computed(() => pick(DATASET.realtime, '加权平均电价', kpiDaily.value))
+const declPriceKpi = computed(() => pick(DATASET.ahead, '申报均价', kpiDaily.value))
+const aheadVolGenKpi = computed(() => pick(DATASET.ahead, '发电侧日前总成交电量', kpiDaily.value))
+const aheadVolConKpi = computed(() => pick(DATASET.ahead, '用电侧日前总成交电量', kpiDaily.value))
 
-/** 峰谷价差：区间内日前加权均价的最高-最低（后端已算，这里只取） */
-const aheadSpread = computed(() => aheadAvg.value?.spread ?? 0)
+const priceUnit = computed(() => aheadAvgKpi.value?.unit || '元/兆瓦时')
+const volUnit = computed(() => aheadVolGenKpi.value?.unit || 'MWh')
 
+/** KPI 峰谷价差：全局快照里日前加权均价的最高-最低（后端已算，这里只取） */
+const aheadSpreadKpi = computed(() => aheadAvgKpi.value?.spread ?? 0)
+
+/** 缺失日期按日去重：同一天多个数据集缺数只算一天。 */
 const coverageNote = computed(() => {
-  const c = board.value?.coverage ?? []
-  const missing = c.reduce((n, x) => n + x.missing.length, 0)
-  return missing === 0 ? '区间内无缺日' : `区间内缺 ${missing} 天（明细见下表）`
+  if (!board.value || board.value.daily.length === 0) return '无覆盖数据'
+  const missing = [...new Set((board.value?.coverage ?? []).flatMap((c) => c.missing))].sort()
+  if (missing.length === 0) return '区间内无缺日'
+  const head = missing.slice(0, 3).join('、')
+  return `区间内缺 ${missing.length} 天（${head}${missing.length > 3 ? '…' : ''}）`
+})
+
+/** 空/滞后分级与市场总览同口径，避免「采集停了」被说成「还没发布」。 */
+const latestRunDate = computed(() => kpiBoard.value?.date || '')
+const dailyLag = computed(() => lagDaysFrom(latestRunDate.value))
+const dailyEmpty = computed(() => !loading.value && daily.value.length === 0)
+const dailyTierNow = computed(() => dailyTier(dailyLag.value, dailyEmpty.value, 'ahead'))
+const dailyStateNote = computed(() => {
+  if (dailyTierNow.value === 't2') return ''
+  const latest = latestRunDate.value || '—'
+  if (dailyTierNow.value === 'never') {
+    return '库里近一年没有日频指标。日频来自披露接口直采，请检查采集是否在跑。'
+  }
+  if (dailyTierNow.value === 'unknown') return ''
+  const head = `采集${dailyTierNow.value === 'stop' ? '已落后' : '滞后'}：库里最新运行日 ${latest}（${dailyLag.value} 天前）`
+  return `${head}，${dailyTierNow.value === 'stop' ? '请检查采集是否在跑' : '已超出日前当日发布的预期'}`
 })
 
 /* ---------- 图 1：加权均价 ---------- */
@@ -472,7 +563,7 @@ useECharts(
   <div v-if="error" class="notice error">
     <strong>数据加载失败</strong>
     <span>　{{ error }}</span>
-    <button type="button" @click="load">重试</button>
+    <button type="button" @click="reload">重试</button>
   </div>
 
   <div class="toolbar">
@@ -487,60 +578,72 @@ useECharts(
         {{ t.t }}
       </button>
     </div>
-    <span v-if="tab === 'daily'" class="field">回看</span>
-    <div v-if="tab === 'daily'" class="radio-group">
-      <button v-for="d in ranges" :key="d" type="button" :class="{ on: days === d }" @click="setDays(d)">
-        {{ d }} 天
-      </button>
-    </div>
+    <span v-if="tab === 'daily'" class="field">回看区间</span>
+    <RangePicker
+      v-if="tab === 'daily'"
+      class="range-picker"
+      :model-value="range"
+      value-format="YYYY-MM-DD"
+      format="YYYY-MM-DD"
+      :allow-clear="false"
+      :disabled-date="disabledFutureDate"
+      :placeholder="['开始日期', '结束日期']"
+      @change="onRangeChange"
+    />
+    <span v-if="tab === 'daily' && rangeHint" class="range-hint">{{ rangeHint }}</span>
     <span class="spacer" />
-    <span class="meta">最新运行日 {{ board?.date || '—' }} · {{ coverageNote }}</span>
+    <span v-if="tab === 'daily'" class="meta">日前最新运行日 {{ latestRunDate || '—' }} · {{ coverageNote }}</span>
   </div>
 
   <!-- ===== 日频 ===== -->
   <template v-if="tab === 'daily'">
+    <div v-if="dailyStateNote" class="notice" :class="dailyTierNow === 'stop' || dailyTierNow === 'never' ? 'is-alert' : ''">
+      {{ dailyStateNote }}
+    </div>
+    <div v-if="dailyEmpty && !dailyStateNote" class="notice">该区间无数据：所选起止日内没有已落库的日频指标。</div>
+    <div class="kpi-note">KPI 固定为全局最新（不受下方回看区间影响）；图/表按所选区间取数。</div>
     <div class="kpis">
       <KpiCard
         label="日前加权均价"
-        :value="fmtNum(aheadAvg?.latest.value)"
+        :value="fmtNum(aheadAvgKpi?.latest.value)"
         :unit="priceUnit"
-        :hint="`环比 ${fmtPct(aheadAvg?.momPct)} · 同比 ${fmtPct(aheadAvg?.yoyPct)}`"
+        :hint="`环比 ${fmtPct(aheadAvgKpi?.momPct)} · 同比 ${fmtPct(aheadAvgKpi?.yoyPct)}`"
       />
       <KpiCard
         label="实时加权均价"
-        :value="fmtNum(realAvg?.latest.value)"
+        :value="fmtNum(realAvgKpi?.latest.value)"
         :unit="priceUnit"
-        :hint="`运行日 ${realAvg?.latest.period || '—'}（实时 T+2 发布）`"
+        :hint="`运行日 ${realAvgKpi?.latest.period || '—'}（实时 T+2 发布）`"
       />
       <KpiCard
         label="日前峰谷价差"
-        :value="fmtNum(aheadSpread)"
+        :value="fmtNum(aheadSpreadKpi)"
         :unit="priceUnit"
-        :hint="`区间最高 ${fmtNum(aheadAvg?.peak)} / 最低 ${fmtNum(aheadAvg?.valley)}`"
+        :hint="`区间最高 ${fmtNum(aheadAvgKpi?.peak)} / 最低 ${fmtNum(aheadAvgKpi?.valley)}`"
       />
       <KpiCard
         label="日前-实时价差"
-        :value="fmtNum(board?.spreadMean)"
+        :value="fmtNum(kpiBoard?.spreadMean)"
         :unit="priceUnit"
         hint="区间均值，正=日前更高"
       />
       <KpiCard
         label="日前成交电量·发电侧"
-        :value="fmtNum(aheadVolGen?.latest.value, 0)"
+        :value="fmtNum(aheadVolGenKpi?.latest.value, 0)"
         :unit="volUnit"
-        :hint="`环比 ${fmtPct(aheadVolGen?.momPct)}`"
+        :hint="`环比 ${fmtPct(aheadVolGenKpi?.momPct)}`"
       />
       <KpiCard
         label="日前申报均价"
-        :value="fmtNum(declPrice?.latest.value)"
+        :value="fmtNum(declPriceKpi?.latest.value)"
         :unit="priceUnit"
-        :hint="`环比 ${fmtPct(declPrice?.momPct)} · 仅日前披露`"
+        :hint="`环比 ${fmtPct(declPriceKpi?.momPct)} · 仅日前披露`"
       />
       <KpiCard
         label="日前成交电量·用电侧"
-        :value="fmtNum(aheadVolCon?.latest.value, 0)"
+        :value="fmtNum(aheadVolConKpi?.latest.value, 0)"
         :unit="volUnit"
-        :hint="`环比 ${fmtPct(aheadVolCon?.momPct)}`"
+        :hint="`环比 ${fmtPct(aheadVolConKpi?.momPct)}`"
       />
     </div>
 
@@ -722,8 +825,11 @@ useECharts(
 }
 .radio-group button.on { background: var(--bg-2); color: var(--brand-ink); font-weight: 600; }
 .field { font-size: var(--fs-13); color: var(--text-3); }
+.range-picker { width: 260px; }
+.range-hint { font-size: var(--fs-12); color: var(--text-3); }
 .spacer { flex: 1; }
 .meta { font-size: var(--fs-12); color: var(--text-3); }
+.kpi-note { margin-bottom: var(--s3); font-size: var(--fs-12); color: var(--text-3); }
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -752,6 +858,11 @@ td.down { color: var(--green-ink); }
   background: var(--red-soft);
   color: var(--red-ink);
   font-size: var(--fs-13);
+}
+.notice:not(.error):not(.is-alert) {
+  border-left-color: var(--border);
+  background: var(--bg-3);
+  color: var(--text-2);
 }
 .notice button {
   margin-left: auto;

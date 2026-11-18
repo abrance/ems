@@ -222,6 +222,9 @@ type ISpotExtractService interface {
 	// 注意：同一运行日的同一指标可能有多份日报产出（表1(二) 与滞后的 表2(一)），
 	// 去重与取哪一路由调用方（logic.BuildTrend）决定。
 	ListMetricsByRunDateRange(ctx context.Context, from, to string) ([]*s_db_model.SSpotMetricModel, error)
+	// LatestMetricDate 某 dataset 最近一个有已确认数据的运行日；空 dataset 表示全部 dataset。
+	// 空串表示库里没有。信息披露页用它锚定日频回看窗口的右端。
+	LatestMetricDate(ctx context.Context, dataset string) (string, error)
 	// CountUnconfirmedByRunDateRange 统计区间内因未复核而被趋势排除的指标条数（前端角标提示用）
 	CountUnconfirmedByRunDateRange(ctx context.Context, from, to string) (int, error)
 	GetRun(ctx context.Context, reportDate string) (*s_db_model.SSpotExtractRunModel, error)
