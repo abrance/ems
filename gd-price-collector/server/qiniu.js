@@ -5,6 +5,7 @@ import qiniu from "qiniu";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_ROOT = path.join(__dirname, "../data/uploads");
+const WECHAT_HOST = process.env.WECHAT_HOST || "mp.weixin.qq.com";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -93,7 +94,7 @@ async function downloadImage(url) {
   const res = await fetch(url, {
     headers: {
       "User-Agent": UA,
-      Referer: "https://mp.weixin.qq.com/",
+      Referer: `https://${WECHAT_HOST}/`,
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     },
   });

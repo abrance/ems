@@ -23,6 +23,7 @@ app.get("/api/config", (_req, res) => {
   res.json({
     qiniu: isQiniuConfigured(),
     storage: isQiniuConfigured() ? "qiniu" : "local",
+    defaultUrl: process.env.DEFAULT_ARTICLE_URL || "",
   });
 });
 

@@ -13,7 +13,7 @@
     market = dayahead | realtime
     side   = gen | load          （申报均价按发电侧算 gen）
     kind   = weighted_avg | declared_avg | max | min | total
-    src    = pm.gd.csg.cn
+    src    = GDPM_SRC（默认取 GDPM_BASE_URL 的 host）
 
 时间戳统一取当日 00:00:00+08:00 的毫秒值。
 
@@ -31,6 +31,7 @@ TODO(月频/年频)：中长期、绿电、零售、Top-m、HHI 这次不进 VM�
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -38,12 +39,13 @@ import urllib.request
 
 import gd_pm_fetch as fetch
 
-SRC = "pm.gd.csg.cn"
+SRC = fetch.SOURCE_LABEL
 PRICE_METRIC = "gdpm_price_cny_mwh"
 VOLUME_METRIC = "gdpm_volume_mwh"
 
-DEFAULT_INSERT_URL = "http://10.43.183.106:8480/insert/0/prometheus/api/v1/import/prometheus"
-DEFAULT_SELECT_URL = "http://10.43.96.62:8481/select/0/prometheus"
+# 内网地址不写入仓库：用 --vm-insert-url/--vm-select-url 或环境变量 VM_INSERT_URL/VM_SELECT_URL。
+DEFAULT_INSERT_URL = os.environ.get("VM_INSERT_URL", "").strip()
+DEFAULT_SELECT_URL = os.environ.get("VM_SELECT_URL", "").strip()
 # 源站限速，沿用 gd_pm_fetch.py 的 0.7s；这里不再另外加延迟
 TZ = dt.timezone(dt.timedelta(hours=8))
 
@@ -271,11 +273,16 @@ def main():
             print("\n".join(lines))
             total_lines += len(lines)
             continue
+        if not args.vm_insert_url:
+            sys.exit("缺少 --vm-insert-url（或 VM_INSERT_URL）—— 写入地址不内置")
         post_lines(args.vm_insert_url, lines)
         total_lines += len(lines)
         log(f"{day}: 写入 {len(lines)} 条样本，请求 {budget.used} 次")
         if args.verify or args.vm_select_url:
-            verify_day(args.vm_select_url or DEFAULT_SELECT_URL, day, log=log)
+            select_url = args.vm_select_url or DEFAULT_SELECT_URL
+            if not select_url:
+                sys.exit("缺少 --vm-select-url（或 VM_SELECT_URL）—— 回查地址不内置")
+            verify_day(select_url, day, log=log)
 
     print(f"完成：{len(days)} 天，{total_lines} 条样本"
           f"{'（dry-run 未写入）' if args.dry_run else ''}")

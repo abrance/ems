@@ -55,7 +55,7 @@
 
 #### Acceptance Criteria
 
-1. WHEN 采集服务收到 `mp.weixin.qq.com` 文章链接, THE 系统 SHALL 读取文章标题。
+1. WHEN 采集服务收到 `<wechat-host>` 文章链接, THE 系统 SHALL 读取文章标题。
 2. WHEN 标题匹配「YYYY年M月运行日报(MM.DD)」模式, THE 系统 SHALL 将运行日解析为对应的年、月、日。
 3. WHEN 文章正文含页眉、4 页日报、页脚, THE 系统 SHALL 仅将 4 页日报原图写入档案，并按顺序标记为：市场概况与日前申报、日前成交与高峰节点电价、低谷节点电价与价格曲线、实时交易电价。
 4. WHEN 4 页日报原图采集成功, THE 系统 SHALL 将图片保存到已配置的七牛云空间，对象键为 `gd-spot/{运行日}/page-{页码}.png`，并在档案中保存可访问 URL。
@@ -66,7 +66,7 @@
 
 #### Acceptance Criteria
 
-1. WHEN 提交的链接主机名不是 `mp.weixin.qq.com`, THE 系统 SHALL 在信息管理界面展示「只支持微信公众号文章链接」。
+1. WHEN 提交的链接主机名不是 `<wechat-host>`, THE 系统 SHALL 在信息管理界面展示「只支持微信公众号文章链接」。
 2. WHEN 标题无法解析出运行日, THE 系统 SHALL 在信息管理界面展示「标题未包含运行日报日期」及原始标题。
 3. WHEN 文章中识别不到 4 页日报原图, THE 系统 SHALL 在信息管理界面展示「文章中没有识别到日报图片」。
 4. WHEN 采集成功, THE 系统 SHALL 刷新信息管理列表，并将新档案排在按运行日降序后的对应位置。

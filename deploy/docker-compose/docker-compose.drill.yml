@@ -9,7 +9,7 @@ name: lems-drill
 
 services:
   lems:
-    image: ${LEMS_IMAGE:-ghcr.chenby.cn/abrance/ems}:${LEMS_IMAGE_TAG:-v1.0.65}
+    image: ${LEMS_IMAGE:-ghcr.io/your-org/ems}:${LEMS_IMAGE_TAG:-v1.0.65}
     container_name: lems-drill
     restart: "no"            # 演练容器不自动重启，避免残留
     pull_policy: missing

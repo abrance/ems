@@ -1,13 +1,21 @@
 # gdpm：广东电力交易指标（官方 API -> ems 业务库）
 
-广东电力交易中心门户 `pm.gd.csg.cn` 的公开披露接口，无登录、无凭据、限速 0.7s。
+广东电力交易中心门户的公开披露接口（`GDPM_BASE_URL`），无登录、无凭据、限速 0.7s。
 
 **2026-11-11 起，官方 API 是广东电力市场数据的唯一权威源。** 原先两条数据源作废：
 
 | 旧数据源 | 处置 | 说明 |
 | --- | --- | --- |
 | OCR 日报（`gd_spot_metric` 里 `origin=manual` 的 804 行，2026-09-14~09-25） | **只作废被官方整表取代的 400 行**（日前/实时成交电价四类指标），`origin='void'`，逐条写 `gd_spot_metric_audit`（`operation=deprecated_by_pm_api`）；其余 404 行（档位 232、申报容量/台数 122、燃煤·燃气均价 50）保持原 origin | 可查、可追溯、不删行；官方没有的指标不作废 |
-| 第三方 CSV（`gdmetric`，`https://file.xiaoyxq.top/gd_metric.csv`） | **已停更**：`gd_metric.enabled=false`，只读本地缓存、不再向第三方站点拉取 | 见文末「怎么恢复/停用 gdmetric」 |
+| 第三方 CSV（`gdmetric`，`GD_METRIC_URL`） | **已停更**：`gd_metric.enabled=false`，只读本地缓存、不再向第三方站点拉取 | 见文末「怎么恢复/停用 gdmetric」 |
+
+## 必填环境变量
+
+```bash
+export GDPM_BASE_URL=https://<host>/portal/xhr/sso-info-disclosure
+# 可选：写进指标的来源名，默认取上面的 host
+export GDPM_SRC=official
+```
 
 ## 三段式
 
@@ -217,7 +225,7 @@ docker run --rm -v <宿主目录>:/app/out \
 
 出口代理只读 `HTTPS_PROXY` / `HTTP_PROXY`（`urllib` 原生支持），代码里不写死地址。
 
-调度本身不在本仓库：k8s CronJob 与白名单代理由 cloud3 侧维护，这份代码只提供镜像与失败可见。
+调度本身不在本仓库：k8s CronJob 与白名单代理由集群侧维护，这份代码只提供镜像与失败可见。
 
 ## 怎么停用 / 恢复 gdmetric 第三方 CSV
 

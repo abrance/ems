@@ -23,3 +23,6 @@ venv/
 
 # tools/gdpm 的文章链接清单：本地数据，不入库
 /tools/gdpm/links.tsv
+
+# 采集产物：含真实文章/图片地址，不入库
+gd-price-collector/data/records.json

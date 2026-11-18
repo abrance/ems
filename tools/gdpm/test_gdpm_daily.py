@@ -28,7 +28,7 @@ def fake_fetch_ok(out_dir, only=None, log=print):
         w = csv.writer(f)
         w.writerow(["date", "dataset", "scope", "metric", "value", "unit", "source"])
         w.writerow(["2026-11-13", "day_ahead_trade", "发电侧", "发电侧日前加权平均电价",
-                    "456.55", "元/兆瓦时", "pm.gd.csg.cn"])
+                    "456.55", "元/兆瓦时", "official"])
 
 
 class FetchFailureTest(unittest.TestCase):

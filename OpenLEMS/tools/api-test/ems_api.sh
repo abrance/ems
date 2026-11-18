@@ -10,12 +10,17 @@
 # 详见 docs/api-static-token.md。
 set -eu
 
-BASE="${EMS_BASE:-https://ems.xiaoyxq.top}"
+BASE="${EMS_BASE:-}"
 TOKEN="${EMS_TOKEN:-}"
 
+if [ -z "$BASE" ]; then
+	echo "EMS_BASE 未设置，拒绝发送请求（脚本内不含任何默认地址）。" >&2
+	exit 2
+fi
+
 if [ "$#" -lt 2 ]; then
-	echo "用法: EMS_TOKEN=<token> $0 <METHOD> <PATH> [额外 curl 参数...]" >&2
-	echo "  EMS_BASE  覆盖 base，当前默认 ${BASE}" >&2
+	echo "用法: EMS_BASE=<地址> EMS_TOKEN=<token> $0 <METHOD> <PATH> [额外 curl 参数...]" >&2
+	echo "  EMS_BASE  目标 base（必填）" >&2
 	echo "  EMS_AUTH  header（默认，X-API-Token）| bearer（Authorization: Bearer）" >&2
 	echo "token 只从环境变量 EMS_TOKEN 读取，脚本内不含任何默认值。" >&2
 	exit 2

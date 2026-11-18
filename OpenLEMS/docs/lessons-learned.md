@@ -247,12 +247,12 @@ Go CI 的 `defaults.run.working-directory` 是 `application`，
 
 ## 5. 部署真相
 
-- 生产在 **cloud2**（`ems.xiaoyxq.top`），部署目录 `/opt/cops/apps/lems/`
-- 由 **`cops` 仓库**（`.github/workflows/deploy.yml`）下发：
+- 生产在 `<prod-host>`（`<ems-host>`），部署目录 `<deploy-root>`
+- 由 **部署仓库**（`.github/workflows/deploy.yml`）下发：
   push 到 main 且命中 `apps/**` 自动部署；**每天 03:17 UTC 做一次漂移纠正**
   → **服务器上手改会被覆盖，改动必须进仓库**
-- 容器环境变量来自 `cops/apps/lems/.env`：`LEMS_IMAGE_TAG` 钉镜像版本
-- 发版流程：PR 合并 → 打 tag `vX.Y.Z` → 触发 `docker-publish-ghcr.yml` 构建推镜像 → 改 `cops/.env` 的 tag → 部署
+- 容器环境变量来自 `<deploy-repo>/apps/<app>/.env`：`LEMS_IMAGE_TAG` 钉镜像版本
+- 发版流程：PR 合并 → 打 tag `vX.Y.Z` → 触发 `docker-publish-ghcr.yml` 构建推镜像 → 改 `<deploy-repo>` 里对应单元的 tag → 部署
 - 部署后**浏览器硬刷新**（资源文件名变了，缓存的旧 `index.html` 会指向不存在的 chunk）
 
 ---

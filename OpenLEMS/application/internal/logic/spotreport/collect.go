@@ -161,7 +161,7 @@ func fetchHTML(ctx context.Context, pageURL string) (string, error) {
 	req.Header.Set("User-Agent", wechatUA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("Referer", "https://mp.weixin.qq.com/")
+	req.Header.Set("Referer", wechatReferer())
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -184,7 +184,7 @@ func downloadImage(ctx context.Context, imageURL string) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", wechatUA)
-	req.Header.Set("Referer", "https://mp.weixin.qq.com/")
+	req.Header.Set("Referer", wechatReferer())
 	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

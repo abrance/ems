@@ -2,7 +2,7 @@
 # 纯标准库（urllib/csv/sqlite3/json），没有任何 pip 依赖，所以不装包也不放 requirements。
 FROM python:3.12-slim
 
-# 抓取要 HTTPS 到 pm.gd.csg.cn；slim 里没有 ca-certificates 时 urlopen 直接报证书错。
+# 抓取要 HTTPS 到源站；slim 里没有 ca-certificates 时 urlopen 直接报证书错。
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*

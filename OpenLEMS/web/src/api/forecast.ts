@@ -1,7 +1,7 @@
 import { api } from './client'
 
 /**
- * TimesFM 预测服务（forecast.xiaoyxq.top）经后端转发的两个入口。
+ * TimesFM 预测服务（地址由部署配置提供，后端转发）的两个入口。
  *
  * 都是 **CPU 推理**（单次≈2s，服务端 max_concurrency=2），后端已加 5 分钟缓存，
  * 所以页面切换不要刻意绕过缓存：只有在用户明确点「刷新」时才带 forceRefresh。

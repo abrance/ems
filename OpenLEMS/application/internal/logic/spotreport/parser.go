@@ -1,14 +1,18 @@
 package spotreport
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 var pageLabels = []string{
@@ -62,12 +66,33 @@ type DateInfo struct {
 	Date  string
 }
 
+// wechatHost 允许的公众号文章域名。环境变量 SPOT_REPORT_WECHAT_HOST 或
+// spotreport.wechat_host 覆盖；都未配置时用公开平台域名兜底。
+var wechatHost = strings.TrimSpace(os.Getenv("SPOT_REPORT_WECHAT_HOST"))
+
+func allowedWechatHost() string {
+	if wechatHost != "" {
+		return wechatHost
+	}
+	if g.Cfg() != nil {
+		if v := strings.TrimSpace(g.Cfg().MustGet(context.Background(), "spotreport.wechat_host").String()); v != "" {
+			wechatHost = v
+			return wechatHost
+		}
+	}
+	return "mp.weixin.qq.com"
+}
+
+func wechatReferer() string {
+	return "https://" + allowedWechatHost() + "/"
+}
+
 func AssertWechatURL(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("只支持微信公众号文章链接")
 	}
-	if parsed.Hostname() != "mp.weixin.qq.com" {
+	if !strings.EqualFold(parsed.Hostname(), allowedWechatHost()) {
 		return "", fmt.Errorf("只支持微信公众号文章链接")
 	}
 	return parsed.String(), nil

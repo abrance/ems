@@ -11,6 +11,18 @@ cp .env.example .env
 
 按需修改 `.env` 里的 `LEMS_IMAGE_TAG`（例如 `v1.0.0`）。
 
+仓库里的 `config.yaml` **不内置任何外部地址**；数据源/对象存储地址由 `.env` 注入：
+
+| 变量 | 用途 | 留空时 |
+| --- | --- | --- |
+| `PRICE_SYNC_BASE_URL` | 电网分时电价数据源 | 同步任务跳过 |
+| `HOME_MARKET_GATEWAY_BASE` | 官网主页 24 点/地市网关 | 采集不启动 |
+| `GD_METRIC_URL` | 第三方 `gd_metric.csv` 下载地址 | 不联网下载 |
+| `SPOT_REPORT_WECHAT_HOST` | 允许的公众号文章域名 | 用公开平台域名兜底 |
+| `QINIU_*` | 日报图片对象存储 | 存本地 |
+
+`FORECAST_BASE_URL` 只影响插件默认值，实际以策略配置 `forecastBaseUrl` 为准。
+
 GHCR 包如果是私有的，先登录：
 
 ```bash
@@ -55,24 +67,24 @@ live 抖动）。改完 `docker compose up -d emsdevice` 生效；`.env` 里的
 
 ```bash
 # 有 cron 的机器（需要 docker 权限即可，不需要 root）
-0 3 * * * BACKUP_DIR=/opt/cops/backup/lems /path/to/backup.sh >> /var/log/lems-backup.log 2>&1
+0 3 * * * BACKUP_DIR=/var/backups/lems /path/to/backup.sh >> /var/log/lems-backup.log 2>&1
 
 # 手工跑一次
 ./deploy/docker-compose/backup.sh
 ```
 
-**cloud2 现状**：该机没有 crond、没有 root、user linger 也开不了，宿主机上**没有可用的
+**生产机现状**：该机没有 crond、没有 root、user linger 也开不了，宿主机上**没有可用的
 cron**。所以调度落在常驻容器 `ems-backup`（`ems-backup:2`）里的 crond 上，容器内
 `0 3 * * *` 直接执行同一份 `backup.sh`。容器只读挂生产卷、挂备份目录与异地密钥，
-不写生产库。改脚本后 `cd /opt/cops/backup/lems-tools-v2 && docker compose up -d --force-recreate`。
+不写生产库。改脚本后需要重建备份容器（`docker compose up -d --force-recreate`）。
 
 流程：`sqlite3 .backup` 出一致快照（不停容器）→ 校验 `PRAGMA integrity_check`
 并统计关键表行数 → gzip → scp 到异地并核对字节数 → 按保留策略清本地。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `BACKUP_DIR` | `/opt/cops/backup/lems` | 本地目录 |
-| `OFFSITE` | `nas:/pool1_8t/public/backup/lems` | `ssh:path`；`OFFSITE=` 关闭异地 |
+| `BACKUP_DIR` | `/var/backups/lems` | 本地目录 |
+| `OFFSITE` | 空 | `ssh:path`（如 `backup-host:/path`）；默认不做异地 |
 | `KEEP_OFFSITE` | `7` | 异地保留份数 |
 | `SSH_KEY` / `SSH_KNOWN_HOSTS` | 空 | 容器内跑时显式指定（容器里没有 `~/.ssh/config`）|
 | `KEEP_DAILY` | `7` | 本地保留日备份数 |
@@ -91,17 +103,17 @@ cron**。所以调度落在常驻容器 `ems-backup`（`ems-backup:2`）里的 c
 
 ```bash
 # 生产：必须显式 --yes，否则只打印「将停止 lems、把 lems_lems-data/db.sqlite3 改名留底」并退出 1
-./deploy/docker-compose/restore.sh /opt/cops/backup/lems/db-20261112T121406Z.sqlite3.gz --yes
-# 也可以指定 health 地址（默认按 LEMS_PORT 从 /opt/cops/apps/lems/.env 取，兜底 11000）
+./deploy/docker-compose/restore.sh /var/backups/lems/db-<UTC>.sqlite3.gz --yes
+# 也可以指定 health 地址（默认按 LEMS_PORT 从生产 .env 取，兜底 11000）
 HEALTH_URL=http://127.0.0.1:11000/api/health \
-  ./deploy/docker-compose/restore.sh /opt/cops/backup/lems/db-20261112T121406Z.sqlite3.gz --yes
+  ./deploy/docker-compose/restore.sh /var/backups/lems/db-<UTC>.sqlite3.gz --yes
 ```
 
 **生产护栏**：`CONTAINER=lems` 或 `VOLUME=lems_lems-data`（两个默认值）时必须带 `--yes`
 或 `PROD_CONFIRM=1`，否则脚本只打印将要动的容器与卷名后 `exit 1`。演练用显式变量绕开。
 
 `HEALTH_URL` 默认是 `http://127.0.0.1:<LEMS_PORT>/api/health`，`LEMS_PORT` 从
-`/opt/cops/apps/lems/.env` 读、兜底 `11000`。**生产宿主映射是 `80/tcp -> 0.0.0.0:11000`**，
+生产 `.env`（`LEMS_ENV`）读、兜底 `11000`。**生产宿主映射是 `80/tcp -> 0.0.0.0:11000`**，
 所以不能默认写 80——那会让恢复成功后仍判 health 失败退出 1。
 
 流程：解压 + `integrity_check` + 取备份行数（任一步不过就**什么都不动**，容器不会被停）→
@@ -139,19 +151,19 @@ docker compose -p lems-drill -f docker-compose.drill.yml --env-file .env.drill d
 docker volume rm lems-drill_lems-data
 ```
 
-实测（cloud2，2026-11-12，库 13.7 MB / 压缩后 1.0 MB）：
+实测（生产机，2026-11-12，库 13.7 MB / 压缩后 1.0 MB）：
 恢复 4 秒，v1.0.65→v1.0.66 升级 55 秒，v1.0.66 库回滚到 v1.0.65 32 秒，三次 health 均 200、
 行数一致。按每天 03:00 备份算，**RPO ≤ 24h，RTO ≈ 1 分钟**（恢复 + 启动 + health 通过）。
 
-### 生产落点（cloud2，2026-11-12 实测）
+### 生产落点（模板，实际值以部署机的 `.env` 为准）
 
 | 项 | 值 |
 | --- | --- |
-| 主机 | cloud2（10.193.0.9） |
-| compose 项目 | `lems`，文件 `/opt/cops/apps/lems/compose.yaml`（**不是**本目录，本目录是模板） |
-| 镜像 | `ghcr.chenby.cn/abrance/ems:v1.0.65`，digest `sha256:ff45a34d...` |
+| 主机 | `<prod-host>` |
+| compose 项目 | `lems`，文件 `<deploy-root>/compose.yaml`（**不是**本目录，本目录是模板） |
+| 镜像 | `${LEMS_IMAGE}:${LEMS_IMAGE_TAG}` |
 | 重启策略 | `unless-stopped` |
-| 卷 | `lems_lems-data` → `/var/lib/docker/volumes/lems_lems-data/_data` |
-| 库 | `db.sqlite3` 13.7 MB（WAL，`-wal` 常态 0 B） |
-| 健康检查 | `GET http://127.0.0.1:11000/api/health` |
-| 异地 | cloud2→nas 免密 SSH，`/pool1_8t/public/backup/lems` |
+| 卷 | `lems_lems-data` |
+| 库 | `db.sqlite3`（WAL） |
+| 健康检查 | `GET http://127.0.0.1:<LEMS_PORT>/api/health` |
+| 异地 | `$OFFSITE`（默认关闭） |

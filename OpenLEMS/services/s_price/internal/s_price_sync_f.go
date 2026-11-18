@@ -3,6 +3,8 @@ package internal
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -40,6 +42,10 @@ func StartEnergydcPriceSync(ctx context.Context) error {
 		c_log.Info(ctx, "电网电价同步未启用，跳过")
 		return nil
 	}
+	if strings.TrimSpace(cfg.BaseURL) == "" {
+		c_log.Warning(ctx, "电网电价同步未配置数据源地址（price_sync.base_url 或 PRICE_SYNC_BASE_URL），跳过")
+		return nil
+	}
 
 	interval := time.Duration(cfg.IntervalHours) * time.Hour
 	if interval <= 0 {
@@ -75,7 +81,7 @@ func StartEnergydcPriceSync(ctx context.Context) error {
 func loadPriceSyncConfig(ctx context.Context) priceSyncConfig {
 	cfg := priceSyncConfig{
 		Enabled:        false,
-		BaseURL:        "https://energydc.cn/edc/api/v1",
+		BaseURL:        strings.TrimSpace(os.Getenv("PRICE_SYNC_BASE_URL")),
 		Region:         40,
 		Usage:          24,
 		Cost:           12,
@@ -87,7 +93,10 @@ func loadPriceSyncConfig(ctx context.Context) priceSyncConfig {
 	}
 
 	cfg.Enabled = g.Cfg().MustGet(ctx, "price_sync.enabled", cfg.Enabled).Bool()
-	cfg.BaseURL = g.Cfg().MustGet(ctx, "price_sync.base_url", cfg.BaseURL).String()
+	cfg.BaseURL = g.Cfg().MustGet(ctx, "price_sync.base_url").String()
+	if v := strings.TrimSpace(os.Getenv("PRICE_SYNC_BASE_URL")); v != "" {
+		cfg.BaseURL = v
+	}
 	cfg.Region = g.Cfg().MustGet(ctx, "price_sync.region", cfg.Region).Int()
 	cfg.Usage = g.Cfg().MustGet(ctx, "price_sync.usage", cfg.Usage).Int()
 	cfg.Cost = g.Cfg().MustGet(ctx, "price_sync.cost", cfg.Cost).Int()
@@ -104,6 +113,15 @@ func loadPriceSyncConfig(ctx context.Context) priceSyncConfig {
 		cfg.LookbackMonths = 0
 	}
 	return cfg
+}
+
+// baseOrigin 从 base_url 取 scheme://host，用于 Origin/Referer（数据源会校验同源）。
+func baseOrigin(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // syncEnergydcPrices 拉取最新可用月份的电价并写入电价表
@@ -163,8 +181,10 @@ func requestPriceList(ctx context.Context, cfg priceSyncConfig, startTime int64)
 
 	client := g.Client().Timeout(15 * time.Second)
 	client.SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	client.SetHeader("Origin", "https://energydc.cn")
-	client.SetHeader("Referer", "https://energydc.cn/")
+	if origin := baseOrigin(cfg.BaseURL); origin != "" {
+		client.SetHeader("Origin", origin)
+		client.SetHeader("Referer", origin+"/")
+	}
 
 	resp, err := client.ContentJson().Post(ctx, strings.TrimRight(cfg.BaseURL, "/")+"/eprice/price-list", reqBody)
 	if err != nil {

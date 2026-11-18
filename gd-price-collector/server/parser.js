@@ -3,6 +3,9 @@ import * as cheerio from "cheerio";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// 允许的公众号文章域名：环境变量 WECHAT_HOST 覆盖，未配置时用公开平台域名兜底。
+const WECHAT_HOST = process.env.WECHAT_HOST || "mp.weixin.qq.com";
+
 const PAGE_LABELS = [
   "市场概况与日前申报",
   "日前成交与高峰节点电价",
@@ -17,8 +20,8 @@ export function assertWechatUrl(raw) {
   } catch {
     throw new Error("请粘贴完整的微信文章链接");
   }
-  if (parsed.hostname !== "mp.weixin.qq.com") {
-    throw new Error("只支持 mp.weixin.qq.com 公众号文章");
+  if (parsed.hostname !== WECHAT_HOST) {
+    throw new Error(`只支持 ${WECHAT_HOST} 公众号文章`);
   }
   return parsed.toString();
 }
@@ -96,7 +99,7 @@ async function fetchHtml(url) {
       "User-Agent": UA,
       Accept: "text/html,application/xhtml+xml",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-      Referer: "https://mp.weixin.qq.com/",
+      Referer: `https://${WECHAT_HOST}/`,
     },
   });
   if (!res.ok) {

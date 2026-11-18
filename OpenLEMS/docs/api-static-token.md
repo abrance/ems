@@ -16,11 +16,11 @@
 ```bash
 # 写法 A：专用头（推荐，语义最清楚）
 curl -s -H "X-API-Token: $EMS_API_STATIC_TOKEN" \
-  "https://ems.xiaoyxq.top/api/spot-report?page=1"
+  "https://<ems-host>/api/spot-report?page=1"
 
 # 写法 B：Authorization Bearer（给只支持标准头的客户端/网关用）
 curl -s -H "Authorization: Bearer $EMS_API_STATIC_TOKEN" \
-  "https://ems.xiaoyxq.top/api/spot-report?page=1"
+  "https://<ems-host>/api/spot-report?page=1"
 ```
 
 参数规则（`matchesAPIStaticToken`）：
@@ -59,20 +59,20 @@ token 只在这条链路上流动，任何一环都不要手改：
 
 ```
 GitHub Actions secret  EMS_API_STATIC_TOKEN
-        │  cops/.github/workflows/deploy.yml → 步骤「下发运行期密钥」
+        │  <deploy-repo>/.github/workflows/deploy.yml → 步骤「下发运行期密钥」
         ▼
-部署主机文件  <BASE_PATH>/secrets/lems-cloud3.env      （由脚本按 SECRET_ENV 声明写入）
-        │  cops/scripts/deploy-k8s.sh：kubectl create secret --from-env-file
+部署主机文件  <BASE_PATH>/secrets/<app>.env      （由脚本按 SECRET_ENV 声明写入）
+        │  <deploy-repo>/scripts/deploy-k8s.sh：kubectl create secret --from-env-file
         ▼
-k8s Secret  cops/lems-cloud3-secrets
-        │  cops/apps/lems-cloud3/k8s.yaml：envFrom.secretRef
+k8s Secret  <app>-secrets
+        │  <deploy-repo>/apps/<app>/k8s.yaml：envFrom.secretRef
         ▼
-容器环境变量  EMS_API_STATIC_TOKEN  （Deployment lems）
+容器环境变量  EMS_API_STATIC_TOKEN  （Deployment <app>）
 ```
 
 关键点：
 
-- `cops/apps/lems-cloud3/app.conf` 的 `SECRET_ENV="... EMS_API_STATIC_TOKEN"` 是这条链路的开关：
+- `<deploy-repo>/apps/<app>/app.conf` 的 `SECRET_ENV="... EMS_API_STATIC_TOKEN"` 是这条链路的开关：
   声明了才会下发，删掉就断链。它**故意不进 `REQUIRED_ENV`**——这样关闭这个特性时
   不会变成「缺变量导致部署失败」，pod 重建后只是不再带该变量。
 - **emsdevice 不引用这个 Secret**，滚动重建与它无关（`K8S_ROLLOUT` 里只有引用 Secret 的工作负载才会被密钥变化牵动）。
@@ -80,13 +80,13 @@ k8s Secret  cops/lems-cloud3-secrets
 ## 4. 轮换步骤
 
 1. 生成新 token（≥32 字节随机，例如 `openssl rand -hex 32`）。
-2. 更新 GitHub secret `abrance/cops` → `EMS_API_STATIC_TOKEN`（仓库 Settings → Secrets）。
+2. 更新部署仓库的 GitHub secret `<deploy-repo>` → `EMS_API_STATIC_TOKEN`（仓库 Settings → Secrets）。
 3. 触发一次部署，任选其一：
-   - `workflow_dispatch` 手动运行 Deploy，`app` 填 `lems-cloud3`（只部署这一个单元）；
+   - `workflow_dispatch` 手动运行 Deploy，`app` 填 `<app>`（只部署这一个单元）；
    - 或让 `apps/**` 的改动合入 main 顺带部署。
-4. 部署脚本比对 `secrets/lems-cloud3.env` 的 sha256，写入 `cops.vectorman.cn/secret-checksum`
-   注解 → Deployment `lems` 滚动；注解没变说明文件没换，别以为是「没生效」。
-5. 验证：新 token 打一次 `./tools/api-test/ems_api.sh GET /api/spot-report?page=1` 返回 `code:0`；
+4. 部署脚本比对 `<BASE_PATH>/secrets/<app>.env` 的 sha256，写入部署注解
+   → Deployment `<app>` 滚动；注解没变说明文件没换，别以为是「没生效」。
+5. 验证：新 token 打一次 `EMS_BASE=<地址> EMS_TOKEN=<token> ./tools/api-test/ems_api.sh GET /api/spot-report?page=1` 返回 `code:0`；
    旧 token 立刻失效（pod 滚动完成后容器里只剩新值）。
 6. 在任务系统/工单里记录轮换时间，但**不记录 token 值**。
 
@@ -95,10 +95,10 @@ k8s Secret  cops/lems-cloud3-secrets
 ## 5. 测试脚本
 
 ```bash
-EMS_TOKEN=<token> ./tools/api-test/ems_api.sh GET "/api/spot-report?page=1"
+EMS_BASE=<地址> EMS_TOKEN=<token> ./tools/api-test/ems_api.sh GET "/api/spot-report?page=1"
 ```
 
-- `EMS_BASE` 覆盖 base（默认 `https://ems.xiaoyxq.top`），`EMS_AUTH=bearer` 改用 `Authorization: Bearer`。
+- `EMS_BASE` 必填（脚本内不含任何默认地址），`EMS_AUTH=bearer` 改用 `Authorization: Bearer`。
 - token 只从环境变量读，脚本里没有默认值，也没有任何硬编码。
 - 退出码 = 响应体里的 `code`（`0` 成功；`401` 未登录；`403` 权限不足……）。
   shell 退出码会被截断到 0~255，`401` 会表现为 `$?=145`，所以失败时脚本同时把 `code=… message` 打到 stderr，

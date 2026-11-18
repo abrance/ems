@@ -17,7 +17,7 @@ graph TD
     Auth --> Ctrl["spotreport controller"]
     Ctrl --> DB["s_db gd_spot_report"]
     Ctrl --> Collect["WeChat parse and Qiniu upload"]
-    Collect --> Wx["mp.weixin.qq.com"]
+    Collect --> Wx["<wechat-host>"]
     Collect --> Qiniu["tos-me bucket z2"]
 ```
 
@@ -34,7 +34,7 @@ graph TD
 
 采集失败返回 `gcode.CodeInvalidParameter`，文案：
 
-- 非 `mp.weixin.qq.com`：`只支持微信公众号文章链接`
+- 非 `<wechat-host>`：`只支持微信公众号文章链接`
 - 标题无日期：`标题未包含运行日报日期：{title}`
 - 识别不到 4 页图：`文章中没有识别到日报图片`
 

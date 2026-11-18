@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """广东电力交易中心官方指标 -> ems 业务库 `gd_spot_metric`。
 
-官方 API（pm.gd.csg.cn）是**唯一权威源**：OCR 日报旧值与第三方 gdmetric CSV 都作废。
+官方 API 是**唯一权威源**：OCR 日报旧值与第三方 gdmetric CSV 都作废。
 本脚本只做「文件 -> 业务表」：读 `gdpm_dataset.py` 产出的长表 CSV，写
 `gd_spot_metric`（origin=pm-api）、采集元数据表 `gd_pm_fetch_run`，并把被官方整表取代的
 旧行（日前/实时成交电价四类指标）标成 origin=void，逐条写审计；官方不给数的指标
@@ -27,6 +27,8 @@ import json
 import os
 import sqlite3
 import sys
+
+import gd_pm_fetch as fetch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "data", "gdpm"))
@@ -288,7 +290,7 @@ def fetch_run_rows(records):
         out.append({
             "target_date": day, "dataset": dataset, "status": "ok",
             "rows_written": len(items),
-            "source_url": "https://pm.gd.csg.cn/portal/xhr/sso-info-disclosure",
+            "source_url": fetch.BASE,
             "payload": json.dumps(items, ensure_ascii=False, separators=(",", ":")),
             "warnings": "", "extractor_version": EXTRACTOR,
         })

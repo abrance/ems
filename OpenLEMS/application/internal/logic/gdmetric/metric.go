@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	defaultURL        = "https://file.xiaoyxq.top/gd_metric.csv"
 	defaultCachePath  = "out/gd_metric.csv"
 	defaultRefreshHrs = 6
 	dateLayout        = "2006-01-02"
@@ -149,14 +148,14 @@ func shanghaiLocation() *time.Location {
 }
 
 // loadConfig 读 gd_metric.* 配置。enabled 默认 true（行为与历史一致）；
-// 置 false 表示「第三方 CSV 通道停用」——不再向 file.xiaoyxq.top 拉取，
+// 置 false 表示「第三方 CSV 通道停用」——不再向 gd_metric.url 拉取，
 // 只用本地已有缓存（96 点分时序列目前没有别的来源，本地数据仍然可用）。
 func loadConfig(ctx context.Context) (enabled, serveFrozen bool, url, cachePath string, refresh time.Duration) {
 	enabled = true
 	// 注意：serveFrozen 的默认值必须是 false。配置文件读不到时宁可「用不了」，
 	// 也不能把已停更的通道当成「还能用」。
 	serveFrozen = false
-	url = defaultURL
+	url = ""
 	cachePath = defaultCachePath
 	hours := defaultRefreshHrs
 	if g.Cfg() != nil {
@@ -294,6 +293,9 @@ func (s *store) ensureFresh(ctx context.Context) error {
 func (s *store) refresh(ctx context.Context) error {
 	if !s.enabled {
 		return errors.New("第三方电网指标通道已停用（gd_metric.enabled=false）")
+	}
+	if strings.TrimSpace(s.url) == "" {
+		return errors.New("第三方电网指标通道未配置下载地址（gd_metric.url 或 GD_METRIC_URL）")
 	}
 	fetchCtx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()

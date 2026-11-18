@@ -21,7 +21,7 @@ python3 tools/price-backtest/backtest.py \
 ... --cache-dir /tmp/bt-cache
 ```
 
-`--csv` 解析顺序：**显式 `--csv` > 环境变量 `GD_METRIC_CSV` > 自动探测**（先当前目录、后仓库根；候选 `out/gd_metric.csv`、`OpenLEMS/application/internal/logic/gdmetric/out/gd_metric.csv`），都没命中才报错并列出候选。当前仓库命中的是后一个（35.7MB）。预测服务默认 `https://forecast.xiaoyxq.top`，可用 `--forecast-url` 或 `FORECAST_URL` 覆盖。
+`--csv` 解析顺序：**显式 `--csv` > 环境变量 `GD_METRIC_CSV` > 自动探测**（先当前目录、后仓库根；候选 `out/gd_metric.csv`、`OpenLEMS/application/internal/logic/gdmetric/out/gd_metric.csv`），都没命中才报错并列出候选。当前仓库命中的是后一个（35.7MB）。预测服务地址不内置，用 `--forecast-url` 或 `FORECAST_URL` 指定；只算基线时加 `--no-timesfm`。
 
 参数速查：`--from/--to` 目标日闭区间、`--history-days` 上下文天数、`--market dayAhead|real|load`、`--no-timesfm`、`--cache-dir`、`--limit N`（调试取前 N 天）、`--export-quantiles PATH` + `--quantile-level`（默认 0.9）。
 
@@ -52,7 +52,7 @@ timestamp,value
 
 ## 预测服务版本（基线可比性）
 
-`GET https://forecast.xiaoyxq.top/version`（2026-11-12 实取）：
+`GET $FORECAST_URL/version`（2026-11-12 实取）：
 
 ```json
 {"name":"modelman-forecast","version":"0.1.0","git_commit":"de7e751","build_time":"2026-09-30T12:36:32Z",

@@ -6,9 +6,9 @@
 
 ## 0. 一句话结论
 
-- **日频市场数据：已全切官方直采**（`pm.gd.csg.cn` 披露接口 → `gd_spot_metric`，`origin=pm-api`）。
+- **日频市场数据：已全切官方直采**（官方披露接口 → `gd_spot_metric`，`origin=pm-api`）。
 - **96 点（15 分钟）分时：官方拿不到。** 匿名访问门户的四个 96 点节点全部返回 0 条；
-  要拿只能靠 `pm.gd.csg.cn` **市场成员账号**在交易平台导出。匿名不可得，且不要尝试绕过鉴权。
+  要拿只能靠**市场成员账号**在交易平台导出。匿名不可得，且不要尝试绕过鉴权。
 - 第三方（电查查）96 点仍在更新（T-7 左右），但**没有免登录、没有自动采集**：
   抓取要 10~15 分钟寿命的凭证。是否恢复由用户拍板，代码里已保留开关与恢复路径。
 
@@ -123,7 +123,7 @@ $ go test ./internal/logic/gdmetric/ -run 'TestNoNewGdmetricImporters|TestRetire
    `Authorization` / `JWTHeaderName` / Cookie（寿命 10~15 分钟）。
 2. `python3 tools/gd-spot/fetch_gd_metric.py --check` 确认服务端最新时间（免登录）。
 3. `python3 tools/gd-spot/fetch_gd_metric.py --from <D1> --to <D2> --source 9 --append-to <csv> --out <csv>`。
-4. 把新 CSV 传到 `https://file.xiaoyxq.top/gd_metric.csv`（对象存储 `tos-me`），
+4. 把新 CSV 传到 `GD_METRIC_URL` 指向的位置（对象存储），
    容器内 `out/gd_metric.csv` 由服务按 `refresh_hours` 刷新。
 5. `gd_metric.enabled=true` + `serve_frozen=true`，重启 ems。页面自动带「第三方 · 非官方」。
 

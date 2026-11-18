@@ -34,7 +34,7 @@ DB="${DB:-db.sqlite3}"
 TABLES="${TABLES:-alarm_history log device price setting}"
 OWNER="${OWNER:-1001:1001}"                      # 卷内属主，与生产一致
 WAIT="${WAIT:-120}"                              # health 等待上限（秒）
-LEMS_ENV="${LEMS_ENV:-/opt/cops/apps/lems/.env}" # 生产 env，用来取宿主机映射端口
+LEMS_ENV="${LEMS_ENV:-}" # 生产 env（可选），用来取宿主机映射端口
 
 # 生产护栏：默认值就是生产，没带 --yes 的默认执行必须先说清楚要动什么再退出
 if [ "$YES" != "1" ] && { [ "$CONTAINER" = "lems" ] || [ "$VOLUME" = "lems_lems-data" ]; }; then

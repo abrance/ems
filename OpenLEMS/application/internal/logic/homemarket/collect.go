@@ -1,7 +1,7 @@
 // Package homemarket 官网主页两路市场数据的采集（24 点分时 + 地市节点价）。
 //
 // 为什么不复用 tools/gdpm（披露接口那套）：那是另一套端点、另一套口径。
-// 本包打的是 pm.gd.csg.cn 的**主页**网关：
+// 本包打的是官方**主页**网关（地址由 HOME_MARKET_GATEWAY_BASE 配置）：
 //
 //	24 点   /portal/xhr/sso-portal/portal/home/trade/tradeSituation?date=D&type=1
 //	地市     /portal/xhr/sso-portal/portal/home/marketEntitiesNum?date=D&model=2
@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -36,11 +37,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-// gatewayBase 主页网关前缀。
+// gatewayBase 主页网关前缀。默认空：由 HOME_MARKET_GATEWAY_BASE 或
+// home_market.gateway_base 注入，调度启动时解析（见 scheduler.go）。
 //
 // 必须走 /portal/xhr/：直连 /sso-portal/... 会 400（源站动态防护）。
 // 是变量而不是常量，为了单测能把请求指向本地桩服务。
-var gatewayBase = "https://pm.gd.csg.cn/portal/xhr/sso-portal/portal/home"
+var gatewayBase = ""
 
 const (
 	// SourceHome24h 24 点分时的来源角标（页面直接展示）
@@ -62,6 +64,15 @@ const (
 )
 
 var httpClient = &http.Client{Timeout: requestTimeout}
+
+// gatewayReferer 从网关地址推导站点 Referer（源站校验同源）。
+func gatewayReferer() string {
+	u, err := url.Parse(gatewayBase)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/portal/"
+}
 
 // collectErrKind 采集失败的类别。
 //
@@ -138,7 +149,7 @@ func getJSON(ctx context.Context, url string, out any) error {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "+
 		"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", "https://pm.gd.csg.cn/portal/")
+	req.Header.Set("Referer", gatewayReferer())
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 
 	res, err := httpClient.Do(req)

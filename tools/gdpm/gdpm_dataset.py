@@ -31,7 +31,7 @@ import gd_pm_fetch as fetch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUT = os.path.normpath(os.path.join(HERE, "..", "..", "data", "gdpm"))
-SRC = "pm.gd.csg.cn"
+SRC = fetch.SOURCE_LABEL
 
 # 日频模板 -> (文件名前缀, dataset, 涨跌口径)
 DAILY = {
