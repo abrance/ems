@@ -323,6 +323,22 @@ func TestLoadPriceHourHistoryWindow(t *testing.T) {
 	}
 }
 
+// 空表与「窗口里没完整日」必须分开报：前者是采集没配/没跑过（本地开发最常见）。
+func TestLoadPriceHourEmptyTableSaysCollectionMissing(t *testing.T) {
+	src := &stubHourSource{} // 一行都没有
+	_, err := loadPriceHourWith(context.Background(), &stubForecastClient{}, src.load,
+		"ahead", "2026-11-18", 7, defaultQuantiles, priceLocation(), mustDay(t, "2026-11-18"))
+	if err == nil {
+		t.Fatal("空表应报错")
+	}
+	if !strings.Contains(err.Error(), "本库还没有 24 点分时数据") {
+		t.Errorf("空表应提示采集未配置，实际 %v", err)
+	}
+	if !strings.Contains(err.Error(), "HOME_MARKET_GATEWAY_BASE") {
+		t.Errorf("空表应给出配置项，实际 %v", err)
+	}
+}
+
 // 目标日之前完全没有完整日 → 明确报错，不返回空图。
 func TestLoadPriceHourNoCompleteDay(t *testing.T) {
 	src := &stubHourSource{rows: hourRows("2026-11-17", 1, 2)[:17]}

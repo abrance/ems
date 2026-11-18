@@ -141,6 +141,13 @@ func loadPriceHourWith(
 		return nil, errors.Wrap(err, "读取 24 点分时失败")
 	}
 
+	if len(rows) == 0 {
+		// 空表和「窗口里没完整日」是两回事：前者是采集没配/没跑过（本地开发最常见），
+		// 后者才是等源站发布。混成一句话会让人去怀疑预测逻辑。
+		return nil, errors.Errorf("本库还没有 24 点分时数据（%s ~ %s 一行都没有）："+
+			"先确认已配置官网主页网关（HOME_MARKET_GATEWAY_BASE），再调 POST /api/gd-metric/home-market/backfill 回补",
+			from, to)
+	}
 	valuesByDate := groupHome24h(rows, spec.Market)
 	anchor, err := latestCompleteDay(valuesByDate, targetDate, from)
 	if err != nil {
