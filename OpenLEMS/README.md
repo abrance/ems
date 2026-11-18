@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://lems.hexems.com/">在线体验</a>
+  <a href="https://YOUR-DEMO-HOST/">在线体验</a>
   ·
   <a href="docs/README.en.md">English README</a>
   ·
@@ -203,7 +203,7 @@
 
 ## 在线体验
 
-- 在线体验地址：[https://lems.hexems.com/](https://lems.hexems.com/)
+- 在线体验地址：[https://YOUR-DEMO-HOST/](https://YOUR-DEMO-HOST/)
 - 管理员密码：`888888`
 
 建议使用平板横屏模式体验，当前项目的界面布局、触控操作和运维主流程已针对平板场景做了优化。

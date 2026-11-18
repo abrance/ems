@@ -1,8 +1,8 @@
 # gd-spot：广东现货 15 分钟数据补齐
 
-`fetch_gd_metric.py` 从电查查（`www.dianchacha.cn`）拉广东现货 15 分钟数据，
+`fetch_gd_metric.py` 从第三方现货站（`DIANCHACHA_BASE_URL`）拉广东现货 15 分钟数据，
 按 **`gd_metric.csv` 的原格式**导出 —— EMS 首页「电网日指标」读的就是那份文件
-（`config.yaml` 的 `gd_metric.url` = `https://file.xiaoyxq.top/gd_metric.csv`）。
+（`config.yaml` 的 `gd_metric.url`，由 `GD_METRIC_URL` 注入）。
 
 ## 为什么需要它
 
@@ -16,7 +16,8 @@
 
 ```bash
 cd tools/gd-spot
-cp creds.json.example creds.json      # 填 authorization / jwt / cookie
+export DIANCHACHA_BASE_URL=https://<host>
+cp creds.json.example creds.json      # 填 authorization / jwt / cookie / aesKey / aesIv
 
 # 先看服务端最新到哪天（免登录，不消耗凭证）
 python3 fetch_gd_metric.py --check
@@ -28,7 +29,7 @@ python3 fetch_gd_metric.py --from 2026-09-01 --to 2026-10-06 --source 9 --out pa
 python3 fetch_gd_metric.py --from 2026-09-01 --to 2026-10-06 --append-to gd_metric.csv --out gd_metric_new.csv
 ```
 
-凭证怎么取：浏览器打开 `https://www.dianchacha.cn/transaction-new/trade-data`，
+凭证怎么取：浏览器打开 `$DIANCHACHA_BASE_URL/transaction-new/trade-data`，
 DevTools → Network → 找任意 `trade/power/data/spot` 请求，复制请求头的
 `Authorization`、`JWTHeaderName`，以及 Cookie。
 

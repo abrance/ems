@@ -1685,7 +1685,7 @@ DEBUG 打开了怎么还是没有」）：
 
 **多外生变量**：服务端当前按一维序列用；负荷/新能源各自单独预测，然后在价格上做残差回归校正（即“数据驱动 + 后校正”）。若要把它们当特征，再做一层 GBDT 残差模型。
 
-### 14.5 时序预测服务 `forecast.xiaoyxq.top`
+### 14.5 时序预测服务 `<forecast-host>`
 
 已实际探查（2026-10-06）：
 
@@ -1702,7 +1702,7 @@ DEBUG 打开了怎么还是没有」）：
 **EMS 已接入**（后端已有，不重建）：
 
 ```
-前端/逻辑 ─▶ s_forecast 客户端 ──POST {baseURL}/v1/forecast──▶ forecast.xiaoyxq.top
+前端/逻辑 ─▶ s_forecast 客户端 ──POST {baseURL}/v1/forecast──▶ <forecast-host>
                     ↑
      配置来源：微电网策略 setting `policy_microgrid`
                .forecastBaseUrl / .gridDeviceId / .forecastHorizon
@@ -1746,5 +1746,5 @@ GET /api/forecast/price?market=ahead|real&historyDays=60&horizonDays=5&quantiles
 | 模块 | 本期 | 说明 |
 | --- | --- | --- |
 | 策略反演 | 🟡 统计反演已做（市场整体） | 见 §5.6 与 §14.1；按机组反演仍缺数据 |
-| 长周期电价预测（未来多日） | ✅ 做 | 复用 `forecast.xiaoyxq.top` TimesFM，一次出 5 日 |
+| 长周期电价预测（未来多日） | ✅ 做 | 复用 `<forecast-host>` TimesFM，一次出 5 日 |
 | 长周期投资评估（年/15 年） | ❌ 不做 | 另一产品线 |

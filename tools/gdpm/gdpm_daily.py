@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import traceback
 
+import gd_pm_fetch as fetch
 import gdpm_dataset
 import gdpm_sqlite as imp
 
@@ -62,7 +63,7 @@ def record_failure(db, target_date, message, log=print):
             "status=excluded.status, rows_written=excluded.rows_written,"
             "warnings=excluded.warnings, updated_at=excluded.updated_at",
             (target_date, DATASET_FAILED, "failed", 0,
-             "https://pm.gd.csg.cn/portal/xhr/sso-info-disclosure", None,
+             fetch.BASE, None,
              message[:WARN_LIMIT], imp.EXTRACTOR, now, now))
         conn.commit()
     except sqlite3.Error as e:

@@ -849,7 +849,7 @@ onMounted(async () => {
           当前{{ segmentConfigured ? '已取到' : '未取到（全部归入全天）' }}。
         </li>
         <li>
-          <strong>真值来源（两条腿同一个口径）</strong>：官方直采（pm.gd.csg.cn 披露接口，
+          <strong>真值来源（两条腿同一个口径）</strong>：官方直采（信息披露接口，
           <code>gd_spot_metric</code> 的「发电侧日前/实时加权平均电价」）。
           96 点分时只存在于第三方 CSV，<b>已停更</b>，实际值止于 {{ FROZEN_AS_OF }}，只作历史演示并标「第三方 · 非官方」。
         </li>

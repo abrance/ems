@@ -48,7 +48,7 @@ func TestSelectReportImagesWithUnsizedNoise(t *testing.T) {
 }
 
 func TestParseArticleWithDuplicateHeader(t *testing.T) {
-	article, err := ParseArticle(articleWithDuplicateHeader, "https://mp.weixin.qq.com/s/pxdJ0CyMva1evGOKsCpE0w")
+	article, err := ParseArticle(articleWithDuplicateHeader, "https://mp.weixin.qq.com/s/demo1")
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestSelectReportImagesWithMixedPageWidth(t *testing.T) {
 }
 
 func TestParseArticleWithMixedPageWidth(t *testing.T) {
-	article, err := ParseArticle(articleWithMixedPageWidth, "https://mp.weixin.qq.com/s/NITM406hoeuLthyQcdkYdg")
+	article, err := ParseArticle(articleWithMixedPageWidth, "https://mp.weixin.qq.com/s/demo2")
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}

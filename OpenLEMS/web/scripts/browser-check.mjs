@@ -272,7 +272,7 @@ const FIXTURES = {
       { dataset: 'day_ahead_trade', from: '2026-06-03', to: '2026-08-31', periods: 90, missing: [], lastDate: '2026-08-31' },
       { dataset: 'realtime_trade', from: '2026-06-03', to: '2026-08-29', periods: 88, missing: [], lastDate: '2026-08-29' },
     ],
-    source: 'pm.gd.csg.cn',
+    source: '官方披露接口',
     updatedAt: '2026-08-31T10:00:00+08:00',
   },
   // 注意外壳：真实响应是 { forecast: {...} }（api/forecast.ts 会拆包），

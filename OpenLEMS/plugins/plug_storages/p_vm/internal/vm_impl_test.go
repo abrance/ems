@@ -32,7 +32,7 @@ func TestSaveSystemMetricsNativeNaming(t *testing.T) {
 		"market": "dayahead",
 		"side":   "gen",
 		"kind":   "weighted_avg",
-		"src":    "pm.gd.csg.cn",
+		"src":    "official",
 	}, map[string]any{"gdpm_price_cny_mwh": 334.569613})
 	if err != nil {
 		t.Fatalf("SaveSystemMetrics 失败: %v", err)
@@ -41,7 +41,7 @@ func TestSaveSystemMetricsNativeNaming(t *testing.T) {
 	if path != DefaultInsertPath {
 		t.Errorf("写入路径 = %q, 期望 %q", path, DefaultInsertPath)
 	}
-	want := `gdpm_price_cny_mwh{kind="weighted_avg",market="dayahead",side="gen",src="pm.gd.csg.cn"} 334.569613 `
+	want := `gdpm_price_cny_mwh{kind="weighted_avg",market="dayahead",side="gen",src="official"} 334.569613 `
 	if !strings.HasPrefix(body, want) {
 		t.Fatalf("payload 前缀不对:\n got: %q\nwant: %q", body, want)
 	}

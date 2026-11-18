@@ -40,9 +40,9 @@ class ImportTest(unittest.TestCase):
         conn.close()
         self.csv = os.path.join(self.dir, "long.csv")
         make_csv(self.csv, [
-            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权平均电价", 428.947306, "元/兆瓦时", "pm.gd.csg.cn"),
-            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权最高电价", 514.995477, "元/兆瓦时", "pm.gd.csg.cn"),
-            ("2026-09-16", "realtime_trade", "发电侧", "发电侧实时加权平均电价", 420.534632, "元/兆瓦时", "pm.gd.csg.cn"),
+            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权平均电价", 428.947306, "元/兆瓦时", "official"),
+            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权最高电价", 514.995477, "元/兆瓦时", "official"),
+            ("2026-09-16", "realtime_trade", "发电侧", "发电侧实时加权平均电价", 420.534632, "元/兆瓦时", "official"),
         ])
 
     def run_import(self):
@@ -228,8 +228,8 @@ class VoidScopeTest(unittest.TestCase):
         conn.close()
         self.csv = os.path.join(self.dir, "long.csv")
         make_csv(self.csv, [
-            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权平均电价", 428.9, "元/兆瓦时", "pm.gd.csg.cn"),
-            ("2026-09-16", "realtime_trade", "发电侧", "发电侧实时加权平均电价", 420.5, "元/兆瓦时", "pm.gd.csg.cn"),
+            ("2026-09-16", "day_ahead_trade", "发电侧", "发电侧日前加权平均电价", 428.9, "元/兆瓦时", "official"),
+            ("2026-09-16", "realtime_trade", "发电侧", "发电侧实时加权平均电价", 420.5, "元/兆瓦时", "official"),
         ])
 
     def run_import(self):

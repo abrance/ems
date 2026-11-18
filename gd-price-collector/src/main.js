@@ -2,7 +2,7 @@ import "./styles.css";
 
 const app = document.querySelector("#app");
 const state = {
-  url: "https://mp.weixin.qq.com/s/pxdJ0CyMva1evGOKsCpE0w",
+  url: "",
   status: "",
   statusType: "",
   loading: false,
@@ -23,6 +23,7 @@ async function boot() {
 async function loadConfig() {
   const res = await fetch("/api/config");
   state.config = await res.json();
+  if (!state.url) state.url = state.config.defaultUrl || "";
 }
 
 async function loadRecords() {
@@ -118,7 +119,7 @@ function render() {
       <aside class="panel">
         <h2>采集台</h2>
         <label>微信文章链接</label>
-        <input class="url-box" id="url" value="${escapeHtml(state.url)}" placeholder="https://mp.weixin.qq.com/s/..." />
+        <input class="url-box" id="url" value="${escapeHtml(state.url)}" placeholder="粘贴文章链接" />
         <div class="row">
           <button class="btn" id="collect" ${state.loading ? "disabled" : ""}>${state.loading ? "采集中" : "采集入库"}</button>
         </div>

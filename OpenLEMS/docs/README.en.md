@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://lems.hexems.com/">Online Demo</a>
+  <a href="https://YOUR-DEMO-HOST/">Online Demo</a>
   ·
   <a href="#quick-start">Quick Start</a>
   ·
@@ -190,7 +190,7 @@ A more precise description is that `LEMS` already provides algorithmic foundatio
 
 ## Online Demo
 
-- Demo URL: [https://lems.hexems.com/](https://lems.hexems.com/)
+- Demo URL: [https://YOUR-DEMO-HOST/](https://YOUR-DEMO-HOST/)
 - Admin password: `888888`
 
 For the best experience, use landscape tablet mode. The current UI layout, touch interactions, and core O&M flows have been optimized for tablet scenarios.

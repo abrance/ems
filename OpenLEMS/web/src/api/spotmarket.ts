@@ -1,7 +1,7 @@
 import { api } from './client'
 
 /**
- * 广东电力市场官方指标（广东电力交易中心 pm.gd.csg.cn 直采，origin=pm-api）。
+ * 广东电力市场官方指标（广东电力交易中心信息披露接口直采，origin=pm-api）。
  *
  * 这是**唯一权威源**：OCR 日报旧值（origin=void）与第三方 gdmetric CSV 都不再作为
  * 市场数据的依据。口径见 tools/gdpm/README.md。

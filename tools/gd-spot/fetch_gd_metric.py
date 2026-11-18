@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""电查查（dianchacha.cn）现货 15 分钟数据 → gd_metric.csv 同格式导出。
+"""第三方现货站 15 分钟数据 → gd_metric.csv 同格式导出。
 
 背景
 ----
-EMS 首页「电网日指标」读的是 https://file.xiaoyxq.top/gd_metric.csv，
+EMS 首页「电网日指标」读的是 GD_METRIC_URL 指向的 CSV，
 那份文件就是这个接口的导出（已逐点核对：同一 日期/时间/typeId 的数值与原文件完全一致，
 2026-08-31 三类共 288 行字符串级 0 mismatch）。上游停更时，用本脚本把缺口补齐。
 
@@ -14,7 +14,8 @@ EMS 首页「电网日指标」读的是 https://file.xiaoyxq.top/gd_metric.csv�
 
 用法
 ----
-  cp creds.json.example creds.json      # 填 authorization / jwt / cookie
+  export DIANCHACHA_BASE_URL=https://<host>
+  cp creds.json.example creds.json      # 填 authorization / jwt / cookie / aesKey / aesIv
   python3 fetch_gd_metric.py --from 2026-09-01 --to 2026-10-06 --out patch.csv
   python3 fetch_gd_metric.py --month 2026-09 --append-to gd_metric.csv --out gd_metric.csv
   python3 fetch_gd_metric.py --from 2026-09-01 --to 2026-10-06 --source 9 --out only_actual.csv
@@ -40,16 +41,17 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = "https://www.dianchacha.cn"
+# 站点地址与前端解密参数都不写入仓库：
+#   DIANCHACHA_BASE_URL  必填，形如 https://<host>
+#   DIANCHACHA_AES_KEY / DIANCHACHA_AES_IV  可选；也可写在 creds.json 的 aesKey / aesIv
+BASE = os.environ.get("DIANCHACHA_BASE_URL", "").strip().rstrip("/")
 SPOT = BASE + "/electric/api/v2/trade/power/data/spot"
 LATEST = BASE + "/electric/api/v2/home/page/electricityPricesLatest"
 REFERER = BASE + "/transaction-new/trade-data"
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0")
 
-# 前端 chunk 26.0c1d05c5.js 的 Decrypt 里写死的 AES-128-CBC / PKCS7 参数
-AES_KEY = b"w*qYPqDydSIEdc#*"
-AES_IV = b"mLPeKAH6psn9dnS2"
+# 前端 Decrypt 用的 AES-128-CBC / PKCS7 参数从 creds.json 或环境变量取。
 
 COLUMNS = ["时间戳", "日期", "时间", "typeId", "类型", "单位", "数值", "sourceId"]
 TYPES = {"21": "日前电价", "22": "实时电价", "23": "负荷"}
@@ -66,31 +68,41 @@ class AuthError(RuntimeError):
 
 # --------------------------------------------------------------------------- 解密
 
-def decrypt(ct_b64):
+def aes_params(creds_):
+    key = (creds_.get("aesKey") or os.environ.get("DIANCHACHA_AES_KEY") or "").encode()
+    iv = (creds_.get("aesIv") or os.environ.get("DIANCHACHA_AES_IV") or "").encode()
+    if len(key) != 16 or len(iv) != 16:
+        sys.exit("缺少 AES 参数：在 creds.json 填 aesKey/aesIv（各 16 字节），"
+                 "或设置 DIANCHACHA_AES_KEY / DIANCHACHA_AES_IV")
+    return key, iv
+
+
+def decrypt(ct_b64, creds_):
     """AES-128-CBC + PKCS7，入参是 base64 密文，返回明文字节。"""
+    key, iv = aes_params(creds_)
     raw = base64.b64decode(ct_b64)
     for decryptor in (_decrypt_cryptography, _decrypt_openssl):
         try:
-            return decryptor(raw)
+            return decryptor(raw, key, iv)
         except ImportError:
             continue
     raise RuntimeError("既没有 cryptography 也没有 openssl，无法解密")
 
 
-def _decrypt_cryptography(raw):
+def _decrypt_cryptography(raw, key, iv):
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.primitives.padding import PKCS7
 
-    dec = Cipher(algorithms.AES(AES_KEY), modes.CBC(AES_IV)).decryptor()
+    dec = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
     padded = dec.update(raw) + dec.finalize()
     unpadder = PKCS7(128).unpadder()
     return unpadder.update(padded) + unpadder.finalize()
 
 
-def _decrypt_openssl(raw):
+def _decrypt_openssl(raw, key, iv):
     proc = subprocess.run(
         ["openssl", "enc", "-d", "-aes-128-cbc", "-nopad",
-         "-K", AES_KEY.hex(), "-iv", AES_IV.hex()],
+         "-K", key.hex(), "-iv", iv.hex()],
         input=raw, capture_output=True, check=True)
     padding = proc.stdout[-1]
     if not 1 <= padding <= 16 or proc.stdout[-padding:] != bytes([padding]) * padding:
@@ -156,7 +168,7 @@ def fetch_spot(creds_, region, type_id, start, end):
     payload = body.get("data")
     if not payload:
         return []
-    return json.loads(decrypt(payload)) or []
+    return json.loads(decrypt(payload, creds_)) or []
 
 
 # --------------------------------------------------------------------------- 组装
@@ -242,6 +254,9 @@ def main():
     parser.add_argument("--no-bom", action="store_true", help="不写 UTF-8 BOM")
     parser.add_argument("--check", action="store_true", help="只看服务端最新到哪天，不抓数据")
     args = parser.parse_args()
+
+    if not BASE:
+        sys.exit("缺少 DIANCHACHA_BASE_URL —— 站点地址不内置，请先导出环境变量")
 
     types = [t.strip() for t in args.types.split(",") if t.strip()]
     for t in types:

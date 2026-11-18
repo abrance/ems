@@ -550,7 +550,7 @@ useECharts(
         sub="发电侧 · 元/兆瓦时"
         :span="8"
         :loading="loading"
-        :foot="`数据来源：${board?.source || 'pm.gd.csg.cn'} · 运行日 ${board?.from || '—'} ~ ${board?.to || '—'}`"
+        :foot="`数据来源：${board?.source || '官方披露接口'} · 运行日 ${board?.from || '—'} ~ ${board?.to || '—'}`"
       >
         <div ref="priceEl" class="chart" />
       </PanelBox>
@@ -696,7 +696,7 @@ useECharts(
   </template>
 
   <p class="source">
-    数据来源：{{ board?.source || '广东电力交易中心 pm.gd.csg.cn' }} ·
+    数据来源：{{ board?.source || '广东电力交易中心披露接口' }} ·
     口径与更新方式见 tools/gdpm/README.md · 最近一次入库 {{ board?.updatedAt || '—' }}
   </p>
 </template>

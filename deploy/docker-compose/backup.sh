@@ -10,8 +10,8 @@
 set -eu
 
 # ---- 可调参数：只改这一段 ----
-BACKUP_DIR="${BACKUP_DIR:-/opt/cops/backup/lems}"         # 本地备份目录
-OFFSITE="${OFFSITE-nas:/pool1_8t/public/backup/lems}"    # 异地目标 ssh:path；显式置空（OFFSITE=）= 不做异地
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/lems}"            # 本地备份目录
+OFFSITE="${OFFSITE:-}"                                  # 异地目标 ssh:path；不设 = 不做异地
 KEEP_DAILY="${KEEP_DAILY:-7}"                             # 本地保留日备份数
 KEEP_WEEKLY="${KEEP_WEEKLY:-4}"                           # 本地保留周备份数（UTC 周日那份）
 KEEP_OFFSITE="${KEEP_OFFSITE:-7}"                         # 异地保留份数（至少留 1 份日备）

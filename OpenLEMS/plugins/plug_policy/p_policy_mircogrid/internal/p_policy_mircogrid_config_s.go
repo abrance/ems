@@ -22,7 +22,7 @@ type SPolicyMircogridConfig struct {
 
 	// 负荷预测（TimesFM），用于预测型需量控制
 	EnableLoadForecast bool   `group:"负荷预测" json:"enableLoadForecast" name:"启用负荷预测" desc:"启用 TimesFM 负荷预测，提前削峰" ct:"switch" vt:"bool" default:"false"`
-	ForecastBaseUrl    string `group:"负荷预测" json:"forecastBaseUrl" vt:"string" name:"预测服务地址" desc:"TimesFM 预测服务地址" ct:"text" default:"https://forecast.xiaoyxq.top"`
+	ForecastBaseUrl    string `group:"负荷预测" json:"forecastBaseUrl" vt:"string" name:"预测服务地址" desc:"TimesFM 预测服务地址" ct:"text"`
 	ForecastHorizon    int    `group:"负荷预测" json:"forecastHorizon" name:"预测步数" desc:"预测未来点数（15分钟/点）" ct:"number" vt:"int" min:"1" max:"512" default:"4"`
 	ForecastRefreshMin int    `group:"负荷预测" json:"forecastRefreshMinutes" name:"预测刷新间隔(分钟)" desc:"负荷预测刷新间隔" ct:"number" vt:"int" min:"1" default:"15"`
 

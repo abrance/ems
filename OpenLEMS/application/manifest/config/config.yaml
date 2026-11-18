@@ -46,7 +46,9 @@ database:
 # 数据来源：公开的分时电价查询接口，按当前月拉取并写入电价表
 price_sync:
   enabled: true
-  base_url: "https://energydc.cn/edc/api/v1"
+  # 数据源地址不写入仓库：用环境变量 PRICE_SYNC_BASE_URL 或本地 config 覆盖。
+  # 留空时同步任务跳过启动（不会静默打空地址）。
+  base_url: ""
   region: 40            # 地区ID：40=广东珠三角五市
   usage: 24             # 用电类型：24=工商业用电
   cost: 12              # 计费方式：12=两部制
@@ -56,12 +58,19 @@ price_sync:
   priority: 1           # 写入电价的优先级（数值越小优先级越高）
   description: "电网分时电价"
 
+# 广东现货运行日报采集：允许的公众号文章域名。
+# 用环境变量 SPOT_REPORT_WECHAT_HOST 或 spotreport.wechat_host 覆盖；留空用公开平台域名兜底。
+spotreport:
+  wechat_host: ""
+
 # 广东现货运行日报图片存储。密钥用环境变量 QINIU_ACCESS_KEY / QINIU_SECRET_KEY 注入，不要写入仓库。
 qiniu:
   accessKey: ""
   secretKey: ""
-  bucket: "tos-me"
-  domain: "http://file.xiaoyxq.top"
+  # bucket 也不写入仓库：用环境变量 QINIU_BUCKET 注入。
+  bucket: ""
+  # 对象存储访问域名不写入仓库：用环境变量 QINIU_DOMAIN 注入。
+  domain: ""
   zone: "z2"
 
 # 广东电网 15 分钟负荷 / 日前电价 / 实时电价（第三方 CSV 通道）。
@@ -81,7 +90,8 @@ gd_metric:
   # true = 允许默认入口读本地缓存（不联网、不补齐），页面必须带「第三方 · 非官方」角标。
   #   恢复采集另需抓取脚本与免登录 check（tools/gd-spot），见 docs/data-source-matrix.md。
   serve_frozen: false
-  url: "https://file.xiaoyxq.top/gd_metric.csv"
+  # 下载地址不写入仓库：用环境变量 GD_METRIC_URL 注入；留空时不联网下载。
+  url: ""
   cache_path: "out/gd_metric.csv"
   refresh_hours: 6
   max_size: "32MB"
@@ -89,7 +99,9 @@ gd_metric:
 # 官网主页市场数据（24 点分时 + 21 地市节点价）。
 #
 # 独立于 gd_metric（第三方 CSV）与 gd_spot_metric（披露接口日频）：
-# 这里打的是 pm.gd.csg.cn 主页网关，粒度 24 个整点、地市维度，滞后 T-6 / T+0。
+# 这里打的是官方主页网关，粒度 24 个整点、地市维度，滞后 T-6 / T+0。
+# 网关地址不写入仓库：用环境变量 HOME_MARKET_GATEWAY_BASE 或 home_market.gateway_base 配置；
+# 留空时采集不会启动（页面报「该日无数据」，不会静默使用旧数）。
 # 采集在 ems 进程内跑（internal/logic/homemarket），不依赖外部 cron。
 # enabled=false 只关采集，不动已落库的数据，也不动读接口。
 # backfill_days = 启动时地市节点价按日期回补的天数（T+0，失败只记日志，不补假数据）。
@@ -98,6 +110,7 @@ gd_metric:
 # 至少 maxLookbackDays=14 天），否则 7 天窗口里只有 1 天有数。
 home_market:
   enabled: true
+  gateway_base: ""
   backfill_days: 7
 
 # 每日电价预测留痕（复盘页「当时预测」腿的数据来源）。

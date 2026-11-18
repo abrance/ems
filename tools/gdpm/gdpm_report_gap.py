@@ -4,7 +4,7 @@
 日报来源（唯一）：微信公众号「广东电力交易中心」当天推文 → 正文 4 张图片
 （page-1 市场概况与日前申报 / page-2 日前成交与高峰节点电价 / page-3 低谷节点电价 /
 page-4 实时交易电价）。没有可枚举的文章列表接口，链接只能人工从公众号取，所以本脚本
-**不自带搜索**：给 links 文件（每行 `YYYY-MM-DD<TAB>mp.weixin.qq.com 文章链接`），
+**不自带搜索**：给 links 文件（每行 `YYYY-MM-DD<TAB>公众号文章链接`），
 由脚本调 ems 自己的采集/解析接口（/api/spot-report/collect、/api/spot-report/extract）。
 
 拿不到链接的日期不是静默跳过，而是写一条 status=partial 的采集记录并留 warnings，

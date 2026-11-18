@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""广东电力交易中心门户（pm.gd.csg.cn）信息披露指标抓取。
+"""广东电力交易中心门户信息披露指标抓取（站点地址由 GDPM_BASE_URL 提供）。
 
 按日期取「电力交易指标」：遍历披露节点树 -> 每个节点的 excelData 拿到指标表
 （templateUuid + 字段定义）-> 用 excelData/page 按日期区间取数。
@@ -20,10 +20,29 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 
-BASE = "https://pm.gd.csg.cn/portal/xhr/sso-info-disclosure"
+# 站点地址不写入仓库：必须用环境变量 GDPM_BASE_URL 指定（形如 https://<host>/portal/xhr/sso-info-disclosure）。
+BASE = os.environ.get("GDPM_BASE_URL", "").strip().rstrip("/")
+
+
+def _require_base():
+    if not BASE:
+        sys.exit("缺少 GDPM_BASE_URL —— 披露接口地址不内置，请先导出环境变量")
+    return BASE
+
+
+def _referer():
+    parts = urllib.parse.urlsplit(BASE)
+    return f"{parts.scheme}://{parts.netloc}/portal/" if parts.scheme and parts.netloc else ""
+
+
+# 写进 CSV / 指标标签的来源名：默认取 GDPM_BASE_URL 的 host，也可用 GDPM_SRC 覆盖。
+SOURCE_LABEL = os.environ.get("GDPM_SRC") or urllib.parse.urlsplit(BASE).hostname or "official"
+
+
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,12 +77,12 @@ class BudgetExceeded(Exception):
 def post(path, payload, budget):
     budget.take()
     req = urllib.request.Request(
-        BASE + path,
+        _require_base() + path,
         data=json.dumps(payload).encode(),
         headers={
             "User-Agent": UA,
             "Content-Type": "application/json",
-            "Referer": "https://pm.gd.csg.cn/portal/",
+            "Referer": _referer(),
         },
         method="POST",
     )
@@ -77,8 +96,8 @@ def post(path, payload, budget):
 def get(path, budget):
     budget.take()
     req = urllib.request.Request(
-        BASE + path,
-        headers={"User-Agent": UA, "Referer": "https://pm.gd.csg.cn/portal/"},
+        _require_base() + path,
+        headers={"User-Agent": UA, "Referer": _referer()},
     )
     with urllib.request.urlopen(req, timeout=40) as r:
         body = json.loads(r.read().decode())

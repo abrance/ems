@@ -8,7 +8,7 @@ func TestFormatSamples(t *testing.T) {
 		{
 			Name: "gdpm_price_cny_mwh",
 			Labels: map[string]string{
-				"src":    "pm.gd.csg.cn",
+				"src":    "official",
 				"kind":   "weighted_avg",
 				"market": "dayahead",
 				"side":   "gen",
@@ -24,7 +24,7 @@ func TestFormatSamples(t *testing.T) {
 		},
 	})
 
-	want := "gdpm_price_cny_mwh{kind=\"weighted_avg\",market=\"dayahead\",side=\"gen\",src=\"pm.gd.csg.cn\"} 334.569613 1762704000000\n" +
+	want := "gdpm_price_cny_mwh{kind=\"weighted_avg\",market=\"dayahead\",side=\"gen\",src=\"official\"} 334.569613 1762704000000\n" +
 		"ems_metric{field=\"usage\",id=\"cpu\",type=\"system\"} 12.5 1762704060000\n"
 	if got != want {
 		t.Fatalf("payload 与约定不一致\n got: %q\nwant: %q", got, want)
@@ -37,7 +37,7 @@ func TestEscapeLabelValue(t *testing.T) {
 		`a"b`:          `a\"b`,
 		`a\b`:          `a\\b`,
 		"a\nb":         `a\nb`,
-		"pm.gd.csg.cn": "pm.gd.csg.cn",
+		"official": "official",
 	}
 	for in, want := range cases {
 		if got := escapeLabelValue(in); got != want {

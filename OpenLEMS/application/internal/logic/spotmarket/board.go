@@ -1,4 +1,4 @@
-// Package spotmarket 广东电力市场官方指标（pm.gd.csg.cn 直采，origin=pm-api）的读路径。
+// Package spotmarket 广东电力市场官方指标（官方披露接口直采，origin=pm-api）的读路径。
 //
 // 为什么不复用 logic/spotreport：那套是「日报 → OCR 提取 → 人工复核」的模型，
 // 以 report_date 为主键、指标名带日报表号语义。官方直采没有「日报」这一层，
@@ -160,7 +160,7 @@ func LoadBoard(ctx context.Context, date string, days int) (*Board, error) {
 		Days:     days,
 		Daily:    daily,
 		Periodic: periodic,
-		Source:   "广东电力交易中心 信息披露接口（pm.gd.csg.cn）直采，origin=pm-api",
+		Source:   "广东电力交易中心 信息披露接口直采，origin=pm-api",
 	}
 	board.Date = latestDate(dailyRows)
 	if board.Date == "" {

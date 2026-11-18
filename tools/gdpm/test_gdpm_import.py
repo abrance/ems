@@ -22,7 +22,7 @@ class TestMapping(unittest.TestCase):
             gi.series_of("generationSideDailyAvgPrice", "dayahead"),
             {"metric": "gdpm_price_cny_mwh",
              "labels": {"market": "dayahead", "side": "gen", "kind": "weighted_avg",
-                        "src": "pm.gd.csg.cn"}},
+                        "src": "official"}},
         )
         self.assertEqual(gi.series_of("consumerSideDailyTotalVolume", "dayahead")["labels"]["side"], "load")
         self.assertEqual(gi.series_of("generationSideDailyMaxPrice", "dayahead")["labels"]["kind"], "max")
@@ -54,10 +54,10 @@ class TestRowsToSamples(unittest.TestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(len(lines), 2)
         self.assertIn(
-            'gdpm_price_cny_mwh{kind="weighted_avg",market="dayahead",side="gen",src="pm.gd.csg.cn"} '
+            'gdpm_price_cny_mwh{kind="weighted_avg",market="dayahead",side="gen",src="official"} '
             '334.569613 1794240000000', lines)
         self.assertIn(
-            'gdpm_volume_mwh{kind="total",market="dayahead",side="gen",src="pm.gd.csg.cn"} '
+            'gdpm_volume_mwh{kind="total",market="dayahead",side="gen",src="official"} '
             '1540786.335 1794240000000', lines)
         # 未声明的实时字段没有被带出来
         self.assertFalse(any("999" in line for line in lines))

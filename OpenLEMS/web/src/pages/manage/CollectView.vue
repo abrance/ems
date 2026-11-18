@@ -32,7 +32,7 @@ import {
  *
  * 不造数：拿不到数据就显示空态与原样错误，不复刻 overlay 的默认假数据。
  */
-const URL_PLACEHOLDER = 'https://mp.weixin.qq.com/s/...'
+const URL_PLACEHOLDER = '粘贴文章链接'
 
 const reports = ref<SpotReport[]>([])
 const selectedDate = ref('')

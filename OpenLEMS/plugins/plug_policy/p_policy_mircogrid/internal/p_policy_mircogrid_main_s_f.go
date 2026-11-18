@@ -8,10 +8,12 @@ import (
 	"common/c_type"
 	"context"
 	"encoding/json"
+	"os"
 	"s_db"
 	"s_forecast"
 	"s_policy"
 	"s_price"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -65,8 +67,12 @@ func (s *sPolicyMircogrid) Init(ctx context.Context) error {
 
 	// 按需初始化预测客户端
 	if s.config.EnableLoadForecast {
-		s.forecastClient = s_forecast.NewClient(s.config.ForecastBaseUrl, 30*time.Second)
-		c_log.Infof(ctx, "已启用负荷预测，服务地址: %s", s.config.ForecastBaseUrl)
+		if s.config.ForecastBaseUrl == "" {
+			c_log.Warning(ctx, "已启用负荷预测但未配置预测服务地址，策略将跳过预测")
+		} else {
+			s.forecastClient = s_forecast.NewClient(s.config.ForecastBaseUrl, 30*time.Second)
+			c_log.Infof(ctx, "已启用负荷预测，服务地址: %s", s.config.ForecastBaseUrl)
+		}
 	}
 
 	c_log.Infof(ctx, "微电网策略初始化成功")
@@ -89,7 +95,7 @@ func (s *sPolicyMircogrid) applyDefaults() {
 		s.config.DischargePowerRatio = 1
 	}
 	if s.config.ForecastBaseUrl == "" {
-		s.config.ForecastBaseUrl = "https://forecast.xiaoyxq.top"
+		s.config.ForecastBaseUrl = strings.TrimSpace(os.Getenv("FORECAST_BASE_URL"))
 	}
 	if s.config.ForecastHorizon <= 0 {
 		s.config.ForecastHorizon = 4

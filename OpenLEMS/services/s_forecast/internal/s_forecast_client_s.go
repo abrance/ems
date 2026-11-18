@@ -28,7 +28,7 @@ type sClient struct {
 
 var _ IClient = (*sClient)(nil)
 
-// NewClient 创建客户端。baseURL 形如 https://forecast.xiaoyxq.top；timeout<=0 时默认 30s。
+// NewClient 创建客户端。baseURL 由部署配置提供；timeout<=0 时默认 30s。
 func NewClient(baseURL string, timeout time.Duration) IClient {
 	if timeout <= 0 {
 		timeout = 30 * time.Second

@@ -34,9 +34,9 @@ class GapTest(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.db = os.path.join(self.dir, "db.sqlite3")
         make_db(self.db,
-                [("2026-09-26", "日报", "https://mp.weixin.qq.com/s/a"),
-                 ("2026-09-27", "日报", "https://mp.weixin.qq.com/s/b"),
-                 ("2026-09-29", "日报", "https://mp.weixin.qq.com/s/d")],
+                [("2026-09-26", "日报", "https://example.test/s/a"),
+                 ("2026-09-27", "日报", "https://example.test/s/b"),
+                 ("2026-09-29", "日报", "https://example.test/s/d")],
                 [("2026-09-26", "ok", ""),
                  ("2026-09-27", "error", "[]"),
                  ("2026-09-29", "partial",
@@ -50,7 +50,7 @@ class GapTest(unittest.TestCase):
 
     def test_actions(self):
         links = gap.read_links(self.linkfile(
-            "# 注释\n2026-09-28\thttps://mp.weixin.qq.com/s/c\n"))
+            "# 注释\n2026-09-28\thttps://example.test/s/c\n"))
         conn = sqlite3.connect(self.db)
         conn.row_factory = sqlite3.Row
         rows = {r["date"]: r for r in gap.plan(conn, "2026-09-26", "2026-09-29", links)}

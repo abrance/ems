@@ -144,8 +144,8 @@ def main():
     ap.add_argument("--from", dest="date_from", required=True, help="首个目标日 YYYY-MM-DD")
     ap.add_argument("--to", dest="date_to", required=True, help="末个目标日 YYYY-MM-DD")
     ap.add_argument("--history-days", type=int, default=30, help="送入模型的上下文天数（默认 30）")
-    ap.add_argument("--forecast-url", default=os.environ.get("FORECAST_URL", "https://forecast.xiaoyxq.top"),
-                    help="TimesFM 服务地址")
+    ap.add_argument("--forecast-url", default=os.environ.get("FORECAST_URL", ""),
+                    help="TimesFM 服务地址（也可用 FORECAST_URL；--no-timesfm 时可不填）")
     ap.add_argument("--no-timesfm", action="store_true", help="只算基线，不调用预测服务")
     ap.add_argument("--cache-dir", default="", help="逐日预测缓存目录（可断点续跑）")
     ap.add_argument("--limit", type=int, default=0, help="最多回测多少天（调试用）")
@@ -154,6 +154,8 @@ def main():
     ap.add_argument("--quantile-level", default="0.9", help="--export-quantiles 的分位，默认 0.9")
     args = ap.parse_args()
 
+    if not args.no_timesfm and not args.forecast_url:
+        sys.exit("缺少 --forecast-url（或 FORECAST_URL）—— 预测服务地址不内置；只算基线请加 --no-timesfm")
     args.csv = resolve_csv(args.csv)
     if not os.path.exists(args.csv):
         sys.exit("找不到 gd_metric.csv：显式给了 %s，候选路径 %s 均不存在。用 --csv 或 GD_METRIC_CSV 指定"

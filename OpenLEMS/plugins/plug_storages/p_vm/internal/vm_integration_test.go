@@ -36,7 +36,7 @@ func TestVMIntegration(t *testing.T) {
 	// 1) 插件写入路径：带 tags 的原生命名，时间戳是当前时间
 	const field = "gdpm_it_probe_cny_mwh"
 	if err := s.SaveSystemMetrics("gdpm_spot", map[string]string{
-		"market": "dayahead", "side": "gen", "kind": "weighted_avg", "src": "pm.gd.csg.cn",
+		"market": "dayahead", "side": "gen", "kind": "weighted_avg", "src": "official",
 	}, map[string]any{field: 123.456}); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestVMIntegrationGapDayStaysEmpty(t *testing.T) {
 
 	// 用独立的探针指标名，不碰 gdpm_* 真实序列；不依赖 retention 窗口外的历史日期。
 	const probe = "gdpm_it_gap_probe_cny_mwh"
-	labels := map[string]string{"it": "gap", "src": "pm.gd.csg.cn"}
+	labels := map[string]string{"it": "gap", "src": "official"}
 	day := func(offsetDays int) int64 {
 		n := time.Now().UTC().AddDate(0, 0, offsetDays)
 		tm := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.FixedZone("CST", 8*3600))

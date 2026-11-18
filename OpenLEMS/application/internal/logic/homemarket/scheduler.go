@@ -3,6 +3,8 @@ package homemarket
 import (
 	"context"
 	stdErrors "errors"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +51,10 @@ func Start(ctx context.Context, interval time.Duration) {
 		c_log.Infof(ctx, "官网主页市场数据采集已关闭（home_market.enabled=false）")
 		return
 	}
+	if resolveGatewayBase(ctx) == "" {
+		c_log.Warningf(ctx, "官网主页市场数据采集未配置网关地址（home_market.gateway_base 或 HOME_MARKET_GATEWAY_BASE），跳过")
+		return
+	}
 	backfillDays := ParseDays(g.Cfg().MustGet(ctx, "home_market.backfill_days", defaultBackfillDays).String())
 
 	go func() {
@@ -78,6 +84,9 @@ func Start(ctx context.Context, interval time.Duration) {
 // 回补是全局唯一的：窗口最大 30 天 × 两路 = 源站几百次请求，两个回补叠在一起只会
 // 把动态防护触得更狠。抢不到锁直接返回 ErrBackfillBusy，不排队、不阻塞调用方。
 func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, map[string]int, error) {
+	if resolveGatewayBase(ctx) == "" {
+		return nil, nil, stdErrors.New("未配置官网主页网关地址（home_market.gateway_base 或 HOME_MARKET_GATEWAY_BASE）")
+	}
 	if !backfillMu.TryLock() {
 		return nil, nil, ErrBackfillBusy
 	}
@@ -92,6 +101,24 @@ func RunBackfill(ctx context.Context, now time.Time, days int) (map[string]int, 
 	}
 	node := BackfillNodePrice(ctx, now, nodeDays)
 	return home24h, node, nil
+}
+
+// resolveGatewayBase 解析网关地址：环境变量 > 配置文件，都不配则返回空。
+// gatewayBase 非空（单测桩服务）时直接用它，不再读配置。
+func resolveGatewayBase(ctx context.Context) string {
+	if strings.TrimSpace(gatewayBase) != "" {
+		return gatewayBase
+	}
+	if v := strings.TrimSpace(os.Getenv("HOME_MARKET_GATEWAY_BASE")); v != "" {
+		gatewayBase = strings.TrimRight(v, "/")
+		return gatewayBase
+	}
+	if g.Cfg() != nil {
+		if v := strings.TrimSpace(g.Cfg().MustGet(ctx, "home_market.gateway_base").String()); v != "" {
+			gatewayBase = strings.TrimRight(v, "/")
+		}
+	}
+	return gatewayBase
 }
 
 // clampDays 把回补窗口夹到 [默认值, 上限]。

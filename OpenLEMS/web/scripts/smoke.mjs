@@ -205,7 +205,7 @@ const FAKE_POLICY_CONFIG = {
   essDevices: ['ess_1'],
   // 故意先绑错：指向 PCS（不是电表）—— 验证页面会把「不在可选列表」标出来
   gridDeviceId: 'pcs_1',
-  forecastBaseUrl: 'https://forecast.xiaoyxq.top',
+  forecastBaseUrl: 'https://forecast.example.test',
 }
 
 const FAKE_STRATEGIES = [
@@ -279,8 +279,8 @@ const FAKE_PRICES = [
 ]
 
 const FAKE_REPORTS = [
-  { date: '2026-09-21', title: '现货运行日报（09.21）', sourceUrl: 'https://mp.weixin.qq.com/s/x', pageCount: 4, pages: [], collectedAt: '2026-09-21 22:10', pendingCount: 2, confirmedCount: 40 },
-  { date: '2026-09-19', title: '现货运行日报（09.19）', sourceUrl: 'https://mp.weixin.qq.com/s/y', pageCount: 4, pages: [], collectedAt: '2026-09-19 20:55', pendingCount: 0, confirmedCount: 42 },
+  { date: '2026-09-21', title: '现货运行日报（09.21）', sourceUrl: 'https://example.test/s/x', pageCount: 4, pages: [], collectedAt: '2026-09-21 22:10', pendingCount: 2, confirmedCount: 40 },
+  { date: '2026-09-19', title: '现货运行日报（09.19）', sourceUrl: 'https://example.test/s/y', pageCount: 4, pages: [], collectedAt: '2026-09-19 20:55', pendingCount: 0, confirmedCount: 42 },
 ]
 
 const FAKE_METRICS = [
@@ -807,7 +807,7 @@ const FAKE_SPOT_MARKET = {
     { dataset: 'green_power_month', from: '2026-08-01', to: '2026-09-01', periods: 2, missing: null, lastDate: '2026-09-01' },
     { dataset: 'hhi', from: '2024-01-01', to: '2025-01-01', periods: 2, missing: null, lastDate: '2025-01-01' },
   ],
-  source: '广东电力交易中心 信息披露接口（pm.gd.csg.cn）直采，origin=pm-api',
+  source: '广东电力交易中心 信息披露接口直采，origin=pm-api',
   updatedAt: '2026-09-21',
 }
 
@@ -4244,7 +4244,7 @@ await clickTo('配置', '储能参数')
       'multiSelect 回写成数组（没被 String() 变成逗号串）',
       JSON.stringify(saved.essDevices),
     )
-    check(saved.forecastBaseUrl === 'https://forecast.xiaoyxq.top', '文本字段原样保留', String(saved.forecastBaseUrl))
+    check(saved.forecastBaseUrl === 'https://forecast.example.test', '文本字段原样保留', String(saved.forecastBaseUrl))
   }
 }
 

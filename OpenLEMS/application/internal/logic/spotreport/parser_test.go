@@ -16,7 +16,7 @@ func TestParseDateFromTitle(t *testing.T) {
 }
 
 func TestAssertWechatURL(t *testing.T) {
-	ok, err := AssertWechatURL("https://mp.weixin.qq.com/s/pxdJ0CyMva1evGOKsCpE0w")
+	ok, err := AssertWechatURL("https://mp.weixin.qq.com/s/demo")
 	if err != nil || ok == "" {
 		t.Fatalf("expected wechat url, err=%v", err)
 	}

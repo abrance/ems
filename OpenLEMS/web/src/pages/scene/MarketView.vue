@@ -494,7 +494,7 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       sub="现货市场总体运行情况 · 发电侧加权口径"
       :span="12"
       :loading="loadingDaily"
-      :foot="`数据来源：广东电力交易中心披露接口（pm.gd.csg.cn）直采 · 最新运行日 ${daily?.date || '—'}`"
+      :foot="`数据来源：广东电力交易中心披露接口直采 · 最新运行日 ${daily?.date || '—'}`"
     >
       <template #actions>
         <StatusTag tone="blue">{{ DAILY_SOURCE }}</StatusTag>
@@ -548,7 +548,7 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       sub="日前 / 实时加权均价 · 近 90 天"
       :span="12"
       :loading="loadingDaily"
-      :foot="`数据来源：${daily?.source || 'pm.gd.csg.cn'} · 运行日 ${daily?.from || '—'} ~ ${daily?.to || '—'}`"
+      :foot="`数据来源：${daily?.source || '官方披露接口'} · 运行日 ${daily?.from || '—'} ~ ${daily?.to || '—'}`"
     >
       <template #actions>
         <StatusTag tone="blue">{{ DAILY_SOURCE }}</StatusTag>
@@ -566,7 +566,7 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       sub="日前 / 实时电价 · 整点"
       :span="8"
       :loading="loading24h"
-      :foot="`数据来源：pm.gd.csg.cn 主页 24 点 · 运行日 ${home24h?.latestDate || '—'}（源站滞后约 6 天）`"
+      :foot="`数据来源：官方主页 24 点 · 运行日 ${home24h?.latestDate || '—'}（源站滞后约 6 天）`"
     >
       <template #actions>
         <StatusTag tone="brand">{{ HOME24H_SOURCE }}</StatusTag>
@@ -614,7 +614,7 @@ const nodeBoxHeight = computed(() => `${Math.max(320, NODE_ROWS_EXPECTED * 18 + 
       sub="21 市 × 高峰 / 低谷 · 元/兆瓦时"
       :span="12"
       :loading="loadingNode"
-      :foot="`数据来源：pm.gd.csg.cn 主页地市节点价（T+0）· 运行日 ${nodePrice?.latestDate || '—'} · 高峰 ${nodePrice?.peakCities ?? 0} 市 / 低谷 ${nodePrice?.valleyCities ?? 0} 市`"
+      :foot="`数据来源：官方主页地市节点价（T+0）· 运行日 ${nodePrice?.latestDate || '—'} · 高峰 ${nodePrice?.peakCities ?? 0} 市 / 低谷 ${nodePrice?.valleyCities ?? 0} 市`"
     >
       <template #actions>
         <StatusTag tone="green">{{ NODE_SOURCE }}</StatusTag>

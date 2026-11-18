@@ -1,5 +1,7 @@
 {
   "authorization": "请求头 Authorization 的值（32 位串）",
   "jwt": "请求头 JWTHeaderName 的值（HS512 JWT）",
-  "cookie": "浏览器上的 Cookie（可选，CURL 里的 -b 那段）"
+  "cookie": "浏览器上的 Cookie（可选，CURL 里的 -b 那段）",
+  "aesKey": "前端 Decrypt 的 AES-128 key（16 字节，可选，也可用 DIANCHACHA_AES_KEY）",
+  "aesIv": "前端 Decrypt 的 AES-128 iv（16 字节，可选，也可用 DIANCHACHA_AES_IV）"
 }
