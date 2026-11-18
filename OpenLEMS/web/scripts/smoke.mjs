@@ -1274,6 +1274,15 @@ globalThis.fetch = async (url, init) => {
     // 空态分支由 reportDailyEmpty 开关驱动（整段无数据 → days: []，页面走空态）
     return json(reportDailyEmpty ? { ...FAKE_REPORT_RECONCILE, days: [], asOfReport: '', asOfOfficial: '' } : FAKE_REPORT_RECONCILE)
   }
+  if (u.includes('/api/spot-market/latest')) {
+    if (dailyLagOverride === 'never') return json({ date: '' })
+    if (typeof dailyLagOverride === 'number') {
+      const d = new Date()
+      d.setDate(d.getDate() - dailyLagOverride)
+      return json({ date: d.toISOString().slice(0, 10) })
+    }
+    return json({ date: FAKE_SPOT_MARKET.date })
+  }
   if (u.includes('/api/spot-market/board')) {
     if (dailyLagOverride === 'never') {
       // 空库：daily 全空，date 回落成查询末日（今天）—— lag 恒为 0
@@ -1284,6 +1293,14 @@ globalThis.fetch = async (url, init) => {
       d.setDate(d.getDate() - dailyLagOverride)
       const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       return json({ ...FAKE_SPOT_MARKET, daily: [], date: day })
+    }
+    // 21 天档返回短序列：用来验「改范围后三张图都跟着变」，不能只价差图变
+    if (new URL(u, 'http://localhost').searchParams.get('days') === '21') {
+      return json({
+        ...FAKE_SPOT_MARKET,
+        daily: FAKE_SPOT_MARKET.daily.map((s) => ({ ...s, points: s.points.slice(0, 2) })),
+        aheadRealtimeSpread: FAKE_SPOT_MARKET.aheadRealtimeSpread.slice(0, 1),
+      })
     }
     return json(FAKE_SPOT_MARKET)
   }
@@ -2036,17 +2053,61 @@ await clickTo('市场数据', '信息披露')
   // 明细表要能读出环比/同比（后端算的），不是只有最新值
   check(bodyHas('+2.50%') && bodyHas('-4.10%'), '明细表显示环比与同比')
 
-  // 回看天数换一档要重新取数，并把 days 带上
-  const before = requests.filter((r) => r.url.includes('/api/spot-market/board')).length
-  const rangeBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '30 天')
-  check(!!rangeBtn, '有「30 天」回看档位')
-  rangeBtn?.dispatchEvent(new window.Event('click', { bubbles: true }))
-  await waitFor(
-    () => requests.filter((r) => r.url.includes('/api/spot-market/board')).length > before,
-    1500,
+  // 日期范围：默认右端锚到后端最新日，KPI 另走全局最新快照（days=730）
+  check(
+    requests.some((r) => r.url.includes('/api/spot-market/board?date=2026-09-21&days=90')),
+    '默认范围 = 最新日往前 90 天（右端不锚今天）',
+    JSON.stringify(requests.filter((r) => r.url.includes('/api/spot-market/board')).map((r) => r.url)),
   )
-  const lastUrl = requests.filter((r) => r.url.includes('/api/spot-market/board')).pop()?.url ?? ''
-  check(lastUrl.includes('days=30'), '换档位后请求带上了 days=30', lastUrl)
+  check(
+    requests.some((r) => r.url.includes('/api/spot-market/board?days=730')),
+    'KPI 另取全局最新快照，不跟范围',
+  )
+  check(bodyHas('KPI 固定为全局最新'), 'KPI 明确标注不受范围影响')
+  const rangeInputs = [...doc.querySelectorAll('.range-picker input')]
+  check(rangeInputs.length === 2, 'Arco RangePicker 有起/止两个输入', String(rangeInputs.length))
+  check(rangeInputs[0]?.value === '2026-06-24' && rangeInputs[1]?.value === '2026-09-21',
+    '范围默认值回显在控件上', JSON.stringify(rangeInputs.map((i) => i.value)))
+  const before = requests.length
+  rangeInputs[0].dispatchEvent(new window.Event('click', { bubbles: true }))
+  rangeInputs[0].value = '2026-09-01'
+  rangeInputs[0].dispatchEvent(new window.Event('input', { bubbles: true }))
+  rangeInputs[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  rangeInputs[1].dispatchEvent(new window.Event('click', { bubbles: true }))
+  rangeInputs[1].value = '2026-09-21'
+  rangeInputs[1].dispatchEvent(new window.Event('input', { bubbles: true }))
+  rangeInputs[1].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await waitFor(
+    () => requests.slice(before).some((r) => r.url.includes('date=2026-09-21&days=21')),
+    2000,
+  )
+  const rangeUrl = requests.slice(before).map((r) => r.url).find((u) => u.includes('date=2026-09-21&days=21'))
+  check(!!rangeUrl, '改起日后按 date=止日 & days=跨度 重新取数', rangeUrl ?? '没发请求')
+  await waitFor(() => {
+    const p = [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
+    return p[0] === 4 && p[1] === 1 && p[2] === 4
+  }, 2000)
+  const changedPoints = [...doc.querySelectorAll('.chart')].map((c) => Number(c.dataset.chartPoints ?? 0))
+  check(
+    changedPoints[0] === 4 && changedPoints[1] === 1 && changedPoints[2] === 4,
+    '均价/价差/电量三图都随范围重画（不是只价差图变）',
+    JSON.stringify(changedPoints),
+  )
+  check(bodyHas('400.50'), '改范围后 KPI 仍是全局最新', '')
+
+  // 超后端上限要明说并夹住，不能静默截成 730 天还让用户以为选的全在图上
+  rangeInputs[0].dispatchEvent(new window.Event('click', { bubbles: true }))
+  rangeInputs[0].value = '2020-01-01'
+  rangeInputs[0].dispatchEvent(new window.Event('input', { bubbles: true }))
+  rangeInputs[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await waitFor(() => bodyHas('范围超过 730 天'), 2000)
+  check(bodyHas('范围超过 730 天'), '超 730 天有明确提示')
+  check(
+    requests.slice(before).some((r) => r.url.includes('date=2026-09-21&days=730')),
+    '超上限按 730 天取数',
+  )
+
+  check(!doc.querySelector('.pagehead input[type=date]'), '信息披露页头没有全局运行日框')
 
   // 月频/年频页签：图表也要真的画出来（不同数据集，另一套取数分支）
   const periodicTab = [...doc.querySelectorAll('.radio-group button')].find((b) =>
@@ -3781,6 +3842,7 @@ await clickTo('分析预测', '决策支持')
 {
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('总节省'))
+  check(!!doc.querySelector('.pagehead input[type=date]'), '决策支持页保留全局运行日框（相似日重算用）')
   // 实测效果 KPI：从 /api/effect/summary 的 summary 里取值（后端是 { summary: {...} }）
   check(bodyHas('314'), 'KPI 取到总节省（说明拆包对了）')
   check(bodyHas('234'), 'KPI 取到套利净收益')

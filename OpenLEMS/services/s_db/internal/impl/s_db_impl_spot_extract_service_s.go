@@ -416,6 +416,29 @@ func (s *sSpotExtractServiceImpl) ListMetricsByRunDateRange(ctx context.Context,
 	return list, nil
 }
 
+func (s *sSpotExtractServiceImpl) LatestMetricDate(ctx context.Context, dataset string) (string, error) {
+	// 单字段扫进 []string 会被 gf 序列化成整行 JSON，按行结构体接。
+	var rows []struct {
+		RunDate string `orm:"run_date"`
+	}
+	m := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
+		WhereIn(s_db_model.FieldSpotMetricOrigin, spotOriginConfirmed)
+	if dataset != "" {
+		m = m.Where(s_db_model.FieldSpotMetricDataset, dataset)
+	}
+	err := m.Fields(s_db_model.FieldSpotMetricRunDate).
+		OrderDesc(s_db_model.FieldSpotMetricRunDate).
+		Limit(1).
+		Scan(&rows)
+	if err != nil {
+		return "", errors.Wrap(err, "查询现货指标最新运行日失败")
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].RunDate, nil
+}
+
 func (s *sSpotExtractServiceImpl) CountUnconfirmedByRunDateRange(ctx context.Context, from, to string) (int, error) {
 	count, err := g.Model(s_db_model.TableSpotMetric).Ctx(ctx).
 		WhereGTE(s_db_model.FieldSpotMetricRunDate, from).

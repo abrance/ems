@@ -47,6 +47,8 @@ func TestLoadBoardAgainstSQLite(t *testing.T) {
 		{"2026-11-12", "2026-11-10", "realtime_trade", "发电侧", "发电侧实时加权平均电价", 300.0, "元/兆瓦时", "pm-api"},
 		// 09-16 的 OCR 旧值已被 pm-api 取代：origin=void，不能出现在看板里
 		{"2026-09-16", "2026-09-16", "day_ahead_trade", "发电侧", "平均电价", 428.95, "元/兆瓦时", "void"},
+		// 作废行日期还要比有效行新：latest 锚点必须忽略 void，否则默认区间右端会落到空日
+		{"2026-11-15", "2026-11-15", "day_ahead_trade", "发电侧", "作废新值", 999.0, "元/兆瓦时", "void"},
 	}
 	for _, r := range rows {
 		if _, err := db.Exec(
@@ -69,6 +71,13 @@ func TestLoadBoardAgainstSQLite(t *testing.T) {
 	}
 	if board.Date != "2026-11-11" {
 		t.Fatalf("最新运行日 = %q, want 2026-11-11", board.Date)
+	}
+	latest, err := LatestDate(context.Background())
+	if err != nil {
+		t.Fatalf("LatestDate 失败: %v", err)
+	}
+	if latest != "2026-11-11" {
+		t.Fatalf("LatestDate = %q，期望 2026-11-11（void 行不算）", latest)
 	}
 	for _, s := range board.Daily {
 		if s.Dataset == "day_ahead_trade" && s.Metric == "平均电价" {
