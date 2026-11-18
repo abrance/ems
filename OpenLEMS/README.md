@@ -246,9 +246,19 @@ go build -o ./bin/lems .
 
 ### 4. 启动 Web 管理界面
 
+推荐从仓库根目录用统一 dev 入口（固定端口，重复执行自动清理）：
+
+```bash
+make dev          # backend :15880 + frontend :5173
+make dev-status
+make dev-stop
+```
+
+手工单起后端（默认 profile 用 `:80`；前端代理要 `:15880` 时加 `--profile=dev`）：
+
 ```bash
 cd application
-go run . --web=true --driver-path=resources/driver
+go run . --web=true --profile=dev --driver-path=resources/driver
 ```
 
 启动后默认可访问：

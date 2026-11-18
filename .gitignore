@@ -17,6 +17,9 @@ __pycache__/
 .venv/
 venv/
 
+# 本地 dev 统一入口的 PID / 日志
+/.dev/
+
 # 编辑器 / 系统
 .DS_Store
 *.swp
@@ -26,3 +29,4 @@ venv/
 
 # 采集产物：含真实文章/图片地址，不入库
 gd-price-collector/data/records.json
+AGENTS.md

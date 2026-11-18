@@ -276,6 +276,9 @@ type IReportDailyService interface {
 	ListByRunDateRange(ctx context.Context, from, to string) ([]*s_db_model.SReportDailyModel, error)
 	// LatestRunDate 最近一个有日报原值的运行日；空串表示一条都没有
 	LatestRunDate(ctx context.Context) (string, error)
+	// LatestOfficialRunDate 最近一个官方直采（pm-api）日频运行日；空串表示一条都没有。
+	// 口径与 ListOfficialDaily 一致，只认核对页真正能对上的三个指标。
+	LatestOfficialRunDate(ctx context.Context) (string, error)
 	// ListOfficialDaily 读官方直采（origin=pm-api）的日频电价与申报均价，供核对页右列使用。
 	// 只读；核对页的右列永远来自这里，不来自 gd_report_daily。
 	ListOfficialDaily(ctx context.Context, from, to string) ([]ReportDailyOfficialRow, error)

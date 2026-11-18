@@ -147,7 +147,7 @@ function rowLabel(item: ReconcileItem): string {
         止
         <input v-model="range.to" type="date" @change="onDateChange" />
       </label>
-      <span class="hint">留空 = 最近 30 个运行日</span>
+      <span class="hint">留空 = 截至两侧最新数据日回看 30 天</span>
     </div>
 
     <div v-if="error" class="blocked">

@@ -203,6 +203,30 @@ func (s *sReportDailyServiceImpl) BackfillFromSpotMetric(ctx context.Context) (s
 // 官方没有分电源拆分与申报结构，那些行由核对页判 official_missing，不在这里补 0。
 // 加权最高/最低价也不取：日报的最高/最低电价不进 gd_report_daily（只存分电源均价 + 申报结构），
 // 左列没有值，单独列一列官方数字没有对照意义。
+func (s *sReportDailyServiceImpl) LatestOfficialRunDate(ctx context.Context) (string, error) {
+	// 口径与 ListOfficialDaily 一致：只认核对页真正能对上的三个指标，避免被其它历史行
+	// （HHI、中长期月频等）把默认区间右端带跑。
+	var rows []struct {
+		RunDate string `orm:"run_date"`
+	}
+	err := g.DB().GetScan(ctx, &rows, `
+		SELECT MAX(run_date) AS run_date
+		FROM gd_spot_metric
+		WHERE origin = 'pm-api'
+		  AND (
+		        (dataset IN ('day_ahead_trade','realtime_trade')
+		         AND metric IN ('发电侧日前加权平均电价','发电侧实时加权平均电价'))
+		     OR (dataset = 'day_ahead_trade' AND metric = '日前申报均价')
+		      )`)
+	if err != nil {
+		return "", errors.Wrap(err, "查询官方日频指标最新运行日失败")
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].RunDate, nil
+}
+
 func (s *sReportDailyServiceImpl) ListOfficialDaily(ctx context.Context, from, to string) ([]s_db_basic.ReportDailyOfficialRow, error) {
 	rows := make([]s_db_basic.ReportDailyOfficialRow, 0, 256)
 	err := g.DB().GetScan(ctx, &rows, `

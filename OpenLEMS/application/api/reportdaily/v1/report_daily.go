@@ -10,10 +10,10 @@ type ExtractDayReq struct {
 }
 
 type ExtractDayRes struct {
-	Date       string   `json:"date"`
-	TradeDate  string   `json:"tradeDate" dc:"表2 承载的滞后运行日"`
-	MetricRows int      `json:"metricRows" dc:"写入日报原值表的行数"`
-	Preserved  int      `json:"preserved" dc:"因人工修订而被保留、未覆盖的行数"`
+	Date       string `json:"date"`
+	TradeDate  string `json:"tradeDate" dc:"表2 承载的滞后运行日"`
+	MetricRows int    `json:"metricRows" dc:"写入日报原值表的行数"`
+	Preserved  int    `json:"preserved" dc:"因人工修订而被保留、未覆盖的行数"`
 	// SkippedFarther 因已有行的报告日更接近运行日（或距离相等）而被保留的行数
 	SkippedFarther int      `json:"skippedFarther" dc:"因已有行的报告日更接近运行日而被保留的行数"`
 	Status         string   `json:"status" dc:"ok / empty"`
@@ -43,14 +43,14 @@ type BatchStatusReq struct {
 }
 
 type BatchStatusRes struct {
-	Id         string   `json:"id"`
-	Status     string   `json:"status" dc:"running / done / failed"`
-	Total      int      `json:"total"`
-	Done       int      `json:"done"`
-	Succeeded  int      `json:"succeeded"`
-	Failed     int      `json:"failed"`
-	MetricRows int      `json:"metricRows" dc:"累计写入行数"`
-	Preserved  int      `json:"preserved"`
+	Id         string `json:"id"`
+	Status     string `json:"status" dc:"running / done / failed"`
+	Total      int    `json:"total"`
+	Done       int    `json:"done"`
+	Succeeded  int    `json:"succeeded"`
+	Failed     int    `json:"failed"`
+	MetricRows int    `json:"metricRows" dc:"累计写入行数"`
+	Preserved  int    `json:"preserved"`
 	// SkippedFarther 累计因报告日更远（或等距）而未覆盖的行数
 	SkippedFarther int      `json:"skippedFarther"`
 	Current        string   `json:"current" dc:"正在处理的日报日"`
@@ -71,8 +71,8 @@ type BackfillRes struct {
 // ReconcileReq 核对页唯一数据源
 type ReconcileReq struct {
 	g.Meta `path:"/report-daily/reconcile" method:"get" tags:"日报核对" summary:"日报原值 vs 官网直采核对" role:"user"`
-	From   string `json:"from" dc:"起始运行日 YYYY-MM-DD，缺省为最近 30 个运行日"`
-	To     string `json:"to" dc:"结束运行日 YYYY-MM-DD，缺省为今天"`
+	From   string `json:"from" dc:"起始运行日 YYYY-MM-DD，缺省为右端往前 30 天"`
+	To     string `json:"to" dc:"结束运行日 YYYY-MM-DD，缺省为两侧数据里较新的那一天（都空则今天）"`
 }
 
 // ReconcileItem 一行核对：左日报原值 / 右官网直采 / 差值

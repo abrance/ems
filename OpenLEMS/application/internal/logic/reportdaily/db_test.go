@@ -138,6 +138,20 @@ func TestReportDailyLoadReconcileRealDB(t *testing.T) {
 	if res.OfficialOrigin != "pm-api" {
 		t.Fatalf("officialOrigin = %q", res.OfficialOrigin)
 	}
+
+	// 缺省右端必须锚到两侧最新数据日（官网 11-13），不是测试运行时的今天；
+	// 否则数据滞后时默认区间会落在数据之后，整页空。
+	defaultRes, err := LoadReconcile(ctx, "", "")
+	if err != nil {
+		t.Fatalf("LoadReconcile 缺省区间失败: %v", err)
+	}
+	if defaultRes.To != "2026-11-13" {
+		t.Fatalf("缺省右端 = %q，期望 2026-11-13（两侧最新日）", defaultRes.To)
+	}
+	if defaultRes.From != "2026-10-15" {
+		t.Fatalf("缺省左端 = %q，期望 2026-10-15（右端往前 30 天）", defaultRes.From)
+	}
+
 	if len(res.Days) != 4 {
 		t.Fatalf("应有 4 天（官网有 4 天），实际 %d", len(res.Days))
 	}

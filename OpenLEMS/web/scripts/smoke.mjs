@@ -1476,20 +1476,44 @@ const appbar = doc.querySelector('.appbar')?.textContent ?? ''
 check(!/KB\/s|上传|下载|CPU|内存|流量/.test(appbar), '顶栏不含流量 / CPU / 内存', appbar)
 check(!/\d{2}:\d{2}:\d{2}/.test(appbar), '顶栏不含时钟', appbar)
 
-console.log('\n== 历史信息：默认区间锚到最新日报日 ==')
+console.log('\n== 历史信息：预设锚到最新日报日，日期框换成 RangePicker ==')
 await clickTo('市场数据', '历史信息')
 {
-  await waitFor(() => doc.querySelectorAll('input[type=date]').length >= 3, 1500)
-  // 页头有一个「运行日」，页面自己还有起/止两个
-  const dates = [...doc.querySelectorAll('input[type=date]')].map((i) => i.value).filter(Boolean)
-  // 夹具里最新日报是 2026-09-21 → 默认区间右端必须是它，不能是「今天」
-  check(dates.includes('2026-09-21'), '默认区间右端 = 最新日报日（夹具 09-21）', JSON.stringify(dates))
-  check(!dates.some((d) => d.startsWith('2026-10-0')), '不再是「今天」当右端', JSON.stringify(dates))
-  // 关键：请求必须**带上**这个区间。后端缺省是「本月 1 日~今天」，
-  // 以前只有自定义模式才传 from/to，于是预设走的是后端缺省 → 整段落在数据之外（页面全空）
+  await waitFor(() => doc.querySelectorAll('.range-picker input').length === 2, 1500)
+  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
+  check(!bodyHas('本周') && !bodyHas('本月'), '预设按钮不再叫「本周/本月」')
+  check(bodyHas('最近 7 天') && bodyHas('最近 30 天'), '预设按钮叫「最近 7/30 天」')
+  const inputs = [...doc.querySelectorAll('.range-picker input')]
+  check(inputs[0]?.value === '2026-08-23' && inputs[1]?.value === '2026-09-21',
+    '默认范围 = 最新日报日往前 30 天', JSON.stringify(inputs.map((i) => i.value)))
   const trendCall = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
-  check(!!trendCall?.url.includes('from=2026-09-01') && trendCall?.url.includes('to=2026-09-21'),
-    '趋势请求带上锚定后的区间（09-01~09-21）', trendCall?.url ?? '没发请求')
+  check(!!trendCall?.url.includes('from=2026-08-23') && trendCall?.url.includes('to=2026-09-21'),
+    '趋势请求带上锚定后的区间（08-23~09-21）', trendCall?.url ?? '没发请求')
+
+  // 最近 7 天同样锚到最新日报日，不是自然周
+  const last7 = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '最近 7 天')
+  const before7 = requests.length
+  last7?.dispatchEvent(new window.Event('click', { bubbles: true }))
+  await waitFor(() => requests.slice(before7).some((r) => r.url.includes('from=2026-09-15&to=2026-09-21')), 2000)
+  check(requests.slice(before7).some((r) => r.url.includes('from=2026-09-15&to=2026-09-21')),
+    '「最近 7 天」= 最新日报日往前 7 天', JSON.stringify(requests.slice(before7).map((r) => r.url)))
+
+  // 手改范围 → 自动切自定义并立即查询（Arco 要先 click 定位焦点端）
+  const beforeCustom = requests.length
+  const pick = [...doc.querySelectorAll('.range-picker input')]
+  pick[0].dispatchEvent(new window.Event('click', { bubbles: true }))
+  pick[0].value = '2026-09-10'
+  pick[0].dispatchEvent(new window.Event('input', { bubbles: true }))
+  pick[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  pick[1].dispatchEvent(new window.Event('click', { bubbles: true }))
+  pick[1].value = '2026-09-21'
+  pick[1].dispatchEvent(new window.Event('input', { bubbles: true }))
+  pick[1].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await waitFor(() => requests.slice(beforeCustom).some((r) => r.url.includes('from=2026-09-10&to=2026-09-21')), 2000)
+  check(requests.slice(beforeCustom).some((r) => r.url.includes('from=2026-09-10&to=2026-09-21')),
+    '改 RangePicker 立即按新区间查询', JSON.stringify(requests.slice(beforeCustom).map((r) => r.url)))
+  check([...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '自定义')?.className.includes('on'),
+    '手改日期后自动切到「自定义」')
 }
 
 console.log('\n== 默认区间的锚点（数据滞后时不能落在空区间）==')
@@ -3943,10 +3967,10 @@ await clickTo('市场数据', '历史信息')
   const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
   await waitFor(() => bodyHas('已排除未复核'))
   check(bodyHas('已排除未复核 8 项'), '显示被排除的未复核条数（不静默少数据）')
-  check(bodyHas('本周') && bodyHas('本月') && bodyHas('自定义'), '区间预设齐全')
+  check(bodyHas('最近 7 天') && bodyHas('最近 30 天') && bodyHas('自定义'), '区间预设齐全（锚数据的最近 7/30 天）')
   check(bodyHas('按日') && bodyHas('按周') && bodyHas('按月'), '粒度可选')
 
-  // 默认本月预设：请求应带 from/to（前端算，前端显示；后端也能兜底）
+  // 默认最近 30 天预设：请求应带 from/to（前端算，前端显示；后端也能兜底）
   const first = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
   check(!!first, '发出趋势请求')
   check(bodyHas('粒度 week'), '展示后端返回的粒度')
@@ -3958,7 +3982,8 @@ await clickTo('市场数据', '历史信息')
 
   // 四条线：实际两条（日报日前/实时成交电价）+ 预测两条（留痕），同一日报域、日期对得上
   check(chartTitles.includes('日前-实时出清与预测价格'), '有四条线面板')
-  check(bodyHas('实际：官方直采（origin=pm-api）的日前/实时成交电价'), '写明实际线的来源与口径')
+  check(bodyHas('实际：官方指标库已确认值（origin=pm-api / manual）的日前/实时成交电价'), '写明实际线的来源与口径')
+  check(bodyHas('预测：留痕'), '四条线面板标出预测线来自留痕')
   check(bodyHas('留痕 2 个生成日'), '写明留痕有几个生成日')
   const pricePanel = [...doc.querySelectorAll('.panel')].find((p) =>
     (p.querySelector('.panel-title')?.textContent ?? '').includes('日前-实时出清与预测价格'),
@@ -4011,8 +4036,8 @@ await clickTo('市场数据', '历史信息')
 
   // 区间预设按钮也会重新查询
   const beforeWeek = requests.filter((r) => r.url.includes('/api/spot-report/trend')).length
-  const weekBtn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '本周')
-  weekBtn.click()
+  const last7Btn = [...doc.querySelectorAll('.radio-group button')].find((b) => b.textContent.trim() === '最近 7 天')
+  last7Btn.click()
   await waitFor(() => requests.filter((r) => r.url.includes('/api/spot-report/trend')).length > beforeWeek)
   const weekCall = requests.filter((r) => r.url.includes('/api/spot-report/trend')).pop()
   check(weekCall.url.includes('grain=day'), '切换区间保留已选粒度', weekCall.url)
