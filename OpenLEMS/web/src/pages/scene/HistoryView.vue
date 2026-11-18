@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { EChartsOption } from 'echarts'
+import { RangePicker } from '@arco-design/web-vue'
+import '@arco-design/web-vue/es/date-picker/style/css.js'
 import PanelBox from '@/components/PanelBox.vue'
 import SourceBadge from '@/components/SourceBadge.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -8,7 +10,7 @@ import TrendChart from '@/components/TrendChart.vue'
 import { fetchRecordedForecast } from '@/api/forecast'
 import { DATASET_LABELS, fetchTrend, listReports, type SpotTrend, type SpotTrendPoint } from '@/api/spotreport'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
-import { anchorEndDate } from '@/utils/latestRange'
+import { anchorEndDate, isoDate, rangeEndingAt, todayInShanghai } from '@/utils/latestRange'
 
 /**
  * 场景 · 历史信息 —— overlay 趋势卡（spot-overlay.js）能力的迁入点。
@@ -20,9 +22,9 @@ import { anchorEndDate } from '@/utils/latestRange'
  * 设计稿 §5.7 里还列了火电启停/备用/调频/出清电量几块 —— 那些没有数据源，
  * 页面底部按「待数据源」明确列出，不画空图。
  */
-const PRESETS: { v: 'week' | 'month' | 'custom'; t: string }[] = [
-  { v: 'week', t: '本周' },
-  { v: 'month', t: '本月' },
+const PRESETS: { v: 'last7' | 'last30' | 'custom'; t: string }[] = [
+  { v: 'last7', t: '最近 7 天' },
+  { v: 'last30', t: '最近 30 天' },
   { v: 'custom', t: '自定义' },
 ]
 
@@ -33,11 +35,14 @@ const GRAINS = [
   { value: 'month', label: '按月' },
 ]
 
-const range = reactive<{ preset: 'week' | 'month' | 'custom'; from: string; to: string }>({
-  preset: 'month',
+const range = reactive<{ preset: 'last7' | 'last30' | 'custom'; from: string; to: string }>({
+  preset: 'last30',
   from: '',
   to: '',
 })
+const rangeHint = ref('')
+const MAX_DAYS = 730
+const DAY_MS = 86400_000
 const grain = ref('')
 
 const trend = ref<SpotTrend | null>(null)
@@ -57,19 +62,44 @@ function fmt(d: Date): string {
 /** 最新日报日（现货指标的日期）；拿不到就用今天 */
 const latestReportDate = ref<string | null>(null)
 
+function spanDays(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1
+}
+function dayString(v: unknown): string {
+  if (v instanceof Date) return isoDate(v)
+  if (typeof v === 'number') return isoDate(new Date(v))
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : ''
+}
+function disabledFutureDate(date: Date): boolean {
+  return isoDate(date) > todayInShanghai()
+}
+
 function applyPreset() {
-  // 与预测复盘同理：日报数据可能滞后，默认区间落到「最新日报日」才不会一开就是空的
-  const today = anchorEndDate(latestReportDate.value)
-  if (range.preset === 'week') {
-    // ISO 周：周一 → 今天，与后端「按周」分桶口径一致，不会错位
-    const dow = (today.getDay() + 6) % 7
-    const monday = new Date(today.getTime() - dow * 86400_000)
-    range.from = fmt(monday)
-    range.to = fmt(today)
-  } else if (range.preset === 'month') {
-    range.from = fmt(new Date(today.getFullYear(), today.getMonth(), 1))
-    range.to = fmt(today)
+  // 日报数据常滞后：右端锚到最新日报日，不是「今天所在周/月」，否则默认整段是空的。
+  // 所以按钮叫「最近 7/30 天」，不叫「本周/本月」。
+  const end = anchorEndDate(latestReportDate.value)
+  rangeHint.value = ''
+  if (range.preset === 'last7' || range.preset === 'last30') {
+    const days = range.preset === 'last7' ? 7 : 30
+    range.from = fmt(new Date(end.getTime() - (days - 1) * DAY_MS))
+    range.to = fmt(end)
   }
+}
+
+function onRangeChange(v: unknown) {
+  if (!Array.isArray(v) || v.length < 2) return
+  let from = dayString(v[0])
+  const to = dayString(v[1])
+  if (!from || !to || Date.parse(`${from}T00:00:00Z`) > Date.parse(`${to}T00:00:00Z`)) return
+  rangeHint.value = ''
+  if (spanDays(from, to) > MAX_DAYS) {
+    from = rangeEndingAt(new Date(`${to}T00:00:00Z`), MAX_DAYS - 1).from
+    rangeHint.value = `范围超过 ${MAX_DAYS} 天，已按 ${MAX_DAYS} 天取数`
+  }
+  range.from = from
+  range.to = to
+  range.preset = 'custom'
+  reload()
 }
 
 function seriesKey(p: SpotTrendPoint): string {
@@ -298,7 +328,7 @@ useECharts(
 )
 
 const priceFoot = computed(() => {
-  const parts = [`实际：官方直采（origin=pm-api）的日前/实时成交电价（发电侧·加权平均电价），区间 ${priceRange.value || '—'}`]
+  const parts = [`实际：官方指标库已确认值（origin=pm-api / manual）的日前/实时成交电价（发电侧·加权平均电价），区间 ${priceRange.value || '—'}`]
   parts.push(
     recordedDays.value.length
       ? `预测：留痕 ${recordedDays.value.length} 个生成日（${recordedDays.value[0]} 起）`
@@ -311,10 +341,12 @@ function reload() {
   void Promise.all([load(), loadPriceCompare()])
 }
 
-function onPreset(p: 'week' | 'month' | 'custom') {
+function onPreset(p: 'last7' | 'last30' | 'custom') {
   range.preset = p
-  if (p !== 'custom') applyPreset()
-  if (p !== 'custom') reload()
+  if (p !== 'custom') {
+    applyPreset()
+    reload()
+  }
 }
 
 onMounted(async () => {
@@ -352,9 +384,17 @@ onMounted(async () => {
           </button>
         </span>
 
-        <label class="field">起<input v-model="range.from" type="date" /></label>
-        <span class="muted">→</span>
-        <label class="field">止<input v-model="range.to" type="date" /></label>
+        <RangePicker
+          class="range-picker"
+          :model-value="[range.from, range.to]"
+          value-format="YYYY-MM-DD"
+          format="YYYY-MM-DD"
+          :allow-clear="false"
+          :disabled-date="disabledFutureDate"
+          :placeholder="['开始日期', '结束日期']"
+          @change="onRangeChange"
+        />
+        <span v-if="rangeHint" class="range-hint">{{ rangeHint }}</span>
 
         <label class="field">
           粒度
@@ -421,7 +461,7 @@ onMounted(async () => {
       :sub="BUCKET_DATASETS.has(dataset) ? '档位计数（分类值，不是价格）' : `${new Set(points.map((p) => p.scope)).size} 个对象`"
       :span="12"
       :loading="loading"
-      :foot="`数据来源：官方直采指标（origin=pm-api） · 按运行日分桶（${trend?.grain || 'day'}）`"
+      :foot="`数据来源：官方指标库 gd_spot_metric（已确认：origin=pm-api / manual） · 按运行日分桶（${trend?.grain || 'day'}）`"
     >
       <template #actions>
         <SourceBadge tone="blue" label="官网·披露接口" />
@@ -467,8 +507,8 @@ onMounted(async () => {
       :foot="false"
     >
       <div class="empty">
-        当前区间没有已确认的现货指标。数据由官方直采（广东电力交易中心信息披露接口）
-        入库，没有记录说明该区间还没有入库。
+        当前区间没有已确认的现货指标。数据由官方指标库 gd_spot_metric（广东电力交易中心信息披露接口
+        直采 + 人工确认）入库，没有记录说明该区间还没有入库。
       </div>
     </PanelBox>
 
@@ -482,7 +522,8 @@ onMounted(async () => {
       <template #actions>
         <!-- 这块同时画日前与实时两条腿，滞后不一样（日前 T+0、实时 T+2），
              一个数字罩住两条腿必然把其中一条说错 —— 只标来源，滞后交给每条腿自己的文案。 -->
-        <SourceBadge tone="blue" label="官网·披露接口" />
+        <SourceBadge tone="blue" label="官网披露·实际" />
+        <StatusTag tone="gray">预测：留痕</StatusTag>
       </template>
       <div v-if="priceError" class="empty">{{ priceError }}</div>
       <template v-else>
@@ -493,7 +534,7 @@ onMounted(async () => {
         </div>
         <div v-if="priceRows.length" ref="priceEl" class="chart" />
         <div v-else class="empty">
-          本区间没有已确认的日前/实时成交电价。数据同为官方直采入库，
+          本区间没有已确认的日前/实时成交电价。数据同为官方指标库已确认值入库，
           没有记录说明该区间还没有入库。
         </div>
       </template>
@@ -558,6 +599,8 @@ onMounted(async () => {
   cursor: pointer;
 }
 .radio-group button.on { background: var(--bg-2); color: var(--brand-ink); font-weight: 600; }
+.range-picker { width: 260px; }
+.range-hint { font-size: var(--fs-12); color: var(--text-3); }
 .field { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--fs-13); color: var(--text-3); }
 .field input,
 .field select {

@@ -132,12 +132,12 @@ func ExtractDay(ctx context.Context, reportDate string, force bool) (*v1.Extract
 		status = "empty"
 	}
 	return &v1.ExtractDayRes{
-		Date:       reportDate,
-		TradeDate:  extracted.TradeDate,
-		MetricRows: written.Written,
-		Preserved:  written.Preserved,
+		Date:           reportDate,
+		TradeDate:      extracted.TradeDate,
+		MetricRows:     written.Written,
+		Preserved:      written.Preserved,
 		SkippedFarther: written.SkippedFarther,
-		Status:     status,
+		Status:         status,
 		// 模板的交叉校验告警照原样透出（它们解释「为什么这一天的某行看起来不对」），
 		// 但不影响入库集合：入库只看上面的子集过滤。
 		Warnings: nonNilStrings(extracted.Warnings),
@@ -197,7 +197,24 @@ func Backfill(ctx context.Context) (*v1.BackfillRes, error) {
 	}, nil
 }
 
-// normalizeRange 归一化区间：缺省取最近 30 个运行日，上限 730 天。
+// latestReconcileDate 两侧数据里较新的运行日；两侧都空时返回空串，由 normalizeRange 回落到今天。
+func latestReconcileDate(ctx context.Context) (string, error) {
+	svc := s_db.GetReportDailyService()
+	report, err := svc.LatestRunDate(ctx)
+	if err != nil {
+		return "", err
+	}
+	official, err := svc.LatestOfficialRunDate(ctx)
+	if err != nil {
+		return "", err
+	}
+	if report > official {
+		return report, nil
+	}
+	return official, nil
+}
+
+// normalizeRange 归一化区间：to 缺省时锚到今天（调用方先尝试数据锚点），往前 30 天，上限 730 天。
 func normalizeRange(from, to string) (string, string, error) {
 	to = strings.TrimSpace(to)
 	from = strings.TrimSpace(from)
@@ -229,6 +246,15 @@ func normalizeRange(from, to string) (string, string, error) {
 // 不写任何表、不做 fallback、不把缺数补成 0：缺日报 → reportValue=null + MissingReport=true；
 // 官网无此口径 → officialValue=null + compare=official_missing。
 func LoadReconcile(ctx context.Context, from, to string) (*v1.ReconcileRes, error) {
+	// 缺省右端锚到两侧数据里较新的那一天，不锚「今天」：
+	// 日报/官网都可能滞后，拿今天当右端会让默认 30 天整段落在数据之后。
+	if strings.TrimSpace(to) == "" {
+		latest, err := latestReconcileDate(ctx)
+		if err != nil {
+			return nil, err
+		}
+		to = latest
+	}
 	from, to, err := normalizeRange(from, to)
 	if err != nil {
 		return nil, err

@@ -11,6 +11,18 @@ npm install
 npm run dev        # http://localhost:5173，/api 反向代理到后端 :15880
 ```
 
+推荐用仓库根目录的统一入口（固定端口，重复执行会先清理旧进程）：
+
+```bash
+make dev          # backend :15880 + frontend :5173
+make dev-status   # 看固定端口占用
+make dev-logs     # 同时跟两个日志
+make dev-stop     # 停掉本次 dev 的进程组，并兜底清固定端口
+```
+
+PID 写在 `.dev/*.pid`，日志在 `.dev/*.log`，均不入库。`make dev` 每次都走 `dev-stop`，
+所以不会像手工 `nohup` 那样留下无人管理的实例；端口始终只有 `15880` / `5173`。
+
 后端按 dev 配置启动（`manifest/config/config-dev.yaml`，监听 `:15880`）：
 
 ```bash
