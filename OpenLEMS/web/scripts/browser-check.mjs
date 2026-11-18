@@ -152,6 +152,39 @@ const FIXTURES = {
       })),
     },
   },
+  // 小时（grain=hour）：官网主页 24 点，目标日 24 个整点 + 该日实际 24 点。
+  // 锚点 to 比目标日早 6 天，正是源站 T-6 滞后在页面上该有的样子。
+  '/api/forecast/price?grain=hour': {
+    forecast: {
+      market: 'ahead',
+      source: 'home24h',
+      grain: 'hour',
+      targetDate: '2026-11-18',
+      stepMinutes: 60,
+      dataset: '官网主页 24 点',
+      scope: '官网主页',
+      metric: '日前电价（整点）',
+      unit: '元/MWh',
+      model: 'timesfm-3.0',
+      from: '2026-11-05',
+      to: '2026-11-12',
+      historyDates: Array.from({ length: 24 }, (_, i) => `2026-11-12 ${String(i).padStart(2, '0')}:00`),
+      historyValues: Array.from({ length: 24 }, (_, i) => 300 + ((i * 17) % 120)),
+      contextPoints: 336,
+      inputTruncated: false,
+      missingDays: 0,
+      timeMs: 900,
+      generatedOn: '2026-11-12',
+      actual: Array.from({ length: 24 }, (_, i) => 310 + ((i * 19) % 110)),
+      forecast: Array.from({ length: 24 }, (_, i) => ({
+        runDate: '2026-11-18',
+        targetTime: `2026-11-18 ${String(i).padStart(2, '0')}:00`,
+        atTime: `${String(i).padStart(2, '0')}:00`,
+        point: 305 + ((i * 13) % 130),
+        quantiles: { '0.1': 250 + ((i * 7) % 40), '0.5': 305 + ((i * 13) % 130), '0.9': 430 + ((i * 5) % 40) },
+      })),
+    },
+  },
   // 分时（grain=intraday）：序列源是电网日指标 CSV，5 个预测日 × 96 点 = 480 点
   // （96×5=480 ≤ TimesFM max_horizon 512）。stub 里按 query 选这一份。
   '/api/forecast/price?grain=intraday': {
@@ -390,6 +423,9 @@ window.fetch = async (input) => {
   if (p === '/api/forecast/price' && url.searchParams.get('grain') === 'intraday') {
     data = __FIXTURES__['/api/forecast/price?grain=intraday'];
   }
+  if (p === '/api/forecast/price' && url.searchParams.get('grain') === 'hour') {
+    data = __FIXTURES__['/api/forecast/price?grain=hour'];
+  }
   if (data === undefined && /\\/points\\/definitions$/.test(p)) data = ${JSON.stringify(pointDefinitions('x'))};
   if (data === undefined) data = {};
   return new Response(JSON.stringify({ code: 0, message: 'OK', data }), {
@@ -496,8 +532,8 @@ const PAGES = [
     text: ['官网·节点价 T+0', '官网·披露接口', '官网·24 点 T-6', '数据截至'],
   },
   { name: '市场数据 · 信息披露', path: '/scene/disclosure', min: 2 },
-  // 决策支持现在有三张图：电价预测、负荷预测、相似日情况分析（目标日 + 叠加日）
-  { name: '分析预测 · 决策支持', path: '/scene/decision', min: 3 },
+  // 决策支持现在有四张图：日均电价预测、小时（24 点）电价预测、负荷预测、相似日情况分析
+  { name: '分析预测 · 决策支持', path: '/scene/decision', min: 4, text: ['小时（24 点）', '锚点'] },
   // 三张图：日前成交电价、实时成交电价、四条线面板（官方口径能画出实际两条线才会是 3）
   { name: '市场数据 · 历史信息', path: '/scene/history', min: 3 },
   { name: '分析预测 · 长周期电价预测（日均）', path: '/scene/forecast', min: 1 },

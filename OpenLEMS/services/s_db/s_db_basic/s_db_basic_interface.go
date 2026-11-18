@@ -244,6 +244,9 @@ type IHomeMarketService interface {
 	ListHome24h(ctx context.Context, date string) ([]*s_db_model.SHome24hModel, error)
 	// LatestHome24hDate 最近一个有数据的运行日；空串表示库里一条都没有
 	LatestHome24hDate(ctx context.Context) (string, error)
+	// ListHome24hRange 取 [from, to] 区间内的 24 点行（按 price_date、hour 升序）。
+	// 小时粒度预测要跨多天回看，逐日 ListHome24h 会是 N 次查询。
+	ListHome24hRange(ctx context.Context, from, to string) ([]*s_db_model.SHome24hModel, error)
 
 	// UpsertNodePrice 覆盖写某天的地市节点价（唯一键 run_date+city_code+period_type）
 	UpsertNodePrice(ctx context.Context, rows []*s_db_model.SNodePriceModel) (int, error)

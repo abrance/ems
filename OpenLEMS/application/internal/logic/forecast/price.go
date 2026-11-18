@@ -45,13 +45,17 @@ const (
 
 // PriceRequest 电价预测请求。ForceRefresh=true 跳过缓存（前端手动刷新用）。
 //
-// Grain 决定序列源，不只是步长：
+// Source 决定读哪份数据（每份数据的锚点规则、缺失判定、留痕来源都不同），
+// Grain 只表达采样步长，两者一一对应并交叉校验（见 ParsePriceSource）：
 //
-//	day（默认）—— 官方直采成交价，一天一个点，出未来多日日均
-//	intraday    —— 电网日指标 CSV 的 15 分钟电价，出未来 5 日 × 96 点
+//	spot_metric   + day      —— 官方直采成交价，一天一个点
+//	home24h       + hour     —— 官网主页 24 点分时，出目标日 24 个整点
+//	gd_metric_csv + intraday —— 电网日指标 CSV 的 15 分钟电价（已停更）
 type PriceRequest struct {
 	Market       string
+	Source       string
 	Grain        string
+	TargetDate   string // 仅 hour：目标日 YYYY-MM-DD，空=今天
 	HistoryDays  int
 	HorizonDays  int
 	Quantiles    []float64
@@ -63,11 +67,107 @@ func ParseGrain(grain string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(grain)) {
 	case "", s_db_model.ForecastGrainDay, "daily":
 		return s_db_model.ForecastGrainDay, nil
+	case s_db_model.ForecastGrainHour, "hourly", "24":
+		return s_db_model.ForecastGrainHour, nil
 	case s_db_model.ForecastGrainIntraday, "intra-day", "96":
 		return s_db_model.ForecastGrainIntraday, nil
 	default:
-		return "", errors.Errorf("不支持的粒度: %s（可用 day / intraday）", grain)
+		return "", errors.Errorf("不支持的粒度: %s（可用 day / hour / intraday）", grain)
 	}
+}
+
+// priceSourceSpec 一种数据源的合法粒度与身份信息。
+type priceSourceSpec struct {
+	Source     string
+	Grain      string
+	Dataset    string
+	MetricName string
+}
+
+// priceSourceSpecs 三路数据源。顺序即文档顺序，便于报错时列出可用值。
+//
+// grain → source 的反推也靠这张表：一粒度只能对应一份数据，否则“day 到底读哪张表”
+// 就又回到靠约定猜。
+var priceSourceSpecs = []priceSourceSpec{
+	{
+		Source:     s_db_model.PriceSourceSpotMetric,
+		Grain:      s_db_model.ForecastGrainDay,
+		Dataset:    spotreport.DatasetTrade,
+		MetricName: priceMetric,
+	},
+	{
+		Source:     s_db_model.PriceSourceHome24h,
+		Grain:      s_db_model.ForecastGrainHour,
+		Dataset:    "官网主页 24 点",
+		MetricName: "日前电价（整点）",
+	},
+	{
+		Source:     s_db_model.PriceSourceGdMetricCSV,
+		Grain:      s_db_model.ForecastGrainIntraday,
+		Dataset:    "电网日指标",
+		MetricName: "日前电价（15 分钟）",
+	},
+}
+
+// ParsePriceSource 推导并校验 (source, grain)。是这两者唯一的校验入口。
+//
+//	都缺       → spot_metric + day（与历史调用方一致）
+//	只给 grain → 反推唯一的 source
+//	只给 src   → 用它的唯一 grain
+//	两者都给   → 必须匹配，否则报错（不静默改参数）
+//	未知取值   → 报错，不回落到默认值（静默回退会让人以为在看官方日频数据）
+func ParsePriceSource(source, grain string) (string, string, error) {
+	src := strings.ToLower(strings.TrimSpace(source))
+	grn := strings.TrimSpace(grain)
+
+	// 粒度别名归一化复用 ParseGrain，不另写一份别名表。
+	if grn != "" {
+		g, err := ParseGrain(grn)
+		if err != nil {
+			return "", "", err
+		}
+		grn = g
+	}
+
+	if src == "" && grn == "" {
+		return s_db_model.PriceSourceSpotMetric, s_db_model.ForecastGrainDay, nil
+	}
+	if src == "" {
+		for _, s := range priceSourceSpecs {
+			if s.Grain == grn {
+				return s.Source, grn, nil
+			}
+		}
+		return "", "", errors.Errorf("粒度 %s 没有对应的数据源", grn)
+	}
+
+	var found *priceSourceSpec
+	for i := range priceSourceSpecs {
+		if priceSourceSpecs[i].Source == src {
+			found = &priceSourceSpecs[i]
+			break
+		}
+	}
+	if found == nil {
+		return "", "", errors.Errorf("不支持的数据源: %s（可用 spot_metric / home24h / gd_metric_csv）", source)
+	}
+	if grn == "" {
+		return found.Source, found.Grain, nil
+	}
+	if grn != found.Grain {
+		return "", "", errors.Errorf("数据源 %s 只支持粒度 %s，收到 %s", found.Source, found.Grain, grn)
+	}
+	return found.Source, grn, nil
+}
+
+// priceSourceSpecOf 按 source 取规格；调用前已经过 ParsePriceSource，不应取不到。
+func priceSourceSpecOf(source string) (priceSourceSpec, error) {
+	for _, s := range priceSourceSpecs {
+		if s.Source == source {
+			return s, nil
+		}
+	}
+	return priceSourceSpec{}, errors.Errorf("未知数据源: %s", source)
 }
 
 // 官方接口直采（origin=pm-api）的指标名：源站原名，与 OCR 日报的「平均电价」不同名。
@@ -155,7 +255,7 @@ func LoadPrice(ctx context.Context, req PriceRequest) (*SPriceForecast, error) {
 		return nil, errors.New("策略未配置预测服务地址")
 	}
 
-	key := fmt.Sprintf("forecast:price:%s:%d:%d:%s", spec.Market, historyDays, horizonDays, quantileKey(quantiles))
+	key := fmt.Sprintf("forecast:price:%s:%s:%d:%d:%s", s_db_model.PriceSourceSpotMetric, spec.Market, historyDays, horizonDays, quantileKey(quantiles))
 	return withForecastCache(ctx, key, req.ForceRefresh, func(ctx context.Context) (*SPriceForecast, error) {
 		client := s_forecast.NewClient(baseURL, forecastTimeout)
 		return loadPriceWith(ctx, client, spotMetricSource, spec, historyDays, horizonDays, quantiles, priceLocation(), time.Now())

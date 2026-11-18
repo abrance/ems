@@ -66,6 +66,26 @@ func (s *sHomeMarketServiceImpl) ListHome24h(ctx context.Context, date string) (
 	return list, nil
 }
 
+func (s *sHomeMarketServiceImpl) ListHome24hRange(
+	ctx context.Context, from, to string,
+) ([]*s_db_model.SHome24hModel, error) {
+	list := make([]*s_db_model.SHome24hModel, 0, 24*14)
+	m := g.Model(s_db_model.TableHome24h).Ctx(ctx)
+	if from != "" {
+		m = m.WhereGTE(s_db_model.FieldHome24hPriceDate, from)
+	}
+	if to != "" {
+		m = m.WhereLTE(s_db_model.FieldHome24hPriceDate, to)
+	}
+	err := m.OrderAsc(s_db_model.FieldHome24hPriceDate).
+		OrderAsc(s_db_model.FieldHome24hHour).
+		Scan(&list)
+	if err != nil {
+		return nil, errors.Wrap(err, "查询 24 点分时区间失败")
+	}
+	return list, nil
+}
+
 func (s *sHomeMarketServiceImpl) LatestHome24hDate(ctx context.Context) (string, error) {
 	// 单字段查询扫进 []string 会被 gf 序列化成整行 JSON（见 s_db_impl_price_forecast_service_s.go 的坑），
 	// 这里按行结构体接再取字段。

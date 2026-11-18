@@ -19,7 +19,9 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 
 	result, err := forecastlogic.LoadPriceAny(ctx, forecastlogic.PriceRequest{
 		Market:       req.Market,
+		Source:       req.Source,
 		Grain:        req.Grain,
+		TargetDate:   req.TargetDate,
 		HistoryDays:  req.HistoryDays,
 		HorizonDays:  req.HorizonDays,
 		Quantiles:    quantiles,
@@ -54,7 +56,9 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 
 	return &v1.GetPriceForecastRes{Forecast: &v1.PriceForecast{
 		Market:         result.Market,
+		Source:         result.Source,
 		Grain:          result.Grain,
+		TargetDate:     result.TargetDate,
 		Dataset:        result.Dataset,
 		Scope:          result.Scope,
 		Metric:         result.Metric,
@@ -66,6 +70,7 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		HistoryDates:   result.HistoryDates,
 		HistoryValues:  result.HistoryValues,
 		Forecast:       points,
+		Actual:         actualOrEmpty(result.Actual),
 		ContextPoints:  result.ContextPoints,
 		InputChannels:  result.InputChannels,
 		InputTruncated: result.InputTruncated,
@@ -74,4 +79,13 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		GeneratedOn:    result.GeneratedOn,
 		Recorded:       result.Recorded,
 	}}, nil
+}
+
+// actualOrEmpty Go 的 nil 切片序列化成 null，前端 `.length` 会直接抛。
+// 这里统一成 []，与 api 层其它数组字段的处理保持一致。
+func actualOrEmpty(v []float64) []float64 {
+	if v == nil {
+		return []float64{}
+	}
+	return v
 }

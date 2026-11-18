@@ -19,6 +19,9 @@ func TestParseGrain(t *testing.T) {
 		"day":        s_db_model.ForecastGrainDay,
 		"daily":      s_db_model.ForecastGrainDay,
 		"DAY":        s_db_model.ForecastGrainDay,
+		"hour":       s_db_model.ForecastGrainHour,
+		"hourly":     s_db_model.ForecastGrainHour,
+		"24":         s_db_model.ForecastGrainHour,
 		"intraday":   s_db_model.ForecastGrainIntraday,
 		"intra-day":  s_db_model.ForecastGrainIntraday,
 		"96":         s_db_model.ForecastGrainIntraday,
@@ -34,7 +37,7 @@ func TestParseGrain(t *testing.T) {
 			t.Errorf("%q → %s，期望 %s", in, got, want)
 		}
 	}
-	if _, err := ParseGrain("hourly"); err == nil {
+	if _, err := ParseGrain("weekly"); err == nil {
 		t.Error("非法粒度应报错")
 	}
 }
@@ -49,6 +52,10 @@ func TestFormatTargetTime(t *testing.T) {
 	}
 	if got := formatTargetTime(s_db_model.ForecastGrainIntraday, ts); got != "2026-09-22 13:45" {
 		t.Errorf("intraday 应到分钟，实际 %q", got)
+	}
+	// hour 与 intraday 一样到分钟，整点即 HH:00
+	if got := formatTargetTime(s_db_model.ForecastGrainHour, time.Date(2026, 9, 22, 13, 0, 0, 0, loc)); got != "2026-09-22 13:00" {
+		t.Errorf("hour 应到分钟，实际 %q", got)
 	}
 }
 
