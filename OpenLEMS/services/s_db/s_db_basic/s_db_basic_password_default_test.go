@@ -53,3 +53,24 @@ func TestInitialPasswordDefaults(t *testing.T) {
 		})
 	}
 }
+
+// 初始口令可以被部署环境的 EMS_ADMIN_PASSWORD / EMS_USER_PASSWORD 覆盖。
+// 只覆盖「建库时写什么」，不改已有库里的值 —— 这里只断言取值函数，
+// 建库时的使用点在 s_db_init_f.go（InitialPassword）。
+func TestInitialPasswordEnvOverride(t *testing.T) {
+	t.Setenv(EnvAdminPassword, "  s3cret-admin  ")
+	if got := InitialPassword(SystemSettingAdminPassword); got != "s3cret-admin" {
+		t.Errorf("admin 初始口令 = %q，应为环境变量值（去空白）", got)
+	}
+
+	t.Setenv(EnvUserPassword, "")
+	if got := InitialPassword(SystemSettingUserPassword); got != "111111" {
+		t.Errorf("user 初始口令 = %q，环境变量为空时应回落到出厂默认值", got)
+	}
+
+	// 非密码设置不该被这两个环境变量影响
+	t.Setenv(EnvAdminPassword, "nope")
+	if got := InitialPassword(SystemSettingPasswordLength); got != "6" {
+		t.Errorf("非密码设置的默认值被误改 = %q", got)
+	}
+}

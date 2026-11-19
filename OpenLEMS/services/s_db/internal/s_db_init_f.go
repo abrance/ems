@@ -616,7 +616,7 @@ func initSystemSettings(ctx context.Context) {
 		err := existingSetting.GetById(ctx, settingDefine.Id)
 		if err != nil {
 			// 设置不存在，创建新的设置记录
-			defaultValue := settingDefine.DefaultValue
+			defaultValue := s_db_basic.InitialPassword(settingDefine)
 			if s_db_basic.IsPasswordSettingID(settingDefine.Id) && defaultValue != "" {
 				hashedValue, hashErr := c_util.HashPassword(defaultValue)
 				if hashErr != nil {

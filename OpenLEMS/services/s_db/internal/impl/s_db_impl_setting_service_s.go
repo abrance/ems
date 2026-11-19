@@ -209,12 +209,16 @@ func (s *sSettingServiceImpl) GetSettingValueBySystemSettingDefine(ctx context.C
 		return nil
 	}
 
+	// 兜底值也走 InitialPassword：部署设了 EMS_ADMIN_PASSWORD/EMS_USER_PASSWORD 时，
+	// 兜底口令要与建库时写进去的一致，否则设置行丢失后会「环境变量写了却登不进」。
+	fallback := s_db_basic.InitialPassword(settingDefine)
+
 	// 先尝试从缓存获取
 	if setting, found := s.getFromCache(ctx, settingDefine.Id); found {
 		// 检查设置是否启用
 		if !setting.Enabled {
 			c_log.Warningf(ctx, "设置已禁用 - 设置名称: %s", settingDefine.Id)
-			return &settingDefine.DefaultValue
+			return &fallback
 		}
 		c_log.Debugf(ctx, "通过系统设置定义获取设置值成功 - 设置ID: %s, 值: %s", settingDefine.Id, setting.GetValue())
 		value := setting.GetValue()
@@ -227,7 +231,7 @@ func (s *sSettingServiceImpl) GetSettingValueBySystemSettingDefine(ctx context.C
 	if err != nil {
 		c_log.Errorf(ctx, "获取设置失败 - 设置名称: %s, 错误: %v", settingDefine.Id, err)
 		// 系统启动时已初始化所有设置，如果获取失败说明数据库有问题
-		return &settingDefine.DefaultValue
+		return &fallback
 	}
 
 	// 将结果存入缓存
@@ -236,7 +240,7 @@ func (s *sSettingServiceImpl) GetSettingValueBySystemSettingDefine(ctx context.C
 	// 检查设置是否启用
 	if !setting.Enabled {
 		c_log.Warningf(ctx, "设置已禁用 - 设置名称: %s", settingDefine.Id)
-		return &settingDefine.DefaultValue
+		return &fallback
 	}
 
 	c_log.Debugf(ctx, "通过系统设置定义获取设置值成功 - 设置ID: %s, 值: %s", settingDefine.Id, setting.GetValue())

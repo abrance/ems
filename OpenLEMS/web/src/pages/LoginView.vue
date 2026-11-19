@@ -84,7 +84,8 @@ async function submit() {
 
       <p class="hint">
         内置账号：<code>admin</code>（管理员）/ <code>user</code>（普通用户）。
-        <strong>初次部署</strong>的初始密码是 <code>admin</code>；升级安装会沿用原有密码，不会被重置。
+        <strong>初次部署</strong>的初始密码是 <code>admin</code>（部署时可用 <code>EMS_ADMIN_PASSWORD</code> 覆盖）；
+        升级/已有库会沿用原有密码，不会被重置。
         登录后请尽快修改。
       </p>
     </form>
