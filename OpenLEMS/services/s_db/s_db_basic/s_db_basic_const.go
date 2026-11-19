@@ -3,6 +3,8 @@ package s_db_basic
 import (
 	"common/c_enum"
 	"math/rand"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -20,6 +22,34 @@ func generateRandomString(length int) string {
 // IsPasswordSettingID reports whether the setting stores a login password.
 func IsPasswordSettingID(id string) bool {
 	return id == SystemSettingUserPassword.Id || id == SystemSettingAdminPassword.Id
+}
+
+// 初始口令的环境变量。只影响**新建的库**：建库时按这里的值哈希写入 setting 表，
+// 已有库里的 admin_password / user_password 不会被覆盖（改口径要慎重：重启时重置
+// 用户改过的密码比留下一个已知默认值更危险）。存量库要换密码走登录后的改密接口。
+const (
+	EnvAdminPassword = "EMS_ADMIN_PASSWORD"
+	EnvUserPassword  = "EMS_USER_PASSWORD"
+)
+
+// InitialPassword 建库时写入的初始口令：环境变量优先，未设置时用常量里的出厂默认值。
+func InitialPassword(def *SSystemSettingDefine) string {
+	if def == nil {
+		return ""
+	}
+	var envKey string
+	switch def.Id {
+	case SystemSettingAdminPassword.Id:
+		envKey = EnvAdminPassword
+	case SystemSettingUserPassword.Id:
+		envKey = EnvUserPassword
+	}
+	if envKey != "" {
+		if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+			return v
+		}
+	}
+	return def.DefaultValue
 }
 
 // 系统设置定义变量
@@ -187,7 +217,7 @@ var (
 		FieldType:    c_enum.ESettingFieldTypeText,
 	}
 
-	// 普通用户密码设置定义
+	// 普通用户密码设置定义（初始口令可用 EMS_USER_PASSWORD 覆盖）
 	SystemSettingUserPassword = &SSystemSettingDefine{
 		Id:           "user_password",
 		Group:        c_enum.ESettingGroupSystem,
@@ -201,6 +231,7 @@ var (
 	//
 	// 初始密码为 admin（与登录页提示一致）。**出厂默认密码等于弱口令**，
 	// 部署后第一件事就是改掉它 —— 尤其别把管理端放到公网。
+	// 部署环境可用 EMS_ADMIN_PASSWORD 覆盖初始口令（见 InitialPassword）。
 	// 注意：改这里只影响**新建**的库；已有库里 admin_password 已存在，不会被覆盖
 	// （刻意如此：升级时重置用户改过的密码比弱默认值更危险）。
 	SystemSettingAdminPassword = &SSystemSettingDefine{

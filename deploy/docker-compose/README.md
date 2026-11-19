@@ -16,6 +16,8 @@ cp .env.example .env
 | 变量 | 用途 | 留空时 |
 | --- | --- | --- |
 | `EMS_DB_LINK` | 关系库连接串（sqlite 或 pgsql）。支持 `postgresql://user:pass@host:5432/db` 与 gf 的 `pgsql:user:pass@tcp(host:5432)/db` 两种写法 | 用 `config.yaml` 里的本地 sqlite |
+| `EMS_ADMIN_PASSWORD` | 管理员初始口令，**只在新库建表时写入**（bcrypt 哈希） | 出厂默认 `admin` |
+| `EMS_USER_PASSWORD` | 普通用户初始口令，同上 | 出厂默认 `111111` |
 | `PRICE_SYNC_BASE_URL` | 电网分时电价数据源 | 同步任务跳过 |
 | `HOME_MARKET_GATEWAY_BASE` | 官网主页 24 点/地市网关 | 采集不启动 |
 | `GD_METRIC_URL` | 第三方 `gd_metric.csv` 下载地址 | 不联网下载 |

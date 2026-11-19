@@ -218,8 +218,9 @@ CI 里 `BROWSER_CHECK_REQUIRED=1`（不许跳过）；本地没有 firefox 时�
 - 会话键：`ems:user:token` / `ems:user:role` / `ems:user:expireAt`（与后端
   `authBypassScript` 同一套，不要另起一套）
 - 令牌以 `Authorization: Bearer <token>` 发送，同时带 Cookie
-- 初始密码：**初次部署** admin = `admin`、user = `111111`；
+- 初始密码：**初次部署** admin = `admin`、user = `111111`，可用环境变量
+  `EMS_ADMIN_PASSWORD` / `EMS_USER_PASSWORD` 覆盖（只在建库时生效）；
   **已升级的库保持原密码**（刻意不重置）。忘了密码就删掉 `setting` 表里
-  `admin_password` 那一行再重启，会按当前默认值重建
+  `admin_password` 那一行再重启，会按环境变量或默认值重建
 - 出厂默认密码是弱口令：部署后第一件事就是改掉它
 - `AUTH_BYPASS_ROLE` 是内网调试/演示用的逃生门，默认不要设
