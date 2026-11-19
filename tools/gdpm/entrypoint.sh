@@ -36,9 +36,10 @@ try:
         print("[gdpm] 采集记录为空：本次连留痕都没写进去")
     # 首次跑/抓取失败时指标表可能还不存在，这不是摘要的错，不报。
     try:
-        n = conn.execute("SELECT COUNT(*), MAX(run_date) FROM gd_spot_metric"
+        # 按列名取：psycopg 的 dict_row 不支持下标（sqlite3.Row 两种都行）
+        n = conn.execute("SELECT COUNT(*) AS c, MAX(run_date) AS d FROM gd_spot_metric"
                          " WHERE origin='pm-api'").fetchone()
-        print(f"[gdpm] pm-api 指标共 {n[0]} 条，最新数据日 {n[1]}")
+        print(f"[gdpm] pm-api 指标共 {n['c']} 条，最新数据日 {n['d']}")
     except Exception:
         print("[gdpm] 指标表尚未建立（本次未写入）")
 except Exception as e:
