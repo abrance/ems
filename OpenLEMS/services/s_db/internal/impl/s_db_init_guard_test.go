@@ -19,7 +19,8 @@ const configFileName = "../../../../application/manifest/config/config.yaml"
 
 // PR #124 的两个改动都在「配置/DDL 里的一行」，代码不引用它们，所以删掉也不会有任何
 // 编译错误或调用失败——只能靠跑一遍真实 Init() 把行为钉住，防止被静默改回去。
-func TestInitEnablesWalAndLogIndexes(t *testing.T) {
+// log 表随「去掉 log db」（#192）下线，不再由 Init() 建表建索引。
+func TestInitEnablesWalAndAlarmIndexes(t *testing.T) {
 	link := readDatabaseLink(t)
 
 	// 生产 link 指向 out/db.sqlite3，这里换成本次测试的临时库，保证是全新库。
@@ -56,9 +57,8 @@ func TestInitEnablesWalAndLogIndexes(t *testing.T) {
 		t.Fatalf("journal_mode = %q，期望 wal（config.yaml 的 link 里 ?journal_mode=WAL 被改掉了？）", got)
 	}
 
-	// ② log / alarm_history 表的索引必须由 Init() 建出来：日志分页深翻页靠 created_at，
-	// 按设备过滤靠 device_id；告警历史按 trigger_at 倒序翻页、按 device_id 过滤。
-	// 缺任一条都会退回全表扫描。
+	// ② alarm_history 表的索引必须由 Init() 建出来：告警历史按 trigger_at 倒序翻页、
+	// 按 device_id 过滤。缺任一条都会退回全表扫描。
 	assertIndexes := func(table string, want []string) {
 		t.Helper()
 		names, err := g.DB().GetArray(ctx,
@@ -77,7 +77,6 @@ func TestInitEnablesWalAndLogIndexes(t *testing.T) {
 		}
 	}
 
-	assertIndexes("log", []string{"idx_log_created_at", "idx_log_device_id"})
 	assertIndexes("alarm_history", []string{"idx_alarm_history_trigger_at", "idx_alarm_history_device_trigger"})
 }
 
