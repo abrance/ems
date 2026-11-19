@@ -122,5 +122,18 @@ class TestPGWrapper(unittest.TestCase):
         self.assertEqual(raw.rec[0], ("CREATE TABLE IF NOT EXISTS t (id BIGSERIAL PRIMARY KEY)", ()))
 
 
+class TestHybridRow(unittest.TestCase):
+    def test_str_and_int_access(self):
+        row = gdpm_db._HybridRow({"run_date": "2026-11-01", "source_url": "u"})
+        self.assertEqual(row["run_date"], "2026-11-01")
+        self.assertEqual(row[0], "2026-11-01")
+        self.assertEqual(row[1], "u")
+
+    def test_missing_str_key_still_raises(self):
+        row = gdpm_db._HybridRow({"a": 1})
+        with self.assertRaises(KeyError):
+            _ = row["b"]
+
+
 if __name__ == "__main__":
     unittest.main()

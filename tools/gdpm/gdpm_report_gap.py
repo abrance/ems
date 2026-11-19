@@ -23,10 +23,12 @@ page-4 实时交易电价）。没有可枚举的文章列表接口，链接只�
 import argparse
 import datetime as dt
 import json
-import sqlite3
+import os
 import sys
 import urllib.error
 import urllib.request
+
+import gdpm_db as dbc
 
 DEFAULT_FROM = "2026-09-26"
 DEFAULT_EXTRACTOR = "gap-1"
@@ -50,14 +52,16 @@ def load_state(conn):
     try:
         for r in conn.execute("SELECT run_date, source_url FROM gd_spot_report"):
             state.setdefault(r[0], {})["source_url"] = r[1]
-    except sqlite3.OperationalError as e:
-        if "no such table" not in str(e):
+    except Exception as e:  # sqlite: no such table / PG: relation "x" does not exist
+        msg = str(e).lower()
+        if "no such table" not in msg and "does not exist" not in msg:
             raise
     try:
         for r in conn.execute("SELECT report_date, status, warnings FROM gd_spot_extract_run"):
             state.setdefault(r[0], {}).update(status=r[1] or "", warnings=r[2] or "")
-    except sqlite3.OperationalError as e:
-        if "no such table" not in str(e):
+    except Exception as e:  # sqlite: no such table / PG: relation "x" does not exist
+        msg = str(e).lower()
+        if "no such table" not in msg and "does not exist" not in msg:
             raise
     return state
 
@@ -146,8 +150,8 @@ def main():
     args = ap.parse_args()
 
     log = lambda m: print(m, file=sys.stderr)
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+    # GDPM_DB_LINK 非空时读 PG；--db 只是 sqlite 兜底路径
+    conn, _pg = dbc.connect(os.environ.get("GDPM_DB_LINK"), args.db)
     links = read_links(args.links)
     rows = plan(conn, args.day_from, args.day_to, links)
 

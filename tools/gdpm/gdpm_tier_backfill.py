@@ -24,11 +24,11 @@ origin 取 manual，不是 cv：
 import argparse
 import json
 import os
-import sqlite3
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import gdpm_db as dbc
 import gdpm_sqlite as base  # 复用 DDL 常量，避免两处表结构漂移
 
 TIER_DATASETS = ("node_price_peak", "node_price_valley")
@@ -86,8 +86,9 @@ def confirmed_keys(conn):
         return {(r[0], r[1], r[2], r[3], r[4]) for r in conn.execute(
             "SELECT report_date,run_date,dataset,scope,metric FROM gd_spot_metric_audit"
             " WHERE operation='confirm' AND dataset IN (?,?)", TIER_DATASETS)}
-    except sqlite3.OperationalError as e:
-        if "no such table" not in str(e):
+    except Exception as e:  # sqlite: no such table / PG: relation "x" does not exist
+        msg = str(e).lower()
+        if "no such table" not in msg and "does not exist" not in msg:
             raise
         return set()
 
@@ -116,9 +117,9 @@ def plan(conn, rows):
     return out
 
 
-def apply(conn, plan_rows, now):
+def apply(conn, plan_rows, now, pg=False):
     written = 0
-    conn.execute(base.DDL_METRIC)
+    conn.execute(dbc.ddl_for(base.DDL_METRIC, pg))
     for r in plan_rows:
         if r["action"] == "skip_pm_api":
             continue
@@ -165,15 +166,15 @@ def main():
     ap.add_argument("--apply", action="store_true", help="真正写库（缺省只算不写）")
     args = ap.parse_args()
 
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+    # GDPM_DB_LINK 非空时写 PG；--db 只是 sqlite 兜底路径
+    conn, pg = dbc.connect(os.environ.get("GDPM_DB_LINK"), args.db)
     rows = load_payload_rows(conn, args.day_from, args.day_to)
     plan_rows = plan(conn, rows)
 
     written = 0
     if args.apply:
         import datetime as dt
-        written = apply(conn, plan_rows, dt.datetime.now().astimezone().isoformat(sep=" "))
+        written = apply(conn, plan_rows, dt.datetime.now().astimezone().isoformat(sep=" "), pg=pg)
         conn.commit()
     else:
         print("dry-run：未写库", file=sys.stderr)

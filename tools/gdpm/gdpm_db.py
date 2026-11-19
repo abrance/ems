@@ -30,6 +30,31 @@ def ddl_for(sql, pg):
     return sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
 
 
+class _HybridRow(dict):
+    """既支持 row["col"]（sqlite3.Row 风格），也支持 row[0]（元组下标）。
+
+    本仓两种写法都在用：入库代码按列名取，补数据/缺口脚本按下标取。
+    sqlite3.Row 两种都支持，psycopg 的 dict_row 只支持前者，所以这里补上下标。
+    下标按列顺序取，与 SELECT 的列顺序一致（等于元组下标语义）。
+    """
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+def _hybrid_row_factory(cursor):
+    from psycopg.rows import dict_row
+
+    make = dict_row(cursor)
+
+    def build(values):
+        return _HybridRow(make(values))
+
+    return build
+
+
 class _PGCursor:
     """把 psycopg cursor 收窄到 sqlite cursor 用到的几个方法。"""
 
@@ -82,7 +107,7 @@ def connect(link=None, db_path=None):
         import psycopg
         from psycopg.rows import dict_row
 
-        return _PGConn(psycopg.connect(link.strip(), row_factory=dict_row)), True
+        return _PGConn(psycopg.connect(link.strip(), row_factory=_hybrid_row_factory)), True
     # sqlite3 延迟导入：只写 PG 的环境（镜像里也留了 sqlite 分支，但精简镜像可能没编 _sqlite3）
     # 不该因为缺这个标准库模块就起不来。
     import sqlite3
