@@ -62,5 +62,65 @@ class TestSqliteFallback(unittest.TestCase):
         self.assertEqual(cur.rowcount, 2)
 
 
+class _FakeCur:
+    def __init__(self, rec):
+        self._rec = rec
+        self.rowcount = 0
+
+    def execute(self, sql, params=()):
+        self._rec.append((sql, params))
+        self.rowcount = len(params[0]) if params and isinstance(params[0], list) else 1
+
+    def executemany(self, sql, seq):
+        self._rec.append((sql, list(seq)))
+        self.rowcount = len(seq)
+
+    def fetchone(self):
+        return {"a": 1}
+
+    def fetchall(self):
+        return [{"a": 1}]
+
+
+class _FakePG:
+    """只记录 SQL，不连库：守住 psycopg3 的 Connection 没有 executemany 这一坑。"""
+
+    def __init__(self):
+        self.rec = []
+        self.committed = False
+
+    def cursor(self):
+        return _FakeCur(self.rec)
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class TestPGWrapper(unittest.TestCase):
+    def test_placeholders_translated_and_executemany_uses_cursor(self):
+        raw = _FakePG()
+        conn = gdpm_db._PGConn(raw)
+        conn.execute("INSERT INTO t(a) VALUES (?)", ("x",))
+        conn.executemany("INSERT INTO t(a,b) VALUES (?,?)", [("x", 1), ("y", 2)])
+        conn.commit()
+
+        self.assertEqual(raw.rec[0], ("INSERT INTO t(a) VALUES (%s)", ("x",)))
+        self.assertEqual(raw.rec[1][0], "INSERT INTO t(a,b) VALUES (%s,%s)")
+        self.assertEqual(raw.rec[1][1], [("x", 1), ("y", 2)])
+        self.assertTrue(raw.committed)
+
+    def test_ddl_without_params(self):
+        raw = _FakePG()
+        conn = gdpm_db._PGConn(raw)
+        conn.execute("CREATE TABLE IF NOT EXISTS t (id BIGSERIAL PRIMARY KEY)")
+        self.assertEqual(raw.rec[0], ("CREATE TABLE IF NOT EXISTS t (id BIGSERIAL PRIMARY KEY)", ()))
+
+
 if __name__ == "__main__":
     unittest.main()

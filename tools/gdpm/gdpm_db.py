@@ -12,8 +12,6 @@ SQL 一律沿用 sqlite 的 `?` 占位符写，PG 分支在 execute 里翻成 `%
 只做这两处方言差异，不引入 ORM —— 现有语句（含 ON CONFLICT ... DO UPDATE）两边都认。
 """
 
-import sqlite3
-
 PG_PREFIXES = ("postgres://", "postgresql://")
 
 
@@ -56,11 +54,17 @@ class _PGConn:
     def __init__(self, conn):
         self._conn = conn
 
+    # psycopg3 的 Connection 只有 execute()（且 3.2 起已弃用），没有 executemany()；
+    # 统一走 cursor，行为与 sqlite3 的 conn.execute/executemany 对齐。
     def execute(self, sql, params=()):
-        return _PGCursor(self._conn.execute(translate_placeholders(sql), params))
+        cur = self._conn.cursor()
+        cur.execute(translate_placeholders(sql), params)
+        return _PGCursor(cur)
 
     def executemany(self, sql, seq):
-        return _PGCursor(self._conn.executemany(translate_placeholders(sql), seq))
+        cur = self._conn.cursor()
+        cur.executemany(translate_placeholders(sql), seq)
+        return _PGCursor(cur)
 
     def commit(self):
         self._conn.commit()
@@ -79,6 +83,10 @@ def connect(link=None, db_path=None):
         from psycopg.rows import dict_row
 
         return _PGConn(psycopg.connect(link.strip(), row_factory=dict_row)), True
+    # sqlite3 延迟导入：只写 PG 的环境（镜像里也留了 sqlite 分支，但精简镜像可能没编 _sqlite3）
+    # 不该因为缺这个标准库模块就起不来。
+    import sqlite3
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn, False
