@@ -163,34 +163,6 @@ func initConfigDatabase() error {
 		return err
 	}
 
-	// 创建日志表
-	_, err = execSchema(ctx, `
-		CREATE TABLE IF NOT EXISTS log (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			type VARCHAR(255) NOT NULL,
-			device_id VARCHAR(255),
-			level VARCHAR(255) NOT NULL,
-			content TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		c_log.Error(ctx, err)
-		return err
-	}
-
-	// 日志列表按 created_at DESC 深翻页、按 device_id 过滤，原先两列均无索引，
-	// 30 万行时深翻页实测 252ms，补索引后 4ms。
-	for _, stmt := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_log_created_at ON log (created_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_log_device_id ON log (device_id)`,
-	} {
-		if _, err = execSchema(ctx, stmt); err != nil {
-			c_log.Error(ctx, err)
-			return err
-		}
-	}
-
 	// 创建自动化表
 	_, err = execSchema(ctx, `
 		CREATE TABLE IF NOT EXISTS automation (

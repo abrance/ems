@@ -75,11 +75,3 @@ func (g *GoFrameLoggerAdapter) Errorf(ctx context.Context, format string, v ...i
 		g.logger.Errorf(ctx, format, v...)
 	}
 }
-
-// QueryLogs 查询日志（系统适配器不支持查询功能）
-func (g *GoFrameLoggerAdapter) QueryLogs(ctx context.Context, params c_log.LogQueryParams) (*c_log.LogQueryResult, error) {
-	if g.logger != nil {
-		g.logger.Warningf(ctx, "GoFrame日志适配器不支持查询功能")
-	}
-	return &c_log.LogQueryResult{Total: 0, Lines: []c_log.LogLine{}}, nil
-}

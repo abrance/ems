@@ -20,7 +20,7 @@ KEEP_OFFSITE="${KEEP_OFFSITE:-7}"                         # 异地保留份数�
 VOLUME="${VOLUME:-lems_lems-data}"   # 生产命名卷；演练时用 VOLUME=lems-drill_lems-data
 DB="${DB:-db.sqlite3}"
 SQLITE_IMAGE="${SQLITE_IMAGE:-ems-backup-tools:1}"  # 只需带 sqlite3 的小镜像
-TABLES="${TABLES:-alarm_history log device price setting}"
+TABLES="${TABLES:-alarm_history device price setting}"
 
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 NAME="db-${TS}.sqlite3.gz"

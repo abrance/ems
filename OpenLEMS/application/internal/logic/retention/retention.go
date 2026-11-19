@@ -39,9 +39,8 @@ type SResult struct {
 	LogDays        int
 	DeviceBefore   time.Time
 	SystemBefore   time.Time
-	LogBefore      time.Time
-	LogRowsDeleted int
-	// 磁盘上 out/logs/app/*.log 的清理结果（数据库日志行之外的那部分）
+	LogBefore time.Time
+	// 磁盘上 out/logs/app/*.log 的清理结果
 	LogFilesDeleted int
 	LogBytesFreed   int64
 	TimeMs          int64
@@ -125,19 +124,10 @@ func RunOnce(ctx context.Context) *SResult {
 		}
 	}
 
-	if deleted, err := s_db.GetLogService().DeleteLogBefore(ctx, res.LogBefore); err != nil {
-		if res.Err != "" {
-			res.Err += "; "
-		}
-		res.Err += "清理日志失败: " + err.Error()
-	} else {
-		res.LogRowsDeleted = deleted
-	}
-
-	// 数据库里的日志行清掉了，磁盘上的 rotate 文件还得单独清：GF 自带的
-	// rotateBackupLimit 按「份数」管，管不到按天命名的历史文件，份数上限本身也很大
+	// 业务日志只进容器标准输出，库里的 log 表已删除，这里只剩磁盘上的 rotate 文件要清：
+	// GF 自带的 rotateBackupLimit 按「份数」管，管不到按天命名的历史文件，份数上限本身也很大
 	// （100 份 × 5MB = 500MB），一次刷屏就能顶满。
-	// 这里按同一个 LogBefore 补一条时间维度，LogRetentionDays 才真的对磁盘生效。
+	// 按 LogBefore 补一条时间维度，LogRetentionDays 才真的对磁盘生效。
 	logDir := strings.TrimSpace(g.Cfg().MustGet(ctx, "logger.path").String())
 	logFilePattern := g.Cfg().MustGet(ctx, "logger.file", "{Ymd}.log").String()
 	files, freed, notes := CleanLogFiles(logDir, logFilePattern, res.LogBefore)
@@ -153,11 +143,11 @@ func RunOnce(ctx context.Context) *SResult {
 	setLast(res)
 
 	if res.Err != "" {
-		c_log.BizWarningf(ctx, "数据保留清理部分失败 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志删除 %d 行/文件 %d 个（释放 %d 字节），错误: %s",
-			res.DeviceDays, res.SystemDays, res.LogDays, res.LogRowsDeleted, res.LogFilesDeleted, res.LogBytesFreed, res.Err)
+		c_log.BizWarningf(ctx, "数据保留清理部分失败 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志文件删除 %d 个（释放 %d 字节），错误: %s",
+			res.DeviceDays, res.SystemDays, res.LogDays, res.LogFilesDeleted, res.LogBytesFreed, res.Err)
 	} else {
-		c_log.BizInfof(ctx, "数据保留清理完成 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志删除 %d 行/文件 %d 个（释放 %d 字节），耗时 %dms",
-			res.DeviceDays, res.SystemDays, res.LogDays, res.LogRowsDeleted, res.LogFilesDeleted, res.LogBytesFreed, res.TimeMs)
+		c_log.BizInfof(ctx, "数据保留清理完成 - 设备保留 %d 天/系统 %d 天/日志 %d 天，日志文件删除 %d 个（释放 %d 字节），耗时 %dms",
+			res.DeviceDays, res.SystemDays, res.LogDays, res.LogFilesDeleted, res.LogBytesFreed, res.TimeMs)
 	}
 	return res
 }

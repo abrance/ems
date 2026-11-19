@@ -11,7 +11,6 @@ server:
 # 日志组件配置
 logger:
   level:   "info"
-  biz_ems_stdout: false
 
 # 静态文件配置
 static:

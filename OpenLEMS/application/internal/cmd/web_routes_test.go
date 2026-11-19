@@ -93,7 +93,6 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		"GET /api/remote/modbus/status",
 		"GET /api/network/interface/list",
 		"POST /api/network/ping",
-		"GET /api/log/biz",
 		// 自动化 / 系统
 		"GET /api/automation/page",
 		"POST /api/automation/{id}/toggle",

@@ -105,7 +105,7 @@ var (
 
 	// 业务日志各级别设置定义。
 	//
-	// 管的是**业务日志**（c_log.BizInfo / BizErrorf 这类，按模块入库 + biz 输出）。
+	// 管的是**业务日志**（c_log.BizInfo / BizErrorf 这类，按模块输出到标准输出）。
 	// 默认 DEBUG = 什么都不滤，与加这个功能之前的行为完全一致 ——
 	// 默认值不能悄悄改变现网日志行为。
 	SystemSettingLogLevelEms = &SSystemSettingDefine{

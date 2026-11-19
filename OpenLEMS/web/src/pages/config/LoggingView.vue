@@ -17,7 +17,7 @@ import {
  * 这里要管的是**两套不同**的日志级别，页面上必须分开写，否则会互相误伤：
  *
  *   全局日志级别  → 系统日志（c_log.Info / Infof 这类），落到文件与控制台
- *   业务日志级别  → 业务日志（c_log.BizInfo / BizErrorf 这类），**按模块**入库 + biz 输出
+ *   业务日志级别  → 业务日志（c_log.BizInfo / BizErrorf 这类），**按模块**过滤后写标准输出（容器日志）
  *
  * 两者都是改完立即生效（写设置会清设置缓存；全局那条还会立刻 SetLevelStr）。
  * 默认值都是「不过滤」，与加这个功能之前的行为一致。
@@ -114,10 +114,10 @@ onMounted(load)
 
     <PanelBox
       title="业务日志级别（按模块）"
-      sub="管业务日志（c_log.BizInfo / BizErrorf 这类）→ 入库 + biz 控制台输出"
+      sub="管业务日志（c_log.BizInfo / BizErrorf 这类）→ 过滤后写标准输出（容器日志）"
       :span="12"
       :loading="loading"
-      foot="低于所选级别的日志既不入库也不输出；默认 DEBUG = 不过滤，与加这个功能之前一致"
+      foot="低于所选级别的日志不输出；默认 DEBUG = 不过滤，与加这个功能之前一致"
     >
       <div class="table">
         <div class="th">模块</div>
@@ -141,10 +141,10 @@ onMounted(load)
 
     <PanelBox
       title="调试日志开关"
-      sub="已有开关，与上面的级别是<strong>两个条件</strong>，都要满足才记录"
+      sub="已有开关，与上面的级别是<strong>两个条件</strong>，都要满足才输出"
       :span="12"
       :loading="loading"
-      foot="SystemEnableDebugLog：ems 的 DEBUG 是否入库。设备侧另有逐设备的调试开关（在「管理 · 设备管理」里）"
+      foot="SystemEnableDebugLog：ems 的 DEBUG 是否输出。设备侧另有逐设备的调试开关（在「管理 · 设备管理」里）"
     >
       <label class="switch">
         <input
@@ -153,11 +153,11 @@ onMounted(load)
           :disabled="!isAdmin || saving === SETTING_SYSTEM_ENABLE_DEBUG_LOG"
           @change="toggleDebug"
         />
-        <span>启用系统调试日志（ems 的 DEBUG 入库）</span>
+        <span>启用系统调试日志（ems 的 DEBUG 输出）</span>
       </label>
       <p class="hint">
-        与级别的关系：<code>ems = DEBUG</code> <strong>且</strong> 这个开关打开，ems 的 DEBUG 才入库。
-        默认两者都偏向「不记」—— 这个开关出厂是关的，所以就算级别是 DEBUG，ems 的 DEBUG 也不会入库。
+        与级别的关系：<code>ems = DEBUG</code> <strong>且</strong> 这个开关打开，ems 的 DEBUG 才输出。
+        默认两者都偏向「不记」—— 这个开关出厂是关的，所以就算级别是 DEBUG，ems 的 DEBUG 也不会输出。
       </p>
     </PanelBox>
 
@@ -174,15 +174,15 @@ onMounted(load)
         </li>
         <li>
           <strong>设备侧还有第三道条件</strong>：<code>device</code> 的 DEBUG 要满足
-          「模块级别 ≤ DEBUG」+「该设备的调试模式已开」才入库 —— 后者是逐设备的，在设备管理页里开。
+          「模块级别 ≤ DEBUG」+「该设备的调试模式已开」才输出 —— 后者是逐设备的，在设备管理页里开。
         </li>
         <li>
           <strong>级别是按日志类型，不是按具体功能</strong>：只有 ems / device / protocol / policy /
           automation / remote 六个类型，做不到「只关某个协议的 DEBUG」。
         </li>
         <li>
-          <strong>日志保留天数会同时管数据库和磁盘</strong>：除了清掉库里的旧日志行，
-          数据保留任务还会按这个天数删除 <code>out/logs/app</code> 下超期的 <code>.log</code> 文件（正在写的那个不删）。
+          <strong>日志不再写数据库表</strong>：业务日志只写标准输出，云上由容器运行时收走（kubectl logs）。
+          日志保留天数现在只管磁盘：数据保留任务按这个天数删除 <code>out/logs/app</code> 下超期的 <code>.log</code> 文件（正在写的那个不删）。
           结果在「存储管理 → 保留策略」里能看到“文件数/释放空间”。
         </li>
         <li><strong>没有日志滚动策略的界面</strong>：文件大小/份数来自配置（5MB × 20 份 ≈ 100MB），运行时不可改；超期的滚动文件另由上面的按天清理删除。</li>

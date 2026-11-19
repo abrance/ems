@@ -32,7 +32,6 @@ export const PAGE_LOADERS: Record<string, RouteComponent> = {
   network: () => import('./manage/NetworkView.vue'),
   statistics: () => import('./manage/StatisticsView.vue'),
   automation: () => import('./manage/AutomationView.vue'),
-  audit: () => import('./manage/AuditView.vue'),
   users: () => import('./manage/UsersView.vue'),
   exports: () => import('./manage/ExportsView.vue'),
   price: () => import('./manage/PriceView.vue'),

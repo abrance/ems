@@ -39,8 +39,8 @@ func InitSystem(ctx context.Context, parser *gcmd.Parser) error {
 
 	// 注入系统日志（GoFrame）- 在配置加载后创建，确保使用正确的日志级别
 	c_log.SetSystemLogger(applog.NewSystemAdapter(g.Log()))
-	// 注入业务日志（输出到数据库）
-	c_log.SetBusinessLogger(applog.NewDatabaseAdapter())
+	// 注入业务日志（输出到标准输出，容器里就是 kubectl logs）
+	c_log.SetBusinessLogger(applog.NewBizAdapter())
 	// 启用异步日志输出提高性能
 	g.Log().SetAsync(true)
 

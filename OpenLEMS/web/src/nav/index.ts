@@ -131,7 +131,6 @@ export const NAV: NavTab[] = [
       { key: 'price', title: '电价管理', path: '/manage/price', status: 'ready', perm: 'manage:price' },
       { key: 'collect', title: '采集管理', path: '/manage/collect', status: 'ready', perm: 'manage:collect' },
       { key: 'statistics', title: '统计分析', path: '/manage/statistics', status: 'ready', perm: 'manage:statistics' },
-      { key: 'audit', title: '审计', path: '/manage/audit', status: 'ready', perm: 'manage:audit' },
       {
         key: 'exports',
         title: '报表导出',
