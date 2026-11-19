@@ -25,10 +25,10 @@ import csv
 import datetime as dt
 import json
 import os
-import sqlite3
 import sys
 
 import gd_pm_fetch as fetch
+import gdpm_db as dbc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "data", "gdpm"))
@@ -196,6 +196,13 @@ CREATE TABLE IF NOT EXISTS gd_pm_fetch_run (
     UNIQUE (target_date, dataset, extractor_version))
 """
 
+def ensure_schema(conn, pg=False):
+    """建表（幂等）。PG 上表由服务侧建好，这里的 DDL 只作为兜底：
+    两边差异只有自增主键，见 gdpm_db.ddl_for。"""
+    conn.execute(dbc.ddl_for(DDL_METRIC, pg))
+    conn.execute(dbc.ddl_for(DDL_FETCH_RUN, pg))
+
+
 DATE_FMT = "%Y-%m-%d"
 
 
@@ -318,8 +325,9 @@ def existing_void(conn):
             "     AND a.operation=? ORDER BY a.id DESC LIMIT 1) AS old_origin"
             " FROM gd_spot_metric m WHERE m.origin=?",
             (AUDIT_DEPRECATE, VOID_ORIGIN)).fetchall()
-    except sqlite3.OperationalError as e:
-        if "no such table" not in str(e):
+    except Exception as e:  # sqlite: no such table；PG: relation ... does not exist
+        msg = str(e)
+        if "no such table" not in msg and "does not exist" not in msg:
             raise
         return []
 
@@ -411,13 +419,12 @@ def plan(conn, records):
             "voids": voids, "restores": restores}
 
 
-def apply(conn, records, p, log=print):
+def apply(conn, records, p, log=print, pg=False):
     # 时间带时区偏移写入（如 2026-11-11 16:27:21.123456+08:00）。不带偏移的本地时间会被
     # Go 侧按 UTC 解析，页面上就多 8 小时（历史行由读侧兜底，见 application/internal/logic/
     # spotreport/extract_run.go 的 auditCreatedAt）。
     now = dt.datetime.now().astimezone().isoformat(sep=" ")
-    conn.execute(DDL_METRIC)
-    conn.execute(DDL_FETCH_RUN)
+    ensure_schema(conn, pg)
     voids, restores = p["voids"], p["restores"]
 
     def write_audit(entries, operation, old_origin_of):
@@ -597,13 +604,12 @@ def main():
     records = load_long(args.csv)
     periodic, loaded, skipped = load_periodic(data_dir)
     records += periodic
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+    conn, pg = dbc.connect(os.environ.get("GDPM_DB_LINK"), args.db)
     p = plan(conn, records)
 
     written = {"restored": 0, "deprecated": 0, "metrics": 0, "fetch_runs": 0}
     if args.apply:
-        written = apply(conn, records, p)
+        written = apply(conn, records, p, pg=pg)
     else:
         print("dry-run：未写库", file=sys.stderr)
 

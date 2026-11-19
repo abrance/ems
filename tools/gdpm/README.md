@@ -69,9 +69,18 @@ CSV 用 `utf-8-sig`，Excel 双击打开不乱码。
 
 ## ② gdpm_sqlite.py：入 `gd_spot_metric`
 
+> **2026-11-19 起库可以是 PostgreSQL**：`EMS_DB_LINK` 同款的连接串放进环境变量
+> `GDPM_DB_LINK`（`postgresql://user:pass@host:5432/db`），入库与留痕都走 PG；
+> 不设时仍按 `--db` 写 sqlite（本地调试/回填）。两边的语句只差占位符与自增主键，
+> 由 `gdpm_db.py` 翻译；PG 上表由服务侧建好，`ensure_schema` 只是幂等兜底。
+
 ```
 python3 gdpm_sqlite.py --db /path/db.sqlite3 --report /tmp/report.json          # 只算不写
 python3 gdpm_sqlite.py --db /path/db.sqlite3 --report /tmp/report.json --apply
+
+# 写 PG（生产口径）：连接串走环境变量，--db 只是 sqlite 兜底路径
+GDPM_DB_LINK=postgresql://ems:***@pg.pg.svc.cluster.local:5432/ems \
+  python3 gdpm_sqlite.py --db /tmp/unused.sqlite3 --apply
 ```
 
 写库口径（与 OCR 日报既有约定一致，已用生产库核对）：

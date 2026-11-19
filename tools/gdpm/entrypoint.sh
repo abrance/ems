@@ -6,6 +6,7 @@
 # 出口代理只读环境变量 HTTPS_PROXY / HTTP_PROXY（urllib 原生支持），这里不写死地址。
 set -e
 
+# GDPM_DB_LINK（PG 连接串）非空时写入走 PG；DB 只是 sqlite 兜底路径。
 DB="${GDPM_DB:-/app/out/db.sqlite3}"
 WORK_DIR="${GDPM_WORK_DIR:-/tmp/gdpm}"
 mkdir -p "$(dirname "$DB")" "$WORK_DIR"
@@ -15,11 +16,12 @@ python3 /app/gdpm_daily.py --db "$DB" --work-dir "$WORK_DIR" || rc=$?
 
 # 摘要必须打，成功失败都打一遍 —— 这是 CronJob 日志里唯一一行人看的东西。
 python3 - "$DB" <<'PY' || true
-import sqlite3, sys
+import os, sys
+sys.path.insert(0, "/app")
+import gdpm_db
 db = sys.argv[1]
 try:
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
+    conn, _ = gdpm_db.connect(os.environ.get("GDPM_DB_LINK"), db)
     # 按 id 取最新：updated_at 是字符串，+08:00 与 +00:00 混在一起按字典序排会取错行。
     r = conn.execute(
         "SELECT target_date,dataset,status,rows_written,warnings,updated_at"

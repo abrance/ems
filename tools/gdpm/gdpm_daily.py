@@ -15,13 +15,13 @@
 import argparse
 import datetime as dt
 import os
-import sqlite3
 import sys
 import traceback
 
 import gd_pm_fetch as fetch
 import gdpm_dataset
 import gdpm_sqlite as imp
+import gdpm_db as dbc
 
 DATASET_FAILED = "fetch"
 WARN_LIMIT = 2000          # warnings 是 TEXT，但别让整段 traceback 灌进去
@@ -48,12 +48,12 @@ def record_failure(db, target_date, message, log=print):
     更需要靠非零退出码和 stderr 让人看见，所以这里只报错不抛。
     """
     try:
-        conn = sqlite3.connect(db)
-    except sqlite3.Error as e:
+        conn, pg = dbc.connect(os.environ.get("GDPM_DB_LINK"), db)
+    except Exception as e:
         log(f"留痕失败：库打不开 {db} {type(e).__name__}: {e}")
         return
     try:
-        conn.execute(imp.DDL_FETCH_RUN)
+        conn.execute(dbc.ddl_for(imp.DDL_FETCH_RUN, pg))
         now = _now()
         conn.execute(
             "INSERT INTO gd_pm_fetch_run (target_date,dataset,status,rows_written,source_url,"
@@ -66,7 +66,7 @@ def record_failure(db, target_date, message, log=print):
              fetch.BASE, None,
              message[:WARN_LIMIT], imp.EXTRACTOR, now, now))
         conn.commit()
-    except sqlite3.Error as e:
+    except Exception as e:
         log(f"留痕失败：写 gd_pm_fetch_run 出错 {type(e).__name__}: {e}")
         return
     finally:
@@ -96,15 +96,14 @@ def run(db, work_dir, fetch=None, today=None, log=print):
         return 1
 
     # 入库沿用原路径：--apply 的语义在这里固定成「总是写」。
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
+    conn, pg = dbc.connect(os.environ.get("GDPM_DB_LINK"), db)
     try:
         # plan() 会先读 gd_spot_metric，新库上表还不存在；建表和 apply 里同一个 DDL。
-        conn.execute(imp.DDL_METRIC)
+        imp.ensure_schema(conn, pg)
         periodic, loaded, skipped = imp.load_periodic(work_dir)
         all_records = records + periodic
         p = imp.plan(conn, all_records)
-        written = imp.apply(conn, all_records, p, log=log)
+        written = imp.apply(conn, all_records, p, log=log, pg=pg)
     except Exception as e:
         conn.rollback()
         conn.close()
