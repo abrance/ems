@@ -11,7 +11,6 @@ logger:
   # 但它只按「份数」算，管不到按天命名的历史文件，100 份 × 5MB = 500MB 也太大。
   # 所以降到 20 份（≈100MB），另由数据保留任务（internal/logic/retention）按天删超期文件。
   rotateBackupLimit: 20          # 切分文件保留份数，20 份 × 5MB ≈ 100MB
-  biz_ems_stdout: true # 业务日志输出到控制台
 gfcli:
   run:
     path: "./bin"

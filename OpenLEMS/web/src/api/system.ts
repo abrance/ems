@@ -145,7 +145,6 @@ export interface RetentionStatus {
   /** 上次清理时间（本地时间；空 = 本次启动后还没跑过） */
   lastRunAt: string
   lastRunTimeMs: number
-  lastLogRowsDeleted: number
   /** 上次删掉的磁盘日志文件个数（out/logs/app 下超期 .log） */
   lastLogFilesDeleted: number
   /** 上次释放的磁盘日志字节数 */

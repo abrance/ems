@@ -234,9 +234,8 @@ common/
 #### c_log_interface.go
 - **功能**: 日志接口定义
 - **核心接口**: ILogger
-- **核心结构**: LogLine, LogQueryParams, LogQueryResult
-- **主要方法**: Debug(), Info(), Warning(), Error(), QueryLogs()
-- **用途**: 定义统一的日志接口，支持结构化日志和日志查询
+- **主要方法**: Debug(), Info(), Warning(), Error()
+- **用途**: 定义统一的日志接口；系统日志走 GoFrame，业务日志走标准输出（容器日志），不再落库
 
 #### c_log_proxy.go
 - **功能**: 日志代理实现

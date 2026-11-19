@@ -91,7 +91,6 @@ src/
 | 管理 · 远程调度 | `GET /api/remote/modbus/status` `GET /api/remote/mqtt/status` `PUT .../enabled/{enabled}` `POST .../reload` |
 | 管理 · 网络配置 | `GET /api/network/interface/list` `POST .../interface/update` `.../interface/state` `.../ping` |
 | 管理 · 统计分析 | `POST /api/device/compare` `POST /api/protocol/monitor/{overview,distribution,trend,metrics}` `POST /api/system/resource/chart` |
-| 管理 · 审计 | `GET /api/log/biz` `.../biz/info` `.../biz/statistics` `DELETE /api/log/biz` |
 | 管理 · 自动化联动 | `GET /api/automation/page` `POST /api/automation` `PUT/DELETE /api/automation/{id}` `POST .../toggle` |
 | 配置 · 采集与凭据 | `GET /api/system/credentials`（只读，密钥不回显） |
 | 配置 · 界面与语言 | 纯前端（localStorage），无接口 |

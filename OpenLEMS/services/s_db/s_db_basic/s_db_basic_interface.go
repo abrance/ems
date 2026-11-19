@@ -65,23 +65,6 @@ type IAlarmService interface {
 	GetAlarmIgnoreCount(ctx context.Context, deviceId string) int
 }
 
-type ILogService interface {
-	CreateLog(ctx context.Context, logType, deviceId, level, content string) error
-	GetLogByDeviceId(ctx context.Context, deviceId string) ([]*s_db_model.SLogModel, error)
-	GetLogByType(ctx context.Context, logType string) ([]*s_db_model.SLogModel, error)
-	GetLogByLevel(ctx context.Context, level string) ([]*s_db_model.SLogModel, error)
-	GetLogByDeviceIdAndType(ctx context.Context, deviceId, logType string) ([]*s_db_model.SLogModel, error)
-	DeleteLogByDeviceId(ctx context.Context, deviceId string) error
-	DeleteLogByType(ctx context.Context, logType string) error
-	DeleteLogByFilters(ctx context.Context, filters map[string]interface{}) (int, error)
-	GetAllLog(ctx context.Context) ([]*s_db_model.SLogModel, error)
-	GetLogPage(ctx context.Context, page, pageSize int, filters map[string]interface{}) ([]*s_db_model.SLogModel, int, error)
-	ClearAllLog(ctx context.Context) error
-	// DeleteLogBefore 删除 before 之前写入的日志（日志保留策略用），返回删除行数
-	DeleteLogBefore(ctx context.Context, before time.Time) (int, error)
-	GetLogCount(ctx context.Context) (int, error)
-}
-
 type IAutomationService interface {
 	// 基础 CRUD 方法
 	CreateAutomation(ctx context.Context, name string, startTime, endTime *time.Time, timeRangeType, timeRangeValue *string, triggerRule, executeRule string, executionInterval int) (int, error)

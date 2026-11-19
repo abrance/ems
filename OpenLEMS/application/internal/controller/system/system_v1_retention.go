@@ -34,7 +34,6 @@ func buildRetentionStatus(ctx context.Context) v1.RetentionStatus {
 	if last := retentionlogic.Last(); last != nil {
 		status.LastRunAt = last.At.Format(layout)
 		status.LastRunTimeMs = last.TimeMs
-		status.LastLogRowsDeleted = last.LogRowsDeleted
 		status.LastLogFilesDeleted = last.LogFilesDeleted
 		status.LastLogBytesFreed = last.LogBytesFreed
 		status.LastDeviceBefore = last.DeviceBefore.Format(layout)

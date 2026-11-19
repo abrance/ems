@@ -507,11 +507,6 @@ const FAKE_COMPARE_CHART = {
     { name: 'meter_1-Power', type: 'line', unit: 'kW', data: ['120', '126'] },
   ],
 }
-const FAKE_LOGS = [
-  { createdAt: '2026-10-06T21:00:01+08:00', id: 'l1', type: 'remote', level: 'DEBUG', content: '成功推送设备数据：设备ID=pcs_1, Topic=lems/7e25fb08e2/info' },
-  { createdAt: '2026-10-06T20:59:30+08:00', id: 'l2', type: 'device', level: 'ERROR', content: '设备 meter_1 采集失败：连接超时' },
-  { createdAt: '2026-10-06T20:58:00+08:00', id: 'l3', type: 'policy', level: 'INFO', content: '策略 tou-rule 触发：峰时段充电 40kW' },
-]
 
 const FAKE_AUTOMATIONS = [
   {
@@ -916,7 +911,6 @@ const RETENTION_BEFORE = {
   intervalHours: 24,
   lastRunAt: '',
   lastRunTimeMs: 0,
-  lastLogRowsDeleted: 0,
   lastDeviceBefore: '',
   lastSystemBefore: '',
   lastLogBefore: '',
@@ -926,7 +920,8 @@ const RETENTION_AFTER = {
   ...RETENTION_BEFORE,
   lastRunAt: '2026-10-08 03:15:00',
   lastRunTimeMs: 812,
-  lastLogRowsDeleted: 12,
+  lastLogFilesDeleted: 7,
+  lastLogBytesFreed: 5242880,
   lastDeviceBefore: '2026-09-08 03:15:00',
   lastSystemBefore: '2026-09-08 03:15:00',
   lastLogBefore: '2026-07-10 03:15:00',
@@ -1196,12 +1191,6 @@ globalThis.fetch = async (url, init) => {
   if (u.includes('/api/protocol/monitor/trend')) return json(FAKE_TREND_CHART)
   if (u.includes('/api/protocol/monitor/metrics')) return json(FAKE_TREND_CHART)
   if (u.includes('/api/device/compare')) return json(FAKE_COMPARE_CHART)
-  if (u.includes('/api/log/biz/info')) return json({ total: 12800, firstLogTime: '2026-09-01 00:00:00', latestLogTime: '2026-10-06 21:00:00' })
-  if (u.includes('/api/log/biz/statistics')) return json({ type: { ems: 100, device: 900, protocol: 1200, policy: 30 }, level: { DEBUG: 1500, INFO: 600, WARN: 80, ERROR: 12 } })
-  if (u.includes('/api/log/biz')) {
-    if (init?.method === 'DELETE') return json({ total: 42 })
-    return json({ total: 3, lines: FAKE_LOGS })
-  }
   if (u.includes('/api/remote/modbus/status')) return json(FAKE_MODBUS)
   if (u.includes('/api/remote/mqtt/status')) return json(FAKE_MQTT)
   if (u.includes('/api/remote/modbus/enabled') || u.includes('/api/remote/mqtt/enabled')) return json({})
@@ -2455,49 +2444,6 @@ await clickTo('管理', '统计分析')
   check(rc?.body?.category === 'process', '系统监控默认查进程资源', JSON.stringify(rc?.body?.category))
 }
 
-console.log('\n== 审计页 ==')
-await clickTo('管理', '审计')
-{
-  const bodyHas = (t) => (doc.body.textContent ?? '').includes(t)
-  await waitFor(() => bodyHas('运行日志'))
-  check(bodyHas('12800'), '日志总量来自 info 接口')
-  check(bodyHas('device') && bodyHas('protocol'), '级别/类型统计卡')
-  check(bodyHas('12'), 'ERROR 计数')
-  check(bodyHas('连接超时'), '日志行内容')
-  check(bodyHas('第 1 / 1 页'), '分页信息')
-
-  // 详情抽屉
-  const row = [...doc.querySelectorAll('.log-row')][1]
-  row.click()
-  await waitFor(() => !!doc.querySelector('.drawer'))
-  check(bodyHas('l2'), '详情显示日志 ID')
-  check(!!doc.querySelector('.content-full'), '详情展示完整内容')
-  ;[...doc.querySelectorAll('.drawer-head button')].find((b) => b.textContent.trim() === '关闭').click()
-  await tick()
-
-  // 变更审计页签：必须自我声明它不是真审计
-  const auditTab = [...doc.querySelectorAll('.tabs-inline button')].find((b) => b.textContent.trim() === '变更审计')
-  auditTab.click()
-  await tick()
-  check(bodyHas('这不是真正的变更审计'), '变更审计页显式声明局限')
-  check(bodyHas('policy') && bodyHas('ems') === false || bodyHas('tou-rule'), '变更审计只挑 policy/ems 类日志')
-
-  // 删除：不支持按日期删，要输 DELETE
-  const delBtn = [...doc.querySelectorAll('.panel-head button')].find((b) => b.textContent.trim() === '删除')
-  delBtn.click()
-  await waitFor(() => !!doc.querySelector('.modal'))
-  check(bodyHas('不支持按日期删除'), '删除弹窗说明不支持按日期删')
-  const confirmBtn = [...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认删除')
-  check(confirmBtn.disabled === true, '未输 DELETE 时不能确认')
-  const input = doc.querySelector('.modal input')
-  input.value = 'DELETE'
-  input.dispatchEvent(new window.Event('input', { bubbles: true }))
-  await tick()
-  ;[...doc.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === '确认删除').click()
-  await waitFor(() => requests.some((r) => r.url.includes('/api/log/biz') && r.method === 'DELETE'))
-  check(true, '输对后调用 DELETE')
-}
-
 console.log('\n== 远程调度页 ==')
 await clickTo('管理', '远程调度')
 {
@@ -3009,9 +2955,9 @@ console.log('\n== 存储管理·保留策略（已生效）==')
   check(requests.some((r) => r.url.includes('/api/system/retention/clean')), '点击后调用清理接口')
   await waitFor(() => bodyHas('已清理'), 1500)
   check(bodyHas('已清理'), '清理完成给出结果提示')
-  // 清理后状态区要换成真实结果（时间/删除行数/各自截止时间）
+  // 清理后状态区要换成真实结果（时间/删除文件数/各自截止时间）
   await waitFor(() => bodyHas('上次清理'), 1500)
-  check(bodyHas('删除日志 12 行'), '显示上次删了多少行')
+  check(bodyHas('删除日志文件 7 个'), '显示上次删了多少个日志文件')
   check(bodyHas('2026-09-08 03:15:00') && bodyHas('2026-07-10 03:15:00'), '分别显示设备/系统/日志的截止时间')
 }
 console.log('\n== 日志级别页 ==')
@@ -3057,7 +3003,7 @@ console.log('\n== 日志级别页 ==')
   // 限制清单：必须写出「三个条件」「保留天数管库+盘」这类实话
   check(bodyHas('两个条件') || bodyHas('都要满足'), '写明级别与调试开关是两个条件')
   check(bodyHas('逐设备的'), '写明设备侧还有第三道条件')
-  check(bodyHas('同时管数据库和磁盘'), '写明日志保留天数会同时清库里行和磁盘文件')
+  check(bodyHas('日志不再写数据库表'), '写明业务日志只进容器日志、不再落库')
   check(!bodyHas('没有任何代码读它'), '不再谎称日志保留天数不生效')
 
   // 普通用户会话：只读（写设置需要 admin，否则每个控件都会吃 403）
@@ -3074,8 +3020,8 @@ console.log('\n== 日志级别页 ==')
 
 console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
-// 当前 34 = 33 + 「日报核对」（市场数据 Tab，左日报原值 / 右官网直采）
-const EXPECTED_PAGES = 34
+// 当前 33；删掉「审计」页后从 34 减 1（运行日志/日志表链路已移除）
+const EXPECTED_PAGES = 33
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 5, `Tab 数量 = ${tabEls.length}（期望 5）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(
