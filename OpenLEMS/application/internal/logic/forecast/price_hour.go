@@ -35,8 +35,8 @@ const (
 	defaultHourHistoryDays = 14
 	// minHourHistoryDays 历史太短预测没意义（7 天 = 168 点）
 	minHourHistoryDays = 7
-	// maxHourHistoryDays 历史上限（30 天 = 720 点，远低于 max_context 4096）
-	maxHourHistoryDays = 30
+	// maxHourHistoryDays 历史上限（170 天 = 4080 点，服务端 max_context 4096 会静默截断更早的点）
+	maxHourHistoryDays = 170
 	// maxHourHorizonPoints TimesFM 单次最大步数（服务端 max_horizon=512，约 21 天）。
 	// 目标日距锚点太远就超限，只能让用户把目标日往前调，不能静默截断。
 	maxHourHorizonPoints = 512

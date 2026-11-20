@@ -8,6 +8,8 @@ import StatusTag from '@/components/StatusTag.vue'
 import { fetchBacktest, fetchEffectSummary, type EffectBacktest, type EffectSummary } from '@/api/effect'
 import { fetchLoadForecast, fetchPriceForecast, type LoadForecast, type PriceForecast } from '@/api/forecast'
 import { fetchGdMetric, fetchSimilarDays, type DayCurve, type SimilarDaysResult } from '@/api/gdmetric'
+import { fetchHome24h } from '@/api/homemarket'
+import { mean } from '@/metrics/forecast'
 import { CHART_COLORS, useECharts } from '@/composables/useECharts'
 import { useAppStore } from '@/stores/app'
 
@@ -112,7 +114,7 @@ async function loadForecast(force = false) {
       source: 'home24h',
       grain: 'hour',
       targetDate: hourDate.value,
-      historyDays: 14,
+      historyDays: 170,
       forceRefresh: force,
     }),
   ])
@@ -145,7 +147,7 @@ async function loadHour(force = false) {
       source: 'home24h',
       grain: 'hour',
       targetDate: hourDate.value,
-      historyDays: 14,
+      historyDays: 170,
       forceRefresh: force,
     })
   } catch (err) {
@@ -153,6 +155,135 @@ async function loadHour(force = false) {
     errors.priceHour = err instanceof Error ? err.message : '小时电价预测失败'
   } finally {
     loading.priceHour = false
+  }
+}
+
+/* ---------- 小时预测准确度：近 N 个完整实际日聚合（as-of 重放） ---------- */
+
+/** 聚合天数：最近有完整 24 点实际值的 N 天 */
+const STAT_DAYS = 7
+/** 最多往前试探的候选日数（缺口再大就只统计找到的，并在脚注说明） */
+const STAT_CANDIDATES = 21
+
+interface HourStats {
+  from: string
+  to: string
+  /** 统计到的完整实际日（升序） */
+  days: string[]
+  mae: number
+  rmse: number
+  /** 平上跨日平均；某日实际均价≈0（正负价抵消）时该日不计入 */
+  mape: number | null
+  /** 实际值落在预测 10%~90% 分位带内的点占比 */
+  coverage: number
+  /** 配对成功的逐点数 */
+  points: number
+  /** 预测调用失败/实际值不完整的候选日数 */
+  failed: number
+  /** 逐日配对数据（升序），供「实际 vs 预测」联动图用 */
+  series: { date: string; actual: number[]; median: number[]; q10: (number | null)[]; q90: (number | null)[] }[]
+}
+
+const hourStats = ref<HourStats | null>(null)
+const hourStatsLoading = ref(false)
+const hourStatsError = ref('')
+
+/**
+ * 近 N 个「实际值完整」的历史日聚合准确度。
+ *
+ * 口径（与复盘页日频一致，见 metrics/forecast.ts）：
+ *   - 每个候选日 X 用**当前模型** as-of 重放一次（锚点 = X 前最新完整 24 点日 D）。
+ *     hour 粒度没有留痕，评的是「今天的模型 + 今天的窗口」在历史日上的重放，不是当时的预测。
+ *   - MAE/RMSE 按 24 点逐点误差；MAPE 分母 = 当日实际均价的绝对值（均价≈0 的日跳过，
+ *     正负价抵消会把分母抽干）；覆盖率 = 实际值落在 10%~90% 分位带内的点占比
+ *     （TimesFM 分位未校准，覆盖率偏离 80% 就是带子不可信的信号）。
+ */
+async function loadHourStats() {
+  hourStatsLoading.value = true
+  hourStatsError.value = ''
+  hourStats.value = null
+  try {
+    // 1. 用便宜的 DB 读找完整实际日：fetchHome24h 带 latestDate，从那里往前试探
+    const head = await fetchHome24h({})
+    if (!head.latestDate) throw new Error('库里还没有 24 点数据，无法统计准确度')
+    const start = new Date(`${head.latestDate}T00:00:00`)
+    const days: string[] = []
+    for (let k = 0; k < STAT_CANDIDATES && days.length < STAT_DAYS; k++) {
+      const d = fmt(new Date(start.getTime() - k * 86400_000))
+      const day = await fetchHome24h({ date: d })
+      // pointCount 由后端按实际落库行数给，缺点日不算全天
+      if (!day.empty && day.pointCount === 24) days.push(d)
+    }
+    if (!days.length) throw new Error(`${head.latestDate} 往前 ${STAT_CANDIDATES} 天里没有完整实际日`)
+
+    // 2. 对每个完整日各重放一次预测（首次会逐日推理，走后端 5 分钟缓存）
+    const results = await Promise.allSettled(
+      days.map((day) =>
+        fetchPriceForecast({ source: 'home24h', grain: 'hour', targetDate: day, historyDays: 170 }),
+      ),
+    )
+    // 与 results 一一对应的请求日（失败/不配对的天跳过时不进 series）
+    const reqDays = days
+
+    let failed = 0
+    const errs: number[] = []
+    const mapes: number[] = []
+    let sqSum = 0
+    let covered = 0
+    let total = 0
+    const daySeries: HourStats['series'] = []
+    for (const [k, r] of results.entries()) {
+      if (r.status !== 'fulfilled') {
+        failed++
+        continue
+      }
+      const f = r.value
+      const actual = f.actual ?? []
+      if (actual.length !== 24 || f.forecast.length !== 24) {
+        failed++
+        continue
+      }
+      const reqDay = reqDays[k]
+      const dayAvg = Math.abs(mean(actual))
+      let dayErr = 0
+      f.forecast.forEach((p, i) => {
+        const e = Math.abs(p.point - actual[i])
+        errs.push(e)
+        sqSum += e * e
+        dayErr += e
+        total++
+        const q10 = p.quantiles?.['0.1']
+        const q90 = p.quantiles?.['0.9']
+        if (q10 != null && q90 != null && actual[i] >= q10 && actual[i] <= q90) covered++
+      })
+      if (dayAvg >= 1e-6) mapes.push(dayErr / dayAvg / 24)
+      daySeries.push({
+        date: reqDay,
+        actual,
+        median: f.forecast.map((p) => p.point),
+        q10: f.forecast.map((p) => p.quantiles?.['0.1'] ?? null),
+        q90: f.forecast.map((p) => p.quantiles?.['0.9'] ?? null),
+      })
+    }
+    if (!total) throw new Error('统计窗口内没有可配对的预测点（预测调用全部失败？）')
+
+    hourStats.value = {
+      from: days[days.length - 1],
+      to: days[0],
+      days,
+      mae: mean(errs),
+      rmse: Math.sqrt(sqSum / total),
+      mape: mapes.length ? mean(mapes) * 100 : null,
+      coverage: (covered / total) * 100,
+      points: total,
+      failed,
+      series: daySeries.slice().reverse(),
+    }
+  } catch (err) {
+    hourStats.value = null
+    hourStatsError.value = err instanceof Error ? err.message : '准确度统计失败'
+  } finally {
+    hourStatsLoading.value = false
   }
 }
 
@@ -449,6 +580,60 @@ useECharts(
   [priceHour],
 )
 
+/* ---------- 统计窗口联动图：近 7 个完整实际日 × 24 点，实际 vs 预测 ---------- */
+const hourStatsEl = ref<HTMLElement>()
+useECharts(
+  hourStatsEl,
+  (): EChartsOption => {
+    const st = hourStats.value
+    if (!st) return { series: [] }
+    const labels: string[] = []
+    const actual: (number | null)[] = []
+    const median: (number | null)[] = []
+    const q10: (number | null)[] = []
+    const q90: (number | null)[] = []
+    for (const d of st.series) {
+      for (let i = 0; i < d.actual.length; i++) {
+        labels.push(`${d.date.slice(5)} ${String(i).padStart(2, '0')}:00`)
+        actual.push(d.actual[i])
+        median.push(d.median[i])
+        q10.push(d.q10[i])
+        q90.push(d.q90[i])
+      }
+    }
+    return {
+      grid: { left: 56, right: 20, top: 32, bottom: 40 },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : `${v} 元/MWh`) },
+      legend: { top: 0, icon: 'rect', itemWidth: 12, itemHeight: 3, textStyle: { fontSize: 12 } },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: {
+          fontSize: 12,
+          color: CHART_COLORS.gray,
+          // 只在每天 12:00 处显示日期（避开左右边缘裁切），其余留空；interval:0 防 auto 跳过
+          interval: 0,
+          formatter: (val: string) => (val.endsWith(' 12:00') ? val.slice(0, 5) : ''),
+        },
+      },
+      yAxis: {
+        type: 'value',
+        name: '元/MWh',
+        nameTextStyle: { fontSize: 12 },
+        axisLabel: { fontSize: 12, color: CHART_COLORS.gray },
+        splitLine: { lineStyle: { color: '#eef0f3' } },
+      },
+      series: [
+        { name: '实际', type: 'line', showSymbol: false, lineStyle: { width: 2 }, itemStyle: { color: CHART_COLORS.gray }, data: actual },
+        { name: '预测 10%', type: 'line', showSymbol: false, lineStyle: { type: 'dotted', width: 1 }, itemStyle: { color: CHART_COLORS.gray }, data: q10 },
+        { name: '预测 90%', type: 'line', showSymbol: false, lineStyle: { type: 'dotted', width: 1 }, itemStyle: { color: CHART_COLORS.gray }, data: q90 },
+        { name: '预测中位', type: 'line', showSymbol: false, lineStyle: { type: 'dashed', width: 2 }, itemStyle: { color: CHART_COLORS.brand }, data: median },
+      ],
+    }
+  },
+  [hourStats],
+)
+
 onMounted(() => {
   applyPreset()
   refreshAll(false)
@@ -561,6 +746,14 @@ watch(
           <input v-model="hourDate" type="date" :max="todayStr()" @change="loadHour(false)" />
         </label>
         <span class="spacer" />
+        <button
+          class="btn"
+          type="button"
+          :disabled="hourStatsLoading"
+          @click="loadHourStats()"
+        >
+          {{ hourStatsLoading ? '统计中（首次需逐日推理）…' : '统计准确度（近 7 天）' }}
+        </button>
         <button class="btn" type="button" :disabled="loading.priceHour" @click="loadHour(true)">
           刷新本图（跳过缓存）
         </button>
@@ -575,6 +768,39 @@ watch(
           <strong>两图不可对齐、不可加总、不可互相换算</strong>。
         </div>
         <div ref="hourEl" class="chart" />
+        <div v-if="hourStatsError" class="empty">{{ hourStatsError }}</div>
+        <template v-else-if="hourStats">
+          <div class="stats-title">统计窗口（{{ hourStats.from }} ~ {{ hourStats.to }}）实际 vs 预测（逐点）</div>
+          <div ref="hourStatsEl" class="chart" />
+          <div class="kpis stats-kpis">
+            <KpiCard label="平均绝对误差" :value="hourStats.mae.toFixed(1)" unit="元/MWh" hint="|预测 − 实际| 的均值" />
+            <KpiCard label="均方根误差" :value="hourStats.rmse.toFixed(1)" unit="元/MWh" hint="大误差点权重更高" />
+            <KpiCard
+              label="平均绝对百分比误差"
+              :value="hourStats.mape == null ? '—' : hourStats.mape.toFixed(2)"
+              unit="%"
+              hint="÷ 当日实际均价（均价≈0 的日不计）"
+            />
+            <KpiCard
+              label="分位带覆盖率"
+              :value="hourStats.coverage.toFixed(0)"
+              unit="%"
+              hint="实际值落在 10%~90% 带内；名义 80%，偏离即带子不可信"
+            />
+          </div>
+          <div class="hint">
+            统计窗口 <strong>{{ hourStats.from }} ~ {{ hourStats.to }}</strong>
+            （{{ hourStats.days.length }} 个完整实际日 × 24 点，共 {{ hourStats.points }} 点<template v-if="hourStats.failed">，另有 {{ hourStats.failed }} 天预测失败已剔除</template>）。
+            这是用<strong>当前模型</strong>对历史日 as-of 重放的结果，不是当时存下的预测（hour 粒度无留痕）；
+            上图逐点对线，误差大的时段可直接看出。
+          </div>
+        </template>
+        <div class="hint">
+          <strong>算法说明</strong>：TimesFM 点预测（CPU 推理）。以目标日 X 之前最新的完整 24 点日 D 为锚点，
+          送入 D 往前 {{ priceHour?.contextPoints || 4080 }} 点（默认 170 个完整日，已吃满 TimesFM 4096 点上下文上限，两年里更早的点会被模型截断）的官网主页日前价，
+          一次滚动预测 (X−D)×24 步，取最后 24 点作为 X 的整点价；
+          10%/50%/90% 分位直接来自模型输出，未做校准。结果后端缓存 5 分钟。
+        </div>
       </template>
     </PanelBox>
 
@@ -743,6 +969,7 @@ watch(
   font-size: var(--fs-12);
 }
 .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--s4); }
+.stats-kpis { margin-top: var(--s3); grid-template-columns: repeat(4, 1fr); }
 .chart { height: 320px; }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
 th {
@@ -793,5 +1020,6 @@ th.num, td.num { text-align: right; }
 @media (max-width: 1280px) {
   .grid :deep(.panel) { grid-column: span 12 !important; }
   .kpis { grid-template-columns: repeat(3, 1fr); }
+  .stats-kpis { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
