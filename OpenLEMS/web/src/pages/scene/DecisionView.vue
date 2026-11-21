@@ -165,23 +165,41 @@ const STAT_DAYS = 7
 /** 最多往前试探的候选日数（缺口再大就只统计找到的，并在脚注说明） */
 const STAT_CANDIDATES = 21
 
+/** 单个算法在统计窗口内的指标。coverage 为 null 表示没有可用的分位带（融合） */
+interface AlgoStat {
+  key: 'timesfm' | 'gbm' | 'fusion'
+  label: string
+  mae: number
+  rmse: number
+  mape: number | null
+  coverage: number | null
+}
+
 interface HourStats {
   from: string
   to: string
   /** 统计到的完整实际日（升序） */
   days: string[]
-  mae: number
-  rmse: number
-  /** 平上跨日平均；某日实际均价≈0（正负价抵消）时该日不计入 */
-  mape: number | null
-  /** 实际值落在预测 10%~90% 分位带内的点占比 */
-  coverage: number
-  /** 配对成功的逐点数 */
+  /** 逐算法指标，按展示顺序（融合排最后） */
+  algos: AlgoStat[]
+  /** 配对成功的逐点数（以 TimesFM 为基准） */
   points: number
   /** 预测调用失败/实际值不完整的候选日数 */
   failed: number
+  /** GBM 不可用的原因；非空时 algos 只含 TimesFM */
+  gbmError: string
   /** 逐日配对数据（升序），供「实际 vs 预测」联动图用 */
-  series: { date: string; actual: number[]; median: number[]; q10: (number | null)[]; q90: (number | null)[] }[]
+  series: {
+    date: string
+    actual: number[]
+    median: number[]
+    q10: (number | null)[]
+    q90: (number | null)[]
+    /** 第二算法中位；该日对比不可用时为 null 数组 */
+    gbm: (number | null)[]
+    /** 两个算法中位的均值（= 融合预测） */
+    fusion: (number | null)[]
+  }[]
 }
 
 const hourStats = ref<HourStats | null>(null)
@@ -216,21 +234,31 @@ async function loadHourStats() {
     }
     if (!days.length) throw new Error(`${head.latestDate} 往前 ${STAT_CANDIDATES} 天里没有完整实际日`)
 
-    // 2. 对每个完整日各重放一次预测（首次会逐日推理，走后端 5 分钟缓存）
+    // 2. 对每个完整日各重放一次预测（首次会逐日推理，走后端 5 分钟缓存）。
+    //    compare: 让同一锚点再跑一次 GBM（modelman price-gbm），两个算法才可比。
     const results = await Promise.allSettled(
       days.map((day) =>
-        fetchPriceForecast({ source: 'home24h', grain: 'hour', targetDate: day, historyDays: 170 }),
+        fetchPriceForecast({
+          source: 'home24h',
+          grain: 'hour',
+          targetDate: day,
+          historyDays: 170,
+          compare: true,
+        }),
       ),
     )
     // 与 results 一一对应的请求日（失败/不配对的天跳过时不进 series）
     const reqDays = days
 
     let failed = 0
-    const errs: number[] = []
-    const mapes: number[] = []
-    let sqSum = 0
-    let covered = 0
+    /** 逐算法的误差累加器；三个算法各自独立统计，指标才可比 */
+    const accs: Record<AlgoStat['key'], { errs: number[]; sq: number; covered: number; total: number; mapes: number[] }> = {
+      timesfm: { errs: [], sq: 0, covered: 0, total: 0, mapes: [] },
+      gbm: { errs: [], sq: 0, covered: 0, total: 0, mapes: [] },
+      fusion: { errs: [], sq: 0, covered: 0, total: 0, mapes: [] },
+    }
     let total = 0
+    let gbmError = ''
     const daySeries: HourStats['series'] = []
     for (const [k, r] of results.entries()) {
       if (r.status !== 'fulfilled') {
@@ -245,38 +273,75 @@ async function loadHourStats() {
       }
       const reqDay = reqDays[k]
       const dayAvg = Math.abs(mean(actual))
-      let dayErr = 0
-      f.forecast.forEach((p, i) => {
-        const e = Math.abs(p.point - actual[i])
-        errs.push(e)
-        sqSum += e * e
-        dayErr += e
-        total++
-        const q10 = p.quantiles?.['0.1']
-        const q90 = p.quantiles?.['0.9']
-        if (q10 != null && q90 != null && actual[i] >= q10 && actual[i] <= q90) covered++
-      })
-      if (dayAvg >= 1e-6) mapes.push(dayErr / dayAvg / 24)
-      daySeries.push({
-        date: reqDay,
-        actual,
-        median: f.forecast.map((p) => p.point),
-        q10: f.forecast.map((p) => p.quantiles?.['0.1'] ?? null),
-        q90: f.forecast.map((p) => p.quantiles?.['0.9'] ?? null),
-      })
+      if (f.forecast.length !== 24) continue
+
+      const tmMed = f.forecast.map((p) => p.point)
+      const tmQ10 = f.forecast.map((p) => p.quantiles?.['0.1'] ?? null)
+      const tmQ90 = f.forecast.map((p) => p.quantiles?.['0.9'] ?? null)
+      // 第二算法：服务未配置/失败时 backend 只回 gbmError，此时整段按不可用处理
+      const gbmPts = f.gbm?.forecast ?? []
+      if (f.gbmError && !gbmError) gbmError = f.gbmError
+      const hasGBM = gbmPts.length === 24
+      const gbmMed: (number | null)[] = hasGBM ? gbmPts.map((p) => p.point) : actual.map(() => null)
+      const gbmQ10 = hasGBM ? gbmPts.map((p) => p.quantiles?.['0.1'] ?? null) : []
+      const gbmQ90 = hasGBM ? gbmPts.map((p) => p.quantiles?.['0.9'] ?? null) : []
+      // 融合 = 两个算法中位的均值（算术平均，与 tools/hour-price-benchmark 同口径）
+      const fusion: (number | null)[] = hasGBM
+        ? tmMed.map((v, i) => (v + (gbmMed[i] as number)) / 2)
+        : actual.map(() => null)
+
+      const push = (acc: (typeof accs)['timesfm'], pred: (number | null)[], q10: (number | null)[], q90: (number | null)[]) => {
+        let dayErr = 0
+        let counted = 0
+        for (let i = 0; i < 24; i++) {
+          const p = pred[i]
+          if (p == null) continue
+          const e = Math.abs(p - actual[i])
+          acc.errs.push(e)
+          acc.sq += e * e
+          acc.total++
+          dayErr += e
+          counted++
+          const lo = q10[i]
+          const hi = q90[i]
+          if (lo != null && hi != null && actual[i] >= lo && actual[i] <= hi) acc.covered++
+        }
+        // MAPE 分母 = 当日实际均价；只在该算法这一天确实出了 24 点时计入
+        if (counted === 24 && dayAvg >= 1e-6) acc.mapes.push(dayErr / dayAvg / 24)
+      }
+      push(accs.timesfm, tmMed, tmQ10, tmQ90)
+      if (hasGBM) {
+        push(accs.gbm, gbmMed, gbmQ10, gbmQ90)
+        push(accs.fusion, fusion, [], [])
+      }
+      total += 24
+      daySeries.push({ date: reqDay, actual, median: tmMed, q10: tmQ10, q90: tmQ90, gbm: gbmMed, fusion })
     }
-    if (!total) throw new Error('统计窗口内没有可配对的预测点（预测调用全部失败？）')
+    if (!total || !accs.timesfm.total) {
+      throw new Error('统计窗口内没有可配对的预测点（预测调用全部失败？）')
+    }
+
+    const toStat = (key: AlgoStat['key'], label: string): AlgoStat => {
+      const a = accs[key]
+      return {
+        key,
+        label,
+        mae: mean(a.errs),
+        rmse: Math.sqrt(a.sq / a.total),
+        mape: a.mapes.length ? mean(a.mapes) * 100 : null,
+        // 融合没有自己的分位带（两个带子的均值不是带子），覆盖率留空而不是编一个
+        coverage: key === 'fusion' || !a.total ? null : (a.covered / a.total) * 100,
+      }
+    }
 
     hourStats.value = {
       from: days[days.length - 1],
       to: days[0],
       days,
-      mae: mean(errs),
-      rmse: Math.sqrt(sqSum / total),
-      mape: mapes.length ? mean(mapes) * 100 : null,
-      coverage: (covered / total) * 100,
+      algos: [toStat('timesfm', 'TimesFM'), toStat('gbm', 'GBM'), toStat('fusion', '融合（两者均值）')],
       points: total,
       failed,
+      gbmError,
       series: daySeries.slice().reverse(),
     }
   } catch (err) {
@@ -590,16 +655,27 @@ useECharts(
     const labels: string[] = []
     const actual: (number | null)[] = []
     const median: (number | null)[] = []
-    const q10: (number | null)[] = []
-    const q90: (number | null)[] = []
+    const gbm: (number | null)[] = []
+    const fusion: (number | null)[] = []
     for (const d of st.series) {
       for (let i = 0; i < d.actual.length; i++) {
         labels.push(`${d.date.slice(5)} ${String(i).padStart(2, '0')}:00`)
         actual.push(d.actual[i])
         median.push(d.median[i])
-        q10.push(d.q10[i])
-        q90.push(d.q90[i])
+        gbm.push(d.gbm[i])
+        fusion.push(d.fusion[i])
       }
+    }
+    // 分位带只在单算法时有意义；两算法对比时五条带线会糊成一片，覆盖率看下表
+    const series: EChartsOption['series'] = [
+      { name: '实际', type: 'line', showSymbol: false, lineStyle: { width: 2 }, itemStyle: { color: CHART_COLORS.gray }, data: actual },
+      { name: 'TimesFM 中位', type: 'line', showSymbol: false, lineStyle: { type: 'dashed', width: 2 }, itemStyle: { color: CHART_COLORS.brand }, data: median },
+    ]
+    if (st.algos.some((a) => a.key === 'gbm' && a.mae > 0)) {
+      series.push(
+        { name: 'GBM 中位', type: 'line', showSymbol: false, lineStyle: { type: 'dashed', width: 2 }, itemStyle: { color: '#3ba272' }, data: gbm },
+        { name: '融合（均值）', type: 'line', showSymbol: false, lineStyle: { width: 2 }, itemStyle: { color: '#c98a00' }, data: fusion },
+      )
     }
     return {
       grid: { left: 56, right: 20, top: 32, bottom: 40 },
@@ -623,12 +699,7 @@ useECharts(
         axisLabel: { fontSize: 12, color: CHART_COLORS.gray },
         splitLine: { lineStyle: { color: '#eef0f3' } },
       },
-      series: [
-        { name: '实际', type: 'line', showSymbol: false, lineStyle: { width: 2 }, itemStyle: { color: CHART_COLORS.gray }, data: actual },
-        { name: '预测 10%', type: 'line', showSymbol: false, lineStyle: { type: 'dotted', width: 1 }, itemStyle: { color: CHART_COLORS.gray }, data: q10 },
-        { name: '预测 90%', type: 'line', showSymbol: false, lineStyle: { type: 'dotted', width: 1 }, itemStyle: { color: CHART_COLORS.gray }, data: q90 },
-        { name: '预测中位', type: 'line', showSymbol: false, lineStyle: { type: 'dashed', width: 2 }, itemStyle: { color: CHART_COLORS.brand }, data: median },
-      ],
+      series,
     }
   },
   [hourStats],
@@ -772,27 +843,39 @@ watch(
         <template v-else-if="hourStats">
           <div class="stats-title">统计窗口（{{ hourStats.from }} ~ {{ hourStats.to }}）实际 vs 预测（逐点）</div>
           <div ref="hourStatsEl" class="chart" />
-          <div class="kpis stats-kpis">
-            <KpiCard label="平均绝对误差" :value="hourStats.mae.toFixed(1)" unit="元/MWh" hint="|预测 − 实际| 的均值" />
-            <KpiCard label="均方根误差" :value="hourStats.rmse.toFixed(1)" unit="元/MWh" hint="大误差点权重更高" />
-            <KpiCard
-              label="平均绝对百分比误差"
-              :value="hourStats.mape == null ? '—' : hourStats.mape.toFixed(2)"
-              unit="%"
-              hint="÷ 当日实际均价（均价≈0 的日不计）"
-            />
-            <KpiCard
-              label="分位带覆盖率"
-              :value="hourStats.coverage.toFixed(0)"
-              unit="%"
-              hint="实际值落在 10%~90% 带内；名义 80%，偏离即带子不可信"
-            />
+          <table class="stat-table">
+            <thead>
+              <tr>
+                <th>算法</th>
+                <th>MAE（元/MWh）</th>
+                <th>RMSE（元/MWh）</th>
+                <th>MAPE</th>
+                <th>分位带覆盖率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="a in hourStats.algos" :key="a.key">
+                <td>{{ a.label }}</td>
+                <td>{{ a.mae.toFixed(1) }}</td>
+                <td>{{ a.rmse.toFixed(1) }}</td>
+                <td>{{ a.mape == null ? '—' : `${a.mape.toFixed(2)}%` }}</td>
+                <td>{{ a.coverage == null ? '—' : `${a.coverage.toFixed(0)}%` }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="hourStats.gbmError" class="empty">
+            GBM 对比不可用：{{ hourStats.gbmError }}
+          </div>
+          <div class="muted stat-note">
+            MAE/RMSE 按 24 点逐点误差；MAPE 分母 = 当日实际均价（均价≈0 的日不计）；
+            分位带覆盖率 = 实际值落在 10%~90% 带内的点占比（名义 80%，偏离即带子不可信）。
+            融合没有自己的分位带，故留空。
           </div>
           <div class="hint">
             统计窗口 <strong>{{ hourStats.from }} ~ {{ hourStats.to }}</strong>
             （{{ hourStats.days.length }} 个完整实际日 × 24 点，共 {{ hourStats.points }} 点<template v-if="hourStats.failed">，另有 {{ hourStats.failed }} 天预测失败已剔除</template>）。
             这是用<strong>当前模型</strong>对历史日 as-of 重放的结果，不是当时存下的预测（hour 粒度无留痕）；
-            上图逐点对线，误差大的时段可直接看出。
+            两个算法共用同一个锚点，所以指标可直接比较。
           </div>
         </template>
         <div class="hint">
@@ -969,7 +1052,29 @@ watch(
   font-size: var(--fs-12);
 }
 .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--s4); }
-.stats-kpis { margin-top: var(--s3); grid-template-columns: repeat(4, 1fr); }
+.stat-table {
+  width: 100%;
+  margin-top: var(--s3);
+  border-collapse: collapse;
+  font-size: var(--fs-13);
+}
+.stat-table th,
+.stat-table td {
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+.stat-table th:first-child,
+.stat-table td:first-child { text-align: left; }
+.stat-table th {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-2);
+}
+.stat-table td { font-variant-numeric: tabular-nums; }
+.stat-note { margin-top: var(--s2); font-size: var(--fs-12); }
 .chart { height: 320px; }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
 th {

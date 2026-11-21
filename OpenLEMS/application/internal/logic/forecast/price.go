@@ -60,6 +60,9 @@ type PriceRequest struct {
 	HorizonDays  int
 	Quantiles    []float64
 	ForceRefresh bool
+	// Compare 仅 hour：额外跑一次 GBM（modelman price-gbm）做算法对比。
+	// 不影响 TimesFM 结果与缓存键——GBM 每次现算，毫秒级。
+	Compare bool
 }
 
 // ParseGrain 解析粒度参数；空值默认 day。

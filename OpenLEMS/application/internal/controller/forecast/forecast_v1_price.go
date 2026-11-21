@@ -26,6 +26,7 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		HorizonDays:  req.HorizonDays,
 		Quantiles:    quantiles,
 		ForceRefresh: req.ForceRefresh,
+		Compare:      req.Compare,
 	})
 	if err != nil {
 		return nil, gerror.WrapCode(gcode.CodeInternalError, err, "电价预测失败")
@@ -78,7 +79,43 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		TimeMs:         result.TimeMs,
 		GeneratedOn:    result.GeneratedOn,
 		Recorded:       result.Recorded,
+		GBM:            gbmDTO(result.GBM),
+		GBMError:       result.GBMError,
 	}}, nil
+}
+
+// gbmDTO 第二算法结果转 DTO。结构与 TimesFM 的 forecast 一致，前端可并排画。
+func gbmDTO(g *forecastlogic.TPriceForecastGBM) *v1.PriceForecastGBM {
+	if g == nil {
+		return nil
+	}
+	points := make([]*v1.PriceForecastPoint, 0, len(g.Points))
+	for _, p := range g.Points {
+		atTime, runDate := "", ""
+		if !p.TargetTime.IsZero() {
+			atTime = p.TargetTime.Format("15:04")
+			runDate = p.TargetTime.Format("2006-01-02")
+		}
+		points = append(points, &v1.PriceForecastPoint{
+			RunDate:    runDate,
+			TargetTime: p.TargetTime.Format("2006-01-02 15:04"),
+			Point:      p.Point,
+			Quantiles: map[string]float64{
+				"0.1": p.Q10,
+				"0.5": p.Q50,
+				"0.9": p.Q90,
+			},
+			AtTime: atTime,
+		})
+	}
+	return &v1.PriceForecastGBM{
+		Model:       g.Model,
+		TargetDate:  g.TargetDate,
+		HorizonDays: g.HorizonDays,
+		HistoryDays: g.HistoryDays,
+		Forecast:    points,
+		TimeMs:      g.TimeMs,
+	}
 }
 
 // actualOrEmpty Go 的 nil 切片序列化成 null，前端 `.length` 会直接抛。
