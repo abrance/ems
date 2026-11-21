@@ -28,6 +28,7 @@ const priceForecastTestDDL = `
 		generated_on TEXT NOT NULL,
 		market TEXT NOT NULL,
 		grain TEXT NOT NULL,
+		algo VARCHAR(16) NOT NULL DEFAULT 'timesfm',
 		target_time TEXT NOT NULL,
 		point REAL NOT NULL DEFAULT 0,
 		q10 REAL NOT NULL DEFAULT 0,
@@ -38,7 +39,7 @@ const priceForecastTestDDL = `
 		source TEXT NOT NULL DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE (generated_on, market, grain, target_time)
+		UNIQUE (generated_on, market, grain, algo, target_time)
 	);
 `
 
