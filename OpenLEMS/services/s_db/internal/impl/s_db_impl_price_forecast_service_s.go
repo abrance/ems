@@ -30,20 +30,24 @@ func (s *sPriceForecastServiceImpl) UpsertBatch(ctx context.Context, rows []*s_d
 		return nil
 	}
 	// 唯一键在 SQL 里声明（见 s_db_init_f.go），这里用 ON CONFLICT 覆盖：
-	// 同一天对同一目标时刻重算只更新，不堆行。
+	// 同一天同一算法对同一目标时刻重算只更新，不堆行。
 	for _, row := range rows {
 		if row == nil || row.TargetTime == "" {
 			continue
 		}
+		algo := row.Algo
+		if algo == "" {
+			algo = s_db_model.ForecastAlgoTimesFM
+		}
 		_, err := g.DB().Exec(ctx, `
 			INSERT INTO gd_price_forecast
-				(generated_on, market, grain, target_time, point, q10, q50, q90, model, unit, source, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-			ON CONFLICT(generated_on, market, grain, target_time) DO UPDATE SET
+				(generated_on, market, grain, algo, target_time, point, q10, q50, q90, model, unit, source, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+			ON CONFLICT(generated_on, market, grain, algo, target_time) DO UPDATE SET
 				point = excluded.point, q10 = excluded.q10, q50 = excluded.q50, q90 = excluded.q90,
 				model = excluded.model, unit = excluded.unit, source = excluded.source,
 				updated_at = CURRENT_TIMESTAMP
-		`, row.GeneratedOn, row.Market, row.Grain, row.TargetTime,
+		`, row.GeneratedOn, row.Market, row.Grain, algo, row.TargetTime,
 			row.Point, row.Q10, row.Q50, row.Q90, row.Model, row.Unit, row.Source)
 		if err != nil {
 			return errors.Wrap(err, "写入电价预测留痕失败")

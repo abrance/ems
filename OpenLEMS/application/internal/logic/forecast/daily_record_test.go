@@ -3,6 +3,7 @@ package forecast
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +125,7 @@ func TestRunDailyRecordUsesComputeDateAcrossMidnight(t *testing.T) {
 			generated_on TEXT NOT NULL,
 			market TEXT NOT NULL,
 			grain TEXT NOT NULL,
+			algo VARCHAR(16) NOT NULL DEFAULT 'timesfm',
 			target_time TEXT NOT NULL,
 			point REAL NOT NULL DEFAULT 0,
 			q10 REAL NOT NULL DEFAULT 0,
@@ -134,7 +136,7 @@ func TestRunDailyRecordUsesComputeDateAcrossMidnight(t *testing.T) {
 			source TEXT NOT NULL DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (generated_on, market, grain, target_time)
+			UNIQUE (generated_on, market, grain, algo, target_time)
 		)`); err != nil {
 		t.Fatalf("建表: %v", err)
 	}
@@ -196,6 +198,7 @@ func TestRunDailyRecordIsIdempotent(t *testing.T) {
 			generated_on TEXT NOT NULL,
 			market TEXT NOT NULL,
 			grain TEXT NOT NULL,
+			algo VARCHAR(16) NOT NULL DEFAULT 'timesfm',
 			target_time TEXT NOT NULL,
 			point REAL NOT NULL DEFAULT 0,
 			q10 REAL NOT NULL DEFAULT 0,
@@ -206,7 +209,7 @@ func TestRunDailyRecordIsIdempotent(t *testing.T) {
 			source TEXT NOT NULL DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (generated_on, market, grain, target_time)
+			UNIQUE (generated_on, market, grain, algo, target_time)
 		)`); err != nil {
 		t.Fatalf("建表: %v", err)
 	}
@@ -339,4 +342,188 @@ func TestDailyRecordFirstWaitIsStartupDelay(t *testing.T) {
 	if dailyRecordFirstWait() != dailyRecordStartupDelay {
 		t.Errorf("首次等待与 dailyRecordStartupDelay 不一致")
 	}
+}
+
+// ---- 每日小时留痕（两算法同锚点） ----
+
+// setupHourRecordTestDB 建一张与 s_db_init_f.go 同构的留痕表。
+// sqlite 只用于跑用例，生产是 pgsql（用户 m00194 明确过）——这里钉的是
+// 「唯一键含 algo，两个算法写同一目标时刻不互相覆盖」，与方言无关。
+func setupHourRecordTestDB(t *testing.T) (context.Context, time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "daily-hour.sqlite3")
+	gdb.SetConfig(gdb.Config{
+		"default": gdb.ConfigGroup{{Type: "sqlite", Link: "sqlite::@file(" + path + ")"}},
+	})
+	t.Cleanup(func() { gdb.SetConfig(gdb.Config{}) })
+
+	if _, err := g.DB().Exec(ctx, `
+		CREATE TABLE gd_price_forecast (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			generated_on TEXT NOT NULL,
+			market TEXT NOT NULL,
+			grain TEXT NOT NULL,
+			algo VARCHAR(16) NOT NULL DEFAULT 'timesfm',
+			target_time TEXT NOT NULL,
+			point REAL NOT NULL DEFAULT 0,
+			q10 REAL NOT NULL DEFAULT 0,
+			q50 REAL NOT NULL DEFAULT 0,
+			q90 REAL NOT NULL DEFAULT 0,
+			model TEXT NOT NULL DEFAULT '',
+			unit TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (generated_on, market, grain, algo, target_time)
+		)`); err != nil {
+		t.Fatalf("建表: %v", err)
+	}
+	return ctx, dailyRecordTestNow()
+}
+
+func makeHourPoints(t *testing.T, targetDate string, base float64) []TPriceForecastPoint {
+	t.Helper()
+	day := parseDayTarget(targetDate)
+	if day.IsZero() {
+		t.Fatalf("目标日 %q 不是合法日期", targetDate)
+	}
+	points := make([]TPriceForecastPoint, 24)
+	for h := range points {
+		v := base + float64(h)
+		points[h] = TPriceForecastPoint{
+			TargetTime: day.Add(time.Duration(h) * time.Hour),
+			Point:      v,
+			Q10:        v - 20,
+			Q50:        v,
+			Q90:        v + 20,
+		}
+	}
+	return points
+}
+
+func assertHourRows(t *testing.T, ctx context.Context, anchor, targetDate string, want int, algos ...string) {
+	t.Helper()
+	if len(algos) == 0 {
+		algos = []string{s_db_model.ForecastAlgoTimesFM, s_db_model.ForecastAlgoGBM}
+	}
+	rows, err := g.DB().GetAll(ctx,
+		`SELECT market, algo, generated_on, target_time FROM gd_price_forecast`)
+	if err != nil {
+		t.Fatalf("读取留痕: %v", err)
+	}
+	if len(rows) != want {
+		t.Fatalf("留痕行数 = %d, want %d", len(rows), want)
+	}
+	perAlgo := make(map[string]int, 4)
+	hours := make(map[string]bool, 24)
+	for _, row := range rows {
+		key := row["market"].String() + "/" + row["algo"].String()
+		perAlgo[key]++
+		if got := row["generated_on"].String(); got != anchor {
+			t.Fatalf("generated_on = %s, want 锚点 %s（同一批次必须共用一个锚点）", got, anchor)
+		}
+		tt := row["target_time"].String()
+		if !strings.HasPrefix(tt, targetDate+" ") {
+			t.Fatalf("target_time = %s, want 目标日 %s 的整点", tt, targetDate)
+		}
+		hours[strings.TrimPrefix(tt, targetDate+" ")] = true
+	}
+	if len(hours) != 24 {
+		t.Errorf("目标时刻只有 %d 个整点, want 24（缺小时会让某算法看起来误差更小）", len(hours))
+	}
+	for _, market := range dailyRecordMarkets {
+		for _, algo := range algos {
+			if got := perAlgo[market+"/"+algo]; got != 24 {
+				t.Errorf("%s/%s 行数 = %d, want 24", market, algo, got)
+			}
+		}
+	}
+}
+
+// 每日小时任务：同一锚点、两个市场、两个算法各 24 行；重跑按唯一键覆盖不堆行。
+func TestRunDailyHourRecordWritesBothAlgos(t *testing.T) {
+	ctx, now := setupHourRecordTestDB(t)
+	anchor := "2026-11-07"
+	targetDate := now.Format(priceDateLayout)
+
+	load := func(_ context.Context, req PriceRequest) (*TPriceForecastResult, error) {
+		if req.Grain != s_db_model.ForecastGrainHour {
+			t.Errorf("grain = %q, want hour", req.Grain)
+		}
+		if req.Source != s_db_model.PriceSourceHome24h {
+			t.Errorf("source = %q, want home24h", req.Source)
+		}
+		if !req.Compare {
+			t.Errorf("必须带 Compare=true，否则没有 GBM 样本可对比")
+		}
+		if !req.ForceRefresh {
+			t.Errorf("必须 ForceRefresh=true，不能读页面那层 5 分钟缓存")
+		}
+		if req.TargetDate != targetDate {
+			t.Errorf("targetDate = %q, want %q", req.TargetDate, targetDate)
+		}
+		return &TPriceForecastResult{
+			Market: req.Market,
+			Grain:  s_db_model.ForecastGrainHour,
+			To:     anchor,
+			Model:  "timesfm-3.0",
+			Unit:   "元/MWh",
+			Points: makeHourPoints(t, targetDate, 400),
+			GBM: &TPriceForecastGBM{
+				Model:  "price-gbm",
+				Points: makeHourPoints(t, targetDate, 420),
+			},
+		}, nil
+	}
+
+	written := runDailyHourRecord(ctx, now, load)
+	for _, market := range dailyRecordMarkets {
+		if written[market] != 48 {
+			t.Errorf("%s 写入 %d 行, want 48（2 算法 × 24 点）", market, written[market])
+		}
+	}
+	assertHourRows(t, ctx, anchor, targetDate, len(dailyRecordMarkets)*2*24)
+
+	// 同一锚点重跑：唯一键含 algo，只覆盖不堆行。
+	runDailyHourRecord(ctx, now, load)
+	assertHourRows(t, ctx, anchor, targetDate, len(dailyRecordMarkets)*2*24)
+}
+
+// GBM 不可用或只回了半截点，TimesFM 的 24 行必须照常落库；半截样本整段丢弃。
+func TestRunDailyHourRecordKeepsTimesFMWhenGBMUnavailable(t *testing.T) {
+	ctx, now := setupHourRecordTestDB(t)
+	anchor := "2026-11-07"
+	targetDate := now.Format(priceDateLayout)
+
+	load := func(_ context.Context, req PriceRequest) (*TPriceForecastResult, error) {
+		res := &TPriceForecastResult{
+			Market: req.Market,
+			Grain:  s_db_model.ForecastGrainHour,
+			To:     anchor,
+			Model:  "timesfm-3.0",
+			Unit:   "元/MWh",
+			Points: makeHourPoints(t, targetDate, 400),
+		}
+		switch req.Market {
+		case "ahead":
+			// 只回 23 点：不能让半截样本进回测。
+			res.GBM = &TPriceForecastGBM{
+				Model:  "price-gbm",
+				Points: makeHourPoints(t, targetDate, 420)[:23],
+			}
+		default:
+			res.GBMError = "未配置 GBM 预测服务"
+		}
+		return res, nil
+	}
+
+	written := runDailyHourRecord(ctx, now, load)
+	if written["ahead"] != 24 {
+		t.Errorf("ahead 写入 %d 行, want 24（GBM 半截样本必须整段丢弃）", written["ahead"])
+	}
+	if written["real"] != 24 {
+		t.Errorf("real 写入 %d 行, want 24（GBM 未配置不影响 TimesFM）", written["real"])
+	}
+	assertHourRows(t, ctx, anchor, targetDate, len(dailyRecordMarkets)*24, s_db_model.ForecastAlgoTimesFM)
 }

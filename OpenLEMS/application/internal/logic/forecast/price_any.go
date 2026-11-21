@@ -80,7 +80,13 @@ func LoadPriceAny(ctx context.Context, req PriceRequest) (*TPriceForecastResult,
 	out.Source = source
 
 	// 留痕：best-effort。写不进去只告警，不让用户看不到预测结果。
-	out.Recorded = recordForecastPoints(ctx, out)
+	//
+	// hour 例外：24 点留痕由每日任务统一写（固定时刻、固定锚点、全算法），
+	// 页面请求不写。否则同一天多次请求会按唯一键互相覆盖，
+	// 样本就不再是稳定的「当时预测」，回测也没法公平比较。
+	if out.Grain != s_db_model.ForecastGrainHour {
+		out.Recorded = recordForecastPoints(ctx, out)
+	}
 	return out, nil
 }
 
@@ -213,6 +219,7 @@ func recordForecastPoints(ctx context.Context, res *TPriceForecastResult) int {
 			GeneratedOn: res.GeneratedOn,
 			Market:      res.Market,
 			Grain:       res.Grain,
+			Algo:        s_db_model.ForecastAlgoTimesFM,
 			TargetTime:  targetTime,
 			Point:       p.Point,
 			Q10:         p.Q10,

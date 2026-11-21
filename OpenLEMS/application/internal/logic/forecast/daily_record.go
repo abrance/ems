@@ -77,6 +77,10 @@ var dailyRecordMarkets = []string{"ahead", "real"}
 // dailyRecordLoader 便于单测注入预测结果；生产使用 loadDaily（与接口同一条日频计算路径）。
 type dailyRecordLoader func(context.Context, PriceRequest) (*TPriceForecastResult, error)
 
+// dailyRecordHourLoader 小时粒度入口；生产使用 loadHourCached（与接口同一条 24 点计算路径）。
+// 与日频 loader 分开，是因为两者的请求参数（targetDate / compare）不同。
+type dailyRecordHourLoader func(context.Context, PriceRequest) (*TPriceForecastResult, error)
+
 // Start 启动每日留痕（幂等：重复调用只起一个协程，由 ctx 控制生命周期）。
 // 关掉的办法：配置 forecast.daily_record.enabled=false。默认 true ——
 // 关掉只会让复盘「当时预测」腿停止长新数据，不动已有留痕，也不影响页面手动预测。
@@ -95,7 +99,11 @@ func Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				RunDailyRecordOnce(ctx, dailyRecordNow())
+				now := dailyRecordNow()
+				RunDailyRecordOnce(ctx, now)
+				// hour 留痕与日频同一时刻、同一轮触发：两种粒度各有自己的锚点，
+				// 但「每天各算法至少一条」的保证一致。
+				RunDailyHourRecordOnce(ctx, now)
 				// 跑完再取时刻算间隔：一轮耗时长也不会算出负延迟导致立刻重跑。
 				timer.Reset(dailyRecordDelay(dailyRecordNow()))
 			}
@@ -161,6 +169,97 @@ func runDailyRecord(ctx context.Context, now time.Time, load dailyRecordLoader) 
 	return written
 }
 
+// RunDailyHourRecordOnce 跑一轮小时留痕：每个市场在同一锚点上，把算法对比要用的
+// 每个算法各写 24 行。页面请求不再写 hour 留痕（见 LoadPriceAny），这里是唯一来源。
+// 返回每个市场实际写入的行数；失败的市场不在返回值里（原因已记日志）。
+func RunDailyHourRecordOnce(ctx context.Context, now time.Time) map[string]int {
+	return runDailyHourRecord(ctx, now, loadHourCached)
+}
+
+func runDailyHourRecord(ctx context.Context, now time.Time, load dailyRecordHourLoader) map[string]int {
+	written := make(map[string]int, len(dailyRecordMarkets))
+	targetDate := now.In(priceLocation()).Format(priceDateLayout)
+
+	for _, market := range dailyRecordMarkets {
+		// Compare=true：同一锚点下把 GBM 也跑一遍，两个算法才可比。
+		// ForceRefresh=true：不读页面缓存，按执行时刻能拿到的最新数据定锚点。
+		res, err := load(ctx, PriceRequest{
+			Market:       market,
+			Source:       s_db_model.PriceSourceHome24h,
+			Grain:        s_db_model.ForecastGrainHour,
+			TargetDate:   targetDate,
+			ForceRefresh: true,
+			Compare:      true,
+		})
+		if err != nil {
+			c_log.Warningf(ctx, "每日小时留痕跳过 %s：预测失败，不写假数（%+v）", market, err)
+			continue
+		}
+		if res == nil || strings.TrimSpace(res.To) == "" {
+			c_log.Warningf(ctx, "每日小时留痕跳过 %s：结果缺少锚点", market)
+			continue
+		}
+
+		n := recordHourPoints(ctx, market, res.To, res.Model, res.Unit, res.Points, s_db_model.ForecastAlgoTimesFM)
+		if res.GBM != nil {
+			n += recordHourPoints(ctx, market, res.To, res.GBM.Model, res.Unit, res.GBM.Points, s_db_model.ForecastAlgoGBM)
+		} else if res.GBMError != "" {
+			c_log.Warningf(ctx, "每日小时留痕 %s 的 GBM 不可用：%s", market, res.GBMError)
+		}
+		if n == 0 {
+			continue
+		}
+		written[market] = n
+		c_log.BizInfof(ctx, "每日小时留痕已写入：%s 锚点 %s / 目标 %s / %d 行", market, res.To, targetDate, n)
+	}
+	return written
+}
+
+// recordHourPoints 把一次 24 点预测写成留痕。algo 由调用方指定，唯一键含 algo，
+// 两个算法写同一目标时刻不会互相覆盖。点数不是 24 就整段不写：半截样本进回测
+// 会让「某算法缺一天」伪装成「那天误差很小」。
+func recordHourPoints(
+	ctx context.Context,
+	market, generatedOn, model, unit string,
+	points []TPriceForecastPoint,
+	algo string,
+) int {
+	if len(points) != 24 {
+		c_log.Warningf(ctx, "每日小时留痕 %s/%s 点数 = %d，需要 24，跳过", market, algo, len(points))
+		return 0
+	}
+	rows := make([]*s_db_model.SPriceForecastModel, 0, 24)
+	for _, p := range points {
+		if p.TargetTime.IsZero() || math.IsNaN(p.Point) || math.IsInf(p.Point, 0) {
+			continue
+		}
+		rows = append(rows, &s_db_model.SPriceForecastModel{
+			GeneratedOn: strings.TrimSpace(generatedOn),
+			Market:      market,
+			Grain:       s_db_model.ForecastGrainHour,
+			Algo:        algo,
+			TargetTime:  formatTargetTime(s_db_model.ForecastGrainHour, p.TargetTime),
+			Point:       p.Point,
+			Q10:         p.Q10,
+			Q50:         p.Q50,
+			Q90:         p.Q90,
+			Model:       model,
+			Unit:        unit,
+			Source:      leafSourceLabel(s_db_model.PriceSourceHome24h),
+		})
+	}
+	if len(rows) != len(points) {
+		c_log.Warningf(ctx, "每日小时留痕 %s/%s 有 %d 个无效点，跳过整段", market, algo, len(points)-len(rows))
+		return 0
+	}
+	n, err := RecordPriceForecast(ctx, rows)
+	if err != nil {
+		c_log.Warningf(ctx, "每日小时留痕写入失败 %s/%s：%+v", market, algo, err)
+		return 0
+	}
+	return n
+}
+
 // nextDate 返回 date 的次日；date 不是 YYYY-MM-DD 时返回空串，调用方据此跳过不写假数。
 func nextDate(date string) string {
 	d := parseDayTarget(date)
@@ -206,6 +305,7 @@ func BuildDailyRecordRow(
 			GeneratedOn: strings.TrimSpace(generatedOn),
 			Market:      market,
 			Grain:       res.Grain,
+			Algo:        s_db_model.ForecastAlgoTimesFM,
 			TargetTime:  targetDate,
 			Point:       p.Point,
 			Q10:         p.Q10,

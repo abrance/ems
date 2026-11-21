@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -349,32 +350,19 @@ func initConfigDatabase() error {
 	}
 
 	// 电价预测留痕：复盘要回答「当时发的预测准不准」，所以必须落库。
-	// 唯一键 (generated_on, market, grain, target_time)：同一天对同一目标时刻只留一条。
-	_, err = execSchema(ctx, `
-		CREATE TABLE IF NOT EXISTS gd_price_forecast (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			generated_on TEXT NOT NULL,
-			market TEXT NOT NULL,
-			grain TEXT NOT NULL,
-			target_time TEXT NOT NULL,
-			point REAL NOT NULL DEFAULT 0,
-			q10 REAL NOT NULL DEFAULT 0,
-			q50 REAL NOT NULL DEFAULT 0,
-			q90 REAL NOT NULL DEFAULT 0,
-			model TEXT NOT NULL DEFAULT '',
-			unit TEXT NOT NULL DEFAULT '',
-			source TEXT NOT NULL DEFAULT '',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (generated_on, market, grain, target_time)
-		)
-	`)
+	// 唯一键 (generated_on, market, grain, algo, target_time)：同一天同一算法对同一目标
+	// 时刻只留一条。algo 进唯一键是为了让 TimesFM / GBM 对同一目标时刻并存。
+	_, err = execSchema(ctx, priceForecastTableDDL("gd_price_forecast"))
 	if err != nil {
 		c_log.Error(ctx, err)
 		return err
 	}
 	_, err = execSchema(ctx, `CREATE INDEX IF NOT EXISTS idx_price_forecast_target ON gd_price_forecast (market, grain, target_time)`)
 	if err != nil {
+		c_log.Error(ctx, err)
+		return err
+	}
+	if err := migratePriceForecastAlgoColumn(ctx); err != nil {
 		c_log.Error(ctx, err)
 		return err
 	}
@@ -575,6 +563,106 @@ func migrateSpotMetricEditColumns(ctx context.Context) error {
 			return err
 		}
 		c_log.Infof(ctx, "gd_spot_metric 补充列 %s", name)
+	}
+	return nil
+}
+
+// priceForecastAlgoUniqueKey gd_price_forecast 新唯一键的约束名（pgsql 补约束时用）。
+const priceForecastAlgoUniqueKey = "gd_price_forecast_algo_target_key"
+
+// priceForecastTableDDL 留痕表的建表语句。table 只在 sqlite 重建时换成临时表名。
+// 唯一键必须含 algo：TimesFM 与 GBM 对同一目标时刻各留一条，缺了 algo 会互相覆盖，
+// 算法对比最后只剩后写入的那个算法的数据。
+func priceForecastTableDDL(table string) string {
+	return `CREATE TABLE IF NOT EXISTS ` + table + ` (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			generated_on TEXT NOT NULL,
+			market TEXT NOT NULL,
+			grain TEXT NOT NULL,
+			algo VARCHAR(16) NOT NULL DEFAULT 'timesfm',
+			target_time TEXT NOT NULL,
+			point REAL NOT NULL DEFAULT 0,
+			q10 REAL NOT NULL DEFAULT 0,
+			q50 REAL NOT NULL DEFAULT 0,
+			q90 REAL NOT NULL DEFAULT 0,
+			model TEXT NOT NULL DEFAULT '',
+			unit TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (generated_on, market, grain, algo, target_time)
+		)`
+}
+
+// migratePriceForecastAlgoColumn 校验/补齐留痕表的 algo 维度。
+//
+// 生产只有 pgsql：schema 变更由运维在发布时执行
+// deploy/migrations/2026-11-21_gd_price_forecast_algo.sql，应用启动不再做 DDL。
+// 启动期改表有三个问题：会卡在表锁上导致服务起不来；多副本/滚动重启时并发
+// 执行 DDL 互相竞争；应用账号在生产通常没有 DDL 权限，失败还可能被静默吞掉。
+// 所以这里只做只读校验，缺列或缺唯一键就让启动失败，并指向要执行的 SQL。
+//
+// sqlite 只在本地与测试里用，改不了表级 UNIQUE，只能整表重建；历史行一律视为 timesfm。
+func migratePriceForecastAlgoColumn(ctx context.Context) error {
+	if dbDialect(nil) == dialectPgsql {
+		return checkPriceForecastAlgoSchemaPgsql(ctx)
+	}
+	return migratePriceForecastAlgoColumnSqlite(ctx)
+}
+
+// checkPriceForecastAlgoSchemaPgsql 只读校验 algo 列与含 algo 的唯一键，不改表。
+func checkPriceForecastAlgoSchemaPgsql(ctx context.Context) error {
+	has, err := g.DB().GetValue(ctx, `SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'gd_price_forecast' AND column_name = 'algo'`)
+	if err != nil {
+		return err
+	}
+	if has.Int() == 0 {
+		return fmt.Errorf("gd_price_forecast 缺少 algo 列：请先由运维执行 deploy/migrations/2026-11-21_gd_price_forecast_algo.sql，再启动本版本")
+	}
+
+	// 唯一键必须含 algo，否则 UpsertBatch 的
+	// ON CONFLICT(generated_on, market, grain, algo, target_time) 找不到对应约束。
+	rows, err := g.DB().GetAll(ctx, `SELECT conname, pg_get_constraintdef(oid) AS def
+		FROM pg_constraint WHERE conrelid = 'gd_price_forecast'::regclass AND contype = 'u'`)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if strings.Contains(strings.TrimSpace(row["def"].String()), "algo") {
+			return nil
+		}
+	}
+	return fmt.Errorf("gd_price_forecast 唯一键不含 algo：请先由运维执行 deploy/migrations/2026-11-21_gd_price_forecast_algo.sql（唯一键应为 %s），再启动本版本", priceForecastAlgoUniqueKey)
+}
+
+func migratePriceForecastAlgoColumnSqlite(ctx context.Context) error {
+	value, err := g.DB().GetValue(ctx, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'gd_price_forecast'`)
+	if err != nil {
+		return err
+	}
+	if value.IsNil() {
+		return nil
+	}
+	if strings.Contains(value.String(), "algo") {
+		return nil
+	}
+	c_log.Warning(ctx, "检测到 gd_price_forecast 旧唯一键，重建表以加入 algo（历史行默认 timesfm）")
+	stmts := []string{
+		`DROP TABLE IF EXISTS gd_price_forecast_new`,
+		priceForecastTableDDL("gd_price_forecast_new"),
+		`INSERT INTO gd_price_forecast_new
+			(id, generated_on, market, grain, algo, target_time, point, q10, q50, q90, model, unit, source, created_at, updated_at)
+		 SELECT id, generated_on, market, grain, 'timesfm', target_time, point, q10, q50, q90, model, unit, source, created_at, updated_at
+		 FROM gd_price_forecast`,
+		`DROP TABLE gd_price_forecast`,
+		`ALTER TABLE gd_price_forecast_new RENAME TO gd_price_forecast`,
+		`CREATE INDEX IF NOT EXISTS idx_price_forecast_target ON gd_price_forecast (market, grain, target_time)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := execSchema(ctx, stmt); err != nil {
+			return err
+		}
 	}
 	return nil
 }

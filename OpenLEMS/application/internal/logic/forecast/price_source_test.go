@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"s_db/s_db_model"
 )
@@ -117,5 +118,55 @@ func TestLoadPriceAnyRejectsBadSource(t *testing.T) {
 	}
 	if called {
 		t.Error("参数非法时不应调用 loader")
+	}
+}
+
+// 小时留痕只能由每日任务写：页面请求若也写，会按唯一键覆盖掉 00:05 那批规范样本，
+// 算法对比的「同锚点」前提就被污染了。day 仍然照写（复盘页的「当时预测」腿靠它）。
+func TestLoadPriceAnyDoesNotRecordHourRows(t *testing.T) {
+	setupForecastTable(t)
+	orig := priceLoaders
+	defer func() { priceLoaders = orig }()
+
+	day := time.Date(2026, 11, 13, 0, 0, 0, 0, priceLocation())
+	mk := func(grain string, points int) func(context.Context, PriceRequest) (*TPriceForecastResult, error) {
+		return func(_ context.Context, req PriceRequest) (*TPriceForecastResult, error) {
+			res := &TPriceForecastResult{
+				Market:      "ahead",
+				Grain:       grain,
+				GeneratedOn: "2026-11-07",
+				Model:       "stub",
+				Unit:        "元/MWh",
+			}
+			for h := 0; h < points; h++ {
+				res.Points = append(res.Points, TPriceForecastPoint{
+					TargetTime: day.Add(time.Duration(h) * time.Hour),
+					Point:      100 + float64(h),
+				})
+			}
+			return res, nil
+		}
+	}
+	priceLoaders = map[string]func(context.Context, PriceRequest) (*TPriceForecastResult, error){
+		s_db_model.PriceSourceHome24h:    mk(s_db_model.ForecastGrainHour, 24),
+		s_db_model.PriceSourceSpotMetric: mk(s_db_model.ForecastGrainDay, 1),
+	}
+
+	if _, err := LoadPriceAny(context.Background(), PriceRequest{
+		Source: s_db_model.PriceSourceHome24h, Grain: s_db_model.ForecastGrainHour,
+	}); err != nil {
+		t.Fatalf("hour: %v", err)
+	}
+	if rows := readForecastRows(t); len(rows) != 0 {
+		t.Errorf("hour 页面请求写了 %d 行留痕，want 0（唯一来源是每日任务）", len(rows))
+	}
+
+	if _, err := LoadPriceAny(context.Background(), PriceRequest{
+		Source: s_db_model.PriceSourceSpotMetric, Grain: s_db_model.ForecastGrainDay,
+	}); err != nil {
+		t.Fatalf("day: %v", err)
+	}
+	if rows := readForecastRows(t); len(rows) != 1 {
+		t.Errorf("day 页面请求写了 %d 行留痕，want 1", len(rows))
 	}
 }
