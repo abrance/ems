@@ -126,6 +126,22 @@ export interface PriceForecast {
   inputChannels?: number
   missingDays: number
   timeMs: number
+  /** 仅 hour + compare：第二算法（modelman price-gbm / LightGBM）对同一目标日的预测 */
+  gbm?: GbmForecast
+  /** 对比算法不可用的原因（未配置/调用失败）。有它时 forecast 仍然有效 */
+  gbmError?: string
+}
+
+/** 第二算法结果，与 forecast 同构，可并排画也能逐点算误差 */
+export interface GbmForecast {
+  model: string
+  targetDate: string
+  /** 目标日距锚点天数 */
+  horizonDays: number
+  /** 送入的连续完整日数 */
+  historyDays: number
+  forecast: PriceForecastPoint[]
+  timeMs: number
 }
 
 /** GET /api/forecast/load → { forecast } */
@@ -169,6 +185,8 @@ export function fetchPriceForecast(
     horizonDays?: number
     quantiles?: string
     forceRefresh?: boolean
+    /** 仅 grain=hour：额外跑 GBM（price-gbm 服务）做算法对比 */
+    compare?: boolean
   },
   signal?: AbortSignal,
 ): Promise<PriceForecast> {

@@ -85,10 +85,17 @@ func loadHourCached(ctx context.Context, req PriceRequest) (*TPriceForecastResul
 
 	key := fmt.Sprintf("forecast:price:%s:%s:%s:%d:%s",
 		s_db_model.PriceSourceHome24h, req.Market, targetDate, historyDays, quantileKey(quantiles))
-	return withForecastCache(ctx, key, req.ForceRefresh, func(ctx context.Context) (*TPriceForecastResult, error) {
+	result, err := withForecastCache(ctx, key, req.ForceRefresh, func(ctx context.Context) (*TPriceForecastResult, error) {
 		client := s_forecast.NewClient(baseURL, forecastTimeout)
 		return loadPriceHourWith(ctx, client, defaultHourSeriesSource, req.Market, targetDate, historyDays, quantiles, loc, time.Now())
 	})
+	if err != nil || !req.Compare {
+		return result, err
+	}
+	// 对比放在缓存之外现算：GBM 每次毫秒级，没必要为它加一份缓存与失效口径。
+	// 对比失败只写 GBMError（见 attachGBM），TimesFM 的结果照常返回。
+	attachGBM(ctx, result, req.Market)
+	return result, nil
 }
 
 // normalizeTargetDate 目标日缺省为「今天」，格式必须 YYYY-MM-DD，且不能晚于今天。

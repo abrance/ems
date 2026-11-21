@@ -46,6 +46,12 @@ type TPriceForecastResult struct {
 	GeneratedOn string
 	// Recorded 本次写入留痕的条数；0 表示没写进去（已在日志里告警）
 	Recorded int
+	// GBM 仅 hour + compare 模式：第二算法（LightGBM）对同一目标日的 24 点预测。
+	// 与 Points 同构，供前端并排对比；为 nil 表示没请求对比或服务未配置。
+	GBM *TPriceForecastGBM
+	// GBMError 对比失败/未配置的原因。有这个字段就不该让整张图变空：
+	// 对比是附加信息，TimesFM 那半仍然可用。
+	GBMError string
 }
 
 // priceLoaders 数据源 → loader。测试可替换表项断言分派，不必起 HTTP。

@@ -21,6 +21,7 @@ type GetPriceForecastReq struct {
 	HorizonDays  int    `json:"horizonDays" dc:"预测天数，默认 5；intraday 上限 5；hour 忽略（步数由目标日与锚点推出）"`
 	Quantiles    string `json:"quantiles" dc:"分位点，逗号分隔，默认 0.1,0.5,0.9"`
 	ForceRefresh bool   `json:"forceRefresh" dc:"跳过缓存，手动刷新用"`
+	Compare      bool   `json:"compare" dc:"仅 grain=hour：额外跑 GBM（modelman price-gbm）做算法对比"`
 }
 
 // PriceForecastPoint 单点预测结果
@@ -60,6 +61,23 @@ type PriceForecast struct {
 	From           string    `json:"from" dc:"历史起点运行日"`
 	To             string    `json:"to" dc:"历史终点运行日"`
 	TimeMs         float64   `json:"timeMs" dc:"预测耗时（毫秒）"`
+	// GBM 仅 hour + compare：第二算法（LightGBM 分位回归）对同一目标日的 24 点预测。
+	GBM *PriceForecastGBM `json:"gbm,omitempty" dc:"第二算法预测（仅 hour + compare）"`
+	// GBMError 对比不可用的原因（未配置/调用失败）。有它时 TimesFM 结果仍然有效。
+	GBMError string `json:"gbmError,omitempty" dc:"对比算法不可用的原因"`
+}
+
+// PriceForecastGBM 第二算法（modelman price-gbm / LightGBM）的结果。
+//
+// 与 TimesFM 的 forecast 同构，前端可以并排画也能逐点算误差；分开一个对象是
+// 为了让"哪个模型出的数"在响应里不靠猜。
+type PriceForecastGBM struct {
+	Model       string                `json:"model" dc:"模型标识"`
+	TargetDate  string                `json:"targetDate" dc:"目标日 YYYY-MM-DD"`
+	HorizonDays int                   `json:"horizonDays" dc:"目标日距锚点天数"`
+	HistoryDays int                   `json:"historyDays" dc:"送入的连续完整日数"`
+	Forecast    []*PriceForecastPoint `json:"forecast" dc:"目标日 24 点预测，按整点升序"`
+	TimeMs      float64               `json:"timeMs" dc:"GBM 推理耗时（毫秒）"`
 }
 
 // GetPriceForecastRes 电价预测响应
