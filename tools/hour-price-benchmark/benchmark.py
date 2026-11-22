@@ -32,6 +32,12 @@ from datetime import date, timedelta
 import numpy as np
 import lightgbm as lgb
 import psycopg
+from scipy.stats import norm
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LassoCV
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 DB_LINK = os.environ.get(
     "EMS_DB_LINK", "postgresql://test:test123456@10.193.0.10:5432/ems-test")
@@ -42,11 +48,20 @@ QUANTILES = (0.1, 0.5, 0.9)
 HOLIDAYS = set()
 DAY_CACHE: dict[str, list[float]] = {}   # date -> [ahead_price x24]
 DAY_MEAN: dict[str, float] = {}          # date -> 全天均价
+DAY_CACHE_RT: dict[str, list[float]] = {}  # 实时价分支：date -> [realtime_price x24]
+DAY_MEAN_RT: dict[str, float] = {}         # 实时价分支：date -> 全天均价
+
 def build_caches(days):
     DAY_CACHE.clear(); DAY_MEAN.clear()
     for d, rows in days.items():
         DAY_CACHE[d] = [r[0] for r in rows]
         DAY_MEAN[d] = float(np.mean([r[0] for r in rows]))
+
+def build_caches_rt(days_rt):
+    DAY_CACHE_RT.clear(); DAY_MEAN_RT.clear()
+    for d, rows in days_rt.items():
+        DAY_CACHE_RT[d] = [r[1] for r in rows]  # 下标1 = realtime_price
+        DAY_MEAN_RT[d] = float(np.mean([r[1] for r in rows]))
 def _rng(a, b):
     d0, d1 = date.fromisoformat(a), date.fromisoformat(b)
     while d0 <= d1:
@@ -77,15 +92,36 @@ def load_days() -> dict[str, list[tuple[float, float]]]:
     return {d: [rows[h] for h in range(24)] for d, rows in byday.items() if len(rows) == 24}
 
 
-def features(days: dict[str, list[tuple[float, float]]], X: date, hour: int, H: int) -> list[float] | None:
-    """X 目标日、锚点 A = X-H。只用 ≤ A 的数据；缺失 lag 用 nan 让 LightGBM 自己分支。"""
+def load_days_rt() -> dict[str, list[tuple[float, float, float]]]:
+    """实时价方向分支专用：{date: [(ahead_price, realtime_price, power_mw) ×24 按小时升序]}。
+
+    只留完整 24 点日。下标含义：0=ahead, 1=realtime, 2=power。
+    原 load_days()（日前价 KPI）不动，两路口径互不污染。
+    """
+    conn = psycopg.connect(DB_LINK, connect_timeout=10)
+    cur = conn.cursor()
+    cur.execute("""SELECT price_date, hour, ahead_price, realtime_price, power_mw
+                   FROM gd_home_24h ORDER BY price_date, hour""")
+    byday: dict[str, dict[int, tuple[float, float, float]]] = {}
+    for d, h, a, r, w in cur.fetchall():
+        byday.setdefault(d, {})[h] = (float(a), float(r), float(w))
+    conn.close()
+    return {d: [rows[h] for h in range(24)] for d, rows in byday.items() if len(rows) == 24}
+
+
+def features(days, X: date, hour: int, H: int, price_col: int = 0, power_col: int = 1) -> list[float] | None:
+    """X 目标日、锚点 A = X-H。只用 ≤ A 的数据；缺失 lag 用 nan 让 LightGBM 自己分支。
+
+    price_col=0/power_col=1（默认）：日前价 KPI 口径，配 load_days() 的 (ahead, power)。
+    price_col=1/power_col=2：实时价方向分支，配 load_days_rt() 的 (ahead, realtime, power)。
+    """
     A = X - timedelta(days=H)
     s = days.get(A.isoformat())
     if s is None:
         return None
     nan = float("nan")
-    price = lambda d: days[d.isoformat()][hour][0] if d.isoformat() in days else nan
-    power = lambda d: days[d.isoformat()][hour][1] if d.isoformat() in days else nan
+    price = lambda d: days[d.isoformat()][hour][price_col] if d.isoformat() in days else nan
+    power = lambda d: days[d.isoformat()][hour][power_col] if d.isoformat() in days else nan
 
     lags = [price(A - timedelta(days=k)) for k in (0, 1, 2, 7, 14)]
     # 同小时滚动统计（7/30 天，含 A）
@@ -95,36 +131,38 @@ def features(days: dict[str, list[tuple[float, float]]], X: date, hour: int, H: 
         arr = np.array([v for v in seq if v == v], dtype=float)
         roll += [float(arr.mean()) if arr.size else nan, float(arr.std()) if arr.size else nan]
     # 锚点日全天形态（24 点 min/max/mean）与电量
-    prices_a = np.array([s[h][0] for h in range(24)])
-    power_a = np.array([s[h][1] for h in range(24)])
+    prices_a = np.array([s[h][price_col] for h in range(24)])
+    power_a = np.array([s[h][power_col] for h in range(24)])
     daystat = [prices_a.min(), prices_a.max(), prices_a.mean(),
                float(power_a.mean()), power(A)]
     # 同星期几多周同小时均值（近 4 个，≤ A）——查表 O(1)
+    # 实时价分支用独立缓存，避免与日前价 DAY_CACHE/DAY_MEAN 混算。
+    cache, mean_cache = (DAY_CACHE_RT, DAY_MEAN_RT) if price_col == 1 else (DAY_CACHE, DAY_MEAN)
     dows = []
     cur, k = A, 0
     while len(dows) < 4 and k < 35:
         if cur.weekday() == X.weekday():
-            dc = DAY_CACHE.get(cur.isoformat())
+            dc = cache.get(cur.isoformat())
             if dc is not None:
                 dows.append(dc[hour])
         cur -= timedelta(days=1)
         k += 1
     dow_mean = float(np.mean(dows)) if dows else nan
     # 日级趋势：近 3 天日均 / 近 10 天日均——查表 O(1)
-    short = [DAY_MEAN.get((A - timedelta(days=k)).isoformat(), nan) for k in range(3)]
-    long_ = [DAY_MEAN.get((A - timedelta(days=k)).isoformat(), nan) for k in range(10)]
+    short = [mean_cache.get((A - timedelta(days=k)).isoformat(), nan) for k in range(3)]
+    long_ = [mean_cache.get((A - timedelta(days=k)).isoformat(), nan) for k in range(10)]
     ls, ll = np.nanmean(short), np.nanmean(long_)
     trend = float(ls / ll) if ll not in (0.0, nan) else nan
     # 形状：锚点日该小时占全天均价比例
     mean_a = prices_a.mean()
-    shape = s[hour][0] / mean_a if mean_a else nan
+    shape = s[hour][price_col] / mean_a if mean_a else nan
     dow = X.weekday()
     cal = [hour, dow, X.month, 1.0 if dow >= 5 else 0.0,
            1.0 if X.isoformat() in HOLIDAYS else 0.0]
     return lags + roll + daystat + cal + [dow_mean, trend, shape]
 
 
-def build_matrix(days: dict[str, list[tuple[float, float]]], targets: list[date], H: int):
+def build_matrix(days, targets: list[date], H: int, price_col: int = 0, power_col: int = 1):
     Xs, ys = [], []
     have_days = []
     for X in targets:
@@ -133,11 +171,11 @@ def build_matrix(days: dict[str, list[tuple[float, float]]], targets: list[date]
             continue
         day_rows = 0
         for h in range(24):
-            f = features(days, X, h, H)
+            f = features(days, X, h, H, price_col=price_col, power_col=power_col)
             if f is None:
                 break
             Xs.append(f)
-            ys.append(rows[h][0])
+            ys.append(rows[h][price_col])
             day_rows += 1
         if day_rows == 24:
             have_days.append(X)
@@ -277,7 +315,229 @@ def run_timesfm(days, eval_targets, H, workers):
         q10 = np.array([v for d in ev_dates for v in results[d]["q10"]])
         q90 = np.array([v for d in ev_dates for v in results[d]["q90"]])
         out["timesfm-3.0"]["覆盖%"] = coverage(q10, q90, yev)
+    by_date = {d: {"median": np.array(results[d]["median"]),
+                   "q10": np.array(results[d]["q10"]) if results[d]["q10"] else None,
+                   "q90": np.array(results[d]["q90"]) if results[d]["q90"] else None}
+               for d in ev_dates}
+    return out, by_date
+
+
+# ---------------------------------------------------------------------------
+# LEAR 基线 + 验证集加权融合 + DM 检验 + 实时-日前方向准确率
+# ---------------------------------------------------------------------------
+
+def _train_eval_split(days, eval_targets, H, price_col=0, power_col=1):
+    """训练窗 = eval0 之前所有天；评估窗 = eval_targets。返回 build_matrix 三件套。"""
+    all_days = sorted(date.fromisoformat(d) for d in days)
+    eval0 = eval_targets[0]
+    train_targets = [d for d in all_days if d < eval0]
+    Xtr, ytr, _ = build_matrix(days, train_targets, H, price_col, power_col)
+    Xev, yev, ev_dates = build_matrix(days, eval_targets, H, price_col, power_col)
+    return Xtr, ytr, Xev, yev, ev_dates
+
+
+def run_lear(days, eval_targets, H):
+    """LEAR/LASSO 强基线（Lago et al. 2021）。点预测 + 残差经验分位带。
+
+    与 run_lightgbm 同特征、同训练窗、同 KPI 口径，可同台对比。
+    分位带非模型原生：取训练残差 0.1/0.9 经验分位作固定偏移（已在 README 标注）。
+    """
+    Xtr, ytr, Xev, yev, ev_dates = _train_eval_split(days, eval_targets, H)
+    per_day = np.array([np.mean([days[d.isoformat()][h][0] for h in range(24)]) for d in ev_dates])
+    pipe = make_pipeline(
+        SimpleImputer(strategy="median"),
+        StandardScaler(),
+        LassoCV(cv=TimeSeriesSplit(n_splits=3), max_iter=5000, random_state=0),
+    )
+    pipe.fit(Xtr, ytr)
+    pred = pipe.predict(Xev)
+    resid = ytr - pipe.predict(Xtr)
+    off_lo, off_hi = np.quantile(resid, [0.1, 0.9])
+    preds = {0.5: pred, 0.1: pred + off_lo, 0.9: pred + off_hi}
+    res = {"lear": kpi(pred, yev, ev_dates, per_day)}
+    res["lear"]["覆盖%"] = coverage(preds[0.1], preds[0.9], yev)
+    return res, preds, yev, ev_dates, per_day
+
+
+def by_date_from_preds(preds, ev_dates):
+    """把 {q: 扁平数组} 转成 {date: {median,q10,q90}}，供融合按日对齐。"""
+    out = {}
+    med = preds.get(0.5, preds.get("0.5"))
+    lo = preds.get(0.1, preds.get("0.1"))
+    hi = preds.get(0.9, preds.get("0.9"))
+    for i, d in enumerate(ev_dates):
+        s, e = i * 24, (i + 1) * 24
+        out[d] = {
+            "median": np.array(med[s:e]),
+            "q10": np.array(lo[s:e]) if lo is not None else None,
+            "q90": np.array(hi[s:e]) if hi is not None else None,
+        }
     return out
+
+
+def run_fusion(model_by_date, days, valid_days):
+    """验证集加权融合。权重 = 验证段各模型 MAE 逆误差归一化；测试段评估。
+
+    model_by_date: {name: {date: {median,q10,q90}}}
+    只学权重于验证段（前 valid_days 天），测试段（其余）评估，避免信息泄漏。
+    """
+    all_dates = sorted(d for m in model_by_date.values() for d in m)
+    valid = set(all_dates[:valid_days])
+    test = all_dates[valid_days:]
+    if not test:
+        return None
+    names = list(model_by_date)
+    common_valid = sorted(set.intersection(*[set(m) for m in model_by_date.values()]) & valid)
+
+    def flatten(values):
+        return np.array([v for arr in values for v in arr], dtype=float)
+
+    # 验证段 MAE → 权重
+    maes = {}
+    for name in names:
+        bd = model_by_date[name]
+        pv = flatten([bd[d]["median"] for d in common_valid])
+        av = flatten([[days[d.isoformat()][h][0] for h in range(24)] for d in common_valid])
+        maes[name] = float(np.mean(np.abs(pv - av))) if len(pv) else float("inf")
+    inv = {n: 1.0 / max(v, 1e-9) for n, v in maes.items()}
+    tot = sum(inv.values())
+    weights = {n: inv[n] / tot for n in names}
+
+    # 测试段：各模型日期交集
+    common_test = sorted(set.intersection(*[set(m) for m in model_by_date.values()]) & set(test))
+
+    def blend(w):
+        fused = {}
+        for d in common_test:
+            med = sum(w[n] * np.asarray(model_by_date[n][d]["median"], float) for n in names)
+            lo_parts = [w[n] * np.asarray(model_by_date[n][d]["q10"], float)
+                        for n in names if model_by_date[n][d].get("q10") is not None]
+            hi_parts = [w[n] * np.asarray(model_by_date[n][d]["q90"], float)
+                        for n in names if model_by_date[n][d].get("q90") is not None]
+            fused[d] = {
+                "median": med,
+                "q10": sum(lo_parts) if lo_parts else None,
+                "q90": sum(hi_parts) if hi_parts else None,
+            }
+        return fused
+
+    fused = blend(weights)
+    eq = {n: 1.0 / len(names) for n in names}
+    fused_eq = blend(eq)
+
+    def kpi_of(f):
+        pred = np.concatenate([f[d]["median"] for d in common_test])
+        act = np.concatenate([[days[d.isoformat()][h][0] for h in range(24)] for d in common_test])
+        per = np.array([np.mean([days[d.isoformat()][h][0] for h in range(24)]) for d in common_test])
+        return kpi(pred, act, common_test, per)
+
+    res = kpi_of(fused)
+    if all(fused[d]["q10"] is not None and fused[d]["q90"] is not None for d in common_test):
+        q10 = np.concatenate([fused[d]["q10"] for d in common_test])
+        q90 = np.concatenate([fused[d]["q90"] for d in common_test])
+        act = np.concatenate([[days[d.isoformat()][h][0] for h in range(24)] for d in common_test])
+        res["覆盖%"] = coverage(q10, q90, act)
+    return {
+        "weights": weights, "equal_weights": eq, "maes": maes,
+        "kpi": res, "equal_kpi": kpi_of(fused_eq),
+        "fused_by_date": fused, "valid_days": len(common_valid),
+        "test_days": len(common_test), "abs_err": (
+            np.abs(np.concatenate([fused[d]["median"] for d in common_test]) -
+                   np.concatenate([[days[d.isoformat()][h][0] for h in range(24)] for d in common_test])),
+            common_test,
+        ),
+    }
+
+
+def dm_test(e1, e2):
+    """Diebold–Mariano 检验（平方损失差的正态近似，无 HAC 修正）。e 为绝对误差数组。"""
+    d = np.asarray(e1, float) ** 2 - np.asarray(e2, float) ** 2
+    n = len(d)
+    if n < 2:
+        return {"dm": None, "p": None}
+    var = d.var(ddof=1)
+    if var == 0:
+        return {"dm": 0.0, "p": 1.0}
+    dm = float(d.mean() / np.sqrt(var / n))
+    return {"dm": round(dm, 3), "p": round(float(2 * (1 - norm.cdf(abs(dm)))), 4)}
+
+
+def directional_accuracy(pred_rt, actual_rt, actual_da, eps=0.5):
+    """严格实时-日前价差方向准确率（用户公式）。
+
+    D_i = sign(pred_rt_i − actual_da_i)（|差|<eps 判 0）；
+    score = Σ D_i·(actual_rt_i − actual_da_i) / Σ |actual_rt_i − actual_da_i|。
+    """
+    pred_rt = np.asarray(pred_rt, float)
+    actual_rt = np.asarray(actual_rt, float)
+    actual_da = np.asarray(actual_da, float)
+    spread = actual_rt - actual_da
+    diff = pred_rt - actual_da
+    D = np.where(diff > eps, 1, np.where(diff < -eps, -1, 0))
+    denom = float(np.abs(spread).sum())
+    if denom == 0:
+        return float("nan")
+    return float((D * spread).sum() / denom)
+
+
+def predict_realtime_by_model(days_rt, eval_targets, H, kind):
+    """以实时价为目标训练并预测，返回 {date: 实时价点预测数组(24)}。
+
+    kind='lightgbm'（分位回归中位数）或 'lear'（LASSO）。复用同一套 as-of 特征，
+    price_col=1/realtime, power_col=2（load_days_rt 三列结构）。
+    """
+    Xtr, ytr, Xev, yev, ev_dates = _train_eval_split(days_rt, eval_targets, H, price_col=1, power_col=2)
+    if kind == "lightgbm":
+        m = lgb.train({"objective": "regression", "verbosity": -1, "num_leaves": 63,
+                       "learning_rate": 0.05, "min_data_in_leaf": 50, "num_threads": 1},
+                      lgb.Dataset(Xtr, ytr), num_boost_round=500)
+        pred = m.predict(Xev)
+    elif kind == "lear":
+        pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(),
+                             LassoCV(cv=TimeSeriesSplit(n_splits=3), max_iter=5000, random_state=0))
+        pipe.fit(Xtr, ytr)
+        pred = pipe.predict(Xev)
+    else:
+        raise ValueError("unknown kind: " + kind)
+    return {d: np.array(pred[i * 24:(i + 1) * 24]) for i, d in enumerate(ev_dates)}
+
+
+def run_realtime_direction(days_rt, eval_targets, H, kinds, fusion_weights=None, skip_timesfm=True):
+    """各模型（+融合）的实时-日前价差方向准确率。ref = 目标日已发布日前价。"""
+    scores = {}
+    rt_by_model = {}
+    for kind in kinds:
+        bd = predict_realtime_by_model(days_rt, eval_targets, H, kind)
+        rt_by_model[kind] = bd
+        preds, acts_rt, acts_da = [], [], []
+        for d in sorted(bd):
+            if d.isoformat() not in days_rt:
+                continue
+            preds.extend(bd[d])
+            acts_rt.extend([days_rt[d.isoformat()][h][1] for h in range(24)])
+            acts_da.extend([days_rt[d.isoformat()][h][0] for h in range(24)])
+        scores[kind] = directional_accuracy(preds, acts_rt, acts_da) if preds else float("nan")
+
+    # 融合方向分：用日 KPI 学出的权重融合各模型实时价预测
+    if fusion_weights and len(kinds) > 1:
+        common = set.intersection(*[set(rt_by_model[k]) for k in kinds])
+        preds, acts_rt, acts_da = [], [], []
+        for d in sorted(common):
+            if d.isoformat() not in days_rt:
+                continue
+            fused_rt = sum(fusion_weights.get(k, 0) * rt_by_model[k][d] for k in kinds
+                           if k in fusion_weights)
+            preds.extend(fused_rt)
+            acts_rt.extend([days_rt[d.isoformat()][h][1] for h in range(24)])
+            acts_da.extend([days_rt[d.isoformat()][h][0] for h in range(24)])
+        if preds:
+            scores["fusion"] = directional_accuracy(preds, acts_rt, acts_da)
+    return scores
+
+
+def _fmt_kpi(v):
+    cov = f" 覆盖={v['覆盖%']}%" if "覆盖%" in v else ""
+    return f"MAE={v['MAE']:7.1f} RMSE={v['RMSE']:7.1f} MAPE={v['MAPE%']:6.2f}%{cov}"
 
 
 def main():
@@ -286,28 +546,114 @@ def main():
     ap.add_argument("--horizons", default="1,8")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--skip-timesfm", action="store_true")
+    ap.add_argument("--skip-lear", action="store_true")
+    ap.add_argument("--skip-fusion", action="store_true")
+    ap.add_argument("--valid-days", type=int, default=30,
+                    help="融合权重学习用的验证段天数（评估窗前 N 天），其余为测试段")
+    ap.add_argument("--export-report", default=None, help="导出 JSON 报告路径")
+    ap.add_argument("--skip-direction-timesfm", action="store_true",
+                    help="方向准确率分支不跑 TimesFM（少打很多 HTTP；默认跑）")
     args = ap.parse_args()
 
     days = load_days()
     build_caches(days)
+    need_rt = not (args.skip_lear and args.skip_fusion)  # 方向分支始终需要
+    days_rt = load_days_rt() if need_rt else None
+    if days_rt is not None:
+        build_caches_rt(days_rt)
     all_days = sorted(date.fromisoformat(d) for d in days)
     eval_targets = all_days[-args.eval_days:]
-    print(f"完整日 {len(all_days)}（{all_days[0]} ~ {all_days[-1]}），评估窗口 {eval_targets[0]} ~ {eval_targets[-1]} 共 {len(eval_targets)} 天")
+    print(f"完整日 {len(all_days)}（{all_days[0]} ~ {all_days[-1]}），评估窗口 "
+          f"{eval_targets[0]} ~ {eval_targets[-1]} 共 {len(eval_targets)} 天")
+
+    report = {"eval_days": args.eval_days, "valid_days": args.valid_days,
+              "horizons": {}, "note": "方向准确率为严格实时-日前口径，与日前价KPI分开呈现"}
 
     for H in [int(x) for x in args.horizons.split(",")]:
         print(f"\n=== H={H}（锚点 = 目标日前 {H} 天）===")
+        hrep = {"day_kpi": {}, "weights": {}, "dm": {}, "direction": {}}
+        report["horizons"][str(H)] = hrep
+
+        # ---- 日前价 KPI（分区一）----
+        print("  --- 日前价预测精度 KPI ---")
         naives, _, _, _ = run_naives(days, eval_targets, H)
         for k, v in naives.items():
-            print(f"  {k:14s} MAE={v['MAE']:7.1f} RMSE={v['RMSE']:7.1f} MAPE={v['MAPE%']:6.2f}%")
-        lgb_res, _, _, _, _ = run_lightgbm(days, eval_targets, H)
+            print(f"  {k:14s} {_fmt_kpi(v)}")
+            hrep["day_kpi"][k] = v
+        lgb_res, lgb_preds, lgb_yev, lgb_dates, lgb_per = run_lightgbm(days, eval_targets, H)
         for k, v in lgb_res.items():
-            print(f"  {k:14s} MAE={v['MAE']:7.1f} RMSE={v['RMSE']:7.1f} MAPE={v['MAPE%']:6.2f}% 覆盖={v['覆盖%']}%")
+            print(f"  {k:14s} {_fmt_kpi(v)}")
+            hrep["day_kpi"][k] = v
+        tf_res, tf_by_date = None, None
         if not args.skip_timesfm:
-            tf = run_timesfm(days, eval_targets, H, args.workers)
-            for k, v in tf.items():
-                cov = f" 覆盖={v.get('覆盖%', '-')}%" if "覆盖%" in v else ""
-                print(f"  {k:14s} MAE={v['MAE']:7.1f} RMSE={v['RMSE']:7.1f} MAPE={v['MAPE%']:6.2f}%{cov}")
-    print("\n注：lightgbm/naive 特征只用 ≤ 锚点数据；timesfm 输入锚点及以前全部点（4096 点内）。")
+            tf_res, tf_by_date = run_timesfm(days, eval_targets, H, args.workers)
+            for k, v in tf_res.items():
+                print(f"  {k:14s} {_fmt_kpi(v)}")
+                hrep["day_kpi"][k] = v
+
+        model_by_date = {"lightgbm": by_date_from_preds(lgb_preds, lgb_dates)}
+        if tf_by_date is not None:
+            model_by_date["timesfm-3.0"] = tf_by_date
+
+        if not args.skip_lear:
+            ler_res, ler_preds, ler_yev, ler_dates, ler_per = run_lear(days, eval_targets, H)
+            for k, v in ler_res.items():
+                print(f"  {k:14s} {_fmt_kpi(v)}")
+                hrep["day_kpi"][k] = v
+            model_by_date["lear"] = by_date_from_preds(ler_preds, ler_dates)
+
+        fusion = None
+        if not args.skip_fusion and len(model_by_date) >= 2:
+            fusion = run_fusion(model_by_date, days, args.valid_days)
+            if fusion:
+                print(f"  fusion        {_fmt_kpi(fusion['kpi'])}  (验证 {fusion['valid_days']}天/测试 {fusion['test_days']}天)")
+                print(f"  等权对照      {_fmt_kpi(fusion['equal_kpi'])}")
+                print(f"  融合权重: " + ", ".join(f"{n}={w:.3f}" for n, w in fusion["weights"].items()))
+                hrep["day_kpi"]["fusion"] = fusion["kpi"]
+                hrep["day_kpi"]["fusion_equal"] = fusion["equal_kpi"]
+                hrep["weights"] = fusion["weights"]
+                hrep["maes"] = fusion["maes"]
+
+                # DM 检验：融合 vs 单模型中验证 MAE 最低者（测试段）
+                best = min(fusion["maes"], key=fusion["maes"].get)
+                best_by_date = model_by_date[best]
+                common = fusion["abs_err"][1]
+                e2 = np.concatenate([
+                    np.abs(best_by_date[d]["median"] - np.array(
+                        [days[d.isoformat()][hh][0] for hh in range(24)]))
+                    for d in common
+                ])
+                dm = dm_test(fusion["abs_err"][0], e2)
+                hrep["dm"] = {"vs": best, **dm}
+                print(f"  DM 检验(融合 vs {best}): DM={dm['dm']} p={dm['p']}")
+
+        # ---- 实时-日前价差方向准确率（分区二）----
+        if days_rt is not None:
+            print("  --- 实时-日前价差方向准确率（ref=目标日日前价）---")
+            kinds = []
+            if not args.skip_lear:
+                kinds.append("lear")
+            kinds.append("lightgbm")
+            if not args.skip_timesfm and not args.skip_direction_timesfm:
+                kinds.append("timesfm-3.0")
+            fuse_w = fusion["weights"] if (fusion and "timesfm-3.0" not in kinds) else None
+            if fuse_w is not None:
+                # 权重键与方向分支 kind 对齐（方向分支只用非-timesfm 模型时键一致）
+                fuse_w = {k: v for k, v in fuse_w.items() if k in kinds}
+                tot = sum(fuse_w.values()) if fuse_w else 0
+                fuse_w = {k: v / tot for k, v in fuse_w.items()} if tot else None
+            scores = run_realtime_direction(days_rt, eval_targets, H, kinds,
+                                            fusion_weights=fuse_w)
+            for k, v in scores.items():
+                print(f"  {k:14s} 方向准确率={v:+.3f}")
+                hrep["direction"][k] = v
+
+    print("\n注：lightgbm/lear/naive 特征只用 ≤ 锚点数据；timesfm 输入锚点及以前全部点（4096 点内）。")
+    print("    方向准确率为严格实时-日前口径，与日前价 KPI 分开呈现，不混算。")
+    if args.export_report:
+        with open(args.export_report, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+        print(f"报告已导出: {args.export_report}")
 
 
 if __name__ == "__main__":
