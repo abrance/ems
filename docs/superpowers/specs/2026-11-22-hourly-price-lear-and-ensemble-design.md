@@ -66,8 +66,12 @@ naive_d1 / naive_weekly / timesfm-3.0 / lightgbm，指标 MAE/RMSE/MAPE + q10-q9
 - `directional_accuracy(pred_rt, actual_rt, actual_da)`：严格复现用户公式——
   `D_i = sign(pred_rt_i − actual_da_i)`（目标日日前价为 ref），
   `score = Σ D_i·(actual_rt_i − actual_da_i) / Σ |actual_rt_i − actual_da_i|`。
-- 实时价预测分支：新增 `run_realtime_direction()`，对 eval_targets 各模型产出目标日**实时价**点预测，
-  喂给 directional_accuracy。日前价 KPI 与实时方向准确率分开呈现，不混算。
+- 实时价预测分支：新增 `run_realtime_direction()`，对 eval_targets 各模型（LEAR / lightgbm /
+  timesfm，按 `--skip-*` 开关取可用者）以**实时价为目标**、复用同一套 `features()` 重新训练，
+  产出目标日实时价点预测 `pred_rt`；再按验证段权重融合出融合模型的 `pred_rt`。
+  **方向准确率按模型分别报告**（LEAR / lightgbm / timesfm / 融合各一行），以便横向比较谁更能判断
+  实时-日前价差方向——这是与「多模型对比」目标一致的解法。
+  日前价 KPI 与实时方向准确率分开呈现，不混算。
   阈值 `D=0`（pred 与 da 相等）的判定：用 `|pred−da| < eps`（eps 默认 0.5 元）判 0。
 
 ## 7. 改动文件
