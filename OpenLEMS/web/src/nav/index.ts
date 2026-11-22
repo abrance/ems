@@ -98,6 +98,7 @@ export const NAV: NavTab[] = [
     pages: [
       { key: 'decision', title: '决策支持', path: '/scene/decision', status: 'ready' },
       { key: 'review', title: '预测复盘', path: '/scene/review', status: 'ready' },
+      { key: 'algoReview', title: '算法回测', path: '/scene/algo-review', status: 'ready' },
       {
         key: 'inference',
         title: '策略反演',

@@ -15,4 +15,6 @@ type IForecastV1 interface {
 	GetPriceForecast(ctx context.Context, req *v1.GetPriceForecastReq) (res *v1.GetPriceForecastRes, err error)
 	GetRecordedForecast(ctx context.Context, req *v1.GetRecordedForecastReq) (res *v1.GetRecordedForecastRes, err error)
 	GetPriceBacktest(ctx context.Context, req *v1.GetPriceBacktestReq) (res *v1.GetPriceBacktestRes, err error)
+	GetAlgoReview(ctx context.Context, req *v1.GetAlgoReviewReq) (res *v1.GetAlgoReviewRes, err error)
+	PostAlgoReviewRun(ctx context.Context, req *v1.PostAlgoReviewRunReq) (res *v1.PostAlgoReviewRunRes, err error)
 }
