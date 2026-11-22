@@ -66,10 +66,13 @@ func setupAlgoReviewDB(t *testing.T) context.Context {
 func seedAlgoReviewDay(t *testing.T, ctx context.Context, date string, base float64) {
 	t.Helper()
 	for h := 0; h < 24; h++ {
-		for _, algo := range []string{"timesfm", "gbm"} {
+		for _, algo := range []string{"timesfm", "gbm", "lear"} {
 			offset := 0.0
-			if algo == "gbm" {
+			switch algo {
+			case "gbm":
 				offset = 10
+			case "lear":
+				offset = 20
 			}
 			p := base + float64(h) + offset
 			_, err := g.DB().Exec(ctx, `INSERT INTO gd_price_forecast
@@ -104,10 +107,10 @@ func TestGetAlgoReviewAgainstSQLite(t *testing.T) {
 	if res.Market != "ahead" || res.Unit != "元/兆瓦时" {
 		t.Errorf("market/unit = %s/%s", res.Market, res.Unit)
 	}
-	if len(res.Summary) != 3 {
-		t.Fatalf("summary 数量 = %d, want 3", len(res.Summary))
+	if len(res.Summary) != 4 {
+		t.Fatalf("summary 数量 = %d, want 4", len(res.Summary))
 	}
-	for _, name := range []string{"timesfm", "gbm", "fusion"} {
+	for _, name := range []string{"timesfm", "gbm", "lear", "fusion"} {
 		found := false
 		for _, s := range res.Summary {
 			if s.Algo != name {
@@ -130,8 +133,8 @@ func TestGetAlgoReviewAgainstSQLite(t *testing.T) {
 			t.Errorf("summary 缺少 %s", name)
 		}
 	}
-	if len(res.Detail) != 72 { // 3 算法 × 24 点
-		t.Errorf("detail 数量 = %d, want 72", len(res.Detail))
+	if len(res.Detail) != 96 { // 4 算法 × 24 点
+		t.Errorf("detail 数量 = %d, want 96", len(res.Detail))
 	}
 	if res.DataAsOf != "2026-11-11" || res.LagDays < 0 {
 		t.Errorf("dataAsOf/lagDays = %s/%d", res.DataAsOf, res.LagDays)

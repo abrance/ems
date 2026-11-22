@@ -52,6 +52,11 @@ type TPriceForecastResult struct {
 	// GBMError 对比失败/未配置的原因。有这个字段就不该让整张图变空：
 	// 对比是附加信息，TimesFM 那半仍然可用。
 	GBMError string
+	// LEAR 仅 hour + compare 模式：第三算法（Lasso 线性回归强基线）的 24 点预测。
+	// 与 GBM 同构；为 nil 表示没请求对比或服务未配置。
+	LEAR *TPriceForecastLEAR
+	// LEARError 对比失败/未配置的原因；与 GBMError 同样只告警不挡主结果。
+	LEARError string
 }
 
 // priceLoaders 数据源 → loader。测试可替换表项断言分派，不必起 HTTP。

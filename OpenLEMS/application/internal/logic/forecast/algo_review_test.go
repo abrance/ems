@@ -41,8 +41,10 @@ func TestBuildAlgoReviewBasic(t *testing.T) {
 	rows := make([]*s_db_model.SPriceForecastModel, 0, 96)
 	rows = append(rows, fullDay(t, s_db_model.ForecastAlgoTimesFM, "2026-11-09", "2026-11-10", 100, 0)...)
 	rows = append(rows, fullDay(t, s_db_model.ForecastAlgoGBM, "2026-11-09", "2026-11-10", 100, 10)...)
+	rows = append(rows, fullDay(t, s_db_model.ForecastAlgoLEAR, "2026-11-09", "2026-11-10", 100, 20)...)
 	rows = append(rows, fullDay(t, s_db_model.ForecastAlgoTimesFM, "2026-11-10", "2026-11-11", 200, 0)...)
 	rows = append(rows, fullDay(t, s_db_model.ForecastAlgoGBM, "2026-11-10", "2026-11-11", 200, 10)...)
+	rows = append(rows, fullDay(t, s_db_model.ForecastAlgoLEAR, "2026-11-10", "2026-11-11", 200, 20)...)
 
 	actual := map[string]map[int]float64{
 		"2026-11-10": {},
@@ -59,8 +61,8 @@ func TestBuildAlgoReviewBasic(t *testing.T) {
 	}
 	got := BuildAlgoReview(rows, actual, "2026-11-10", "2026-11-11", "元/兆瓦时", algos, "")
 
-	if len(got.Summary) != 3 {
-		t.Fatalf("summary 数量 = %d, want 3", len(got.Summary))
+	if len(got.Summary) != 4 {
+		t.Fatalf("summary 数量 = %d, want 4", len(got.Summary))
 	}
 	byAlgo := map[string]*SAlgoReviewSummary{}
 	for _, s := range got.Summary {
@@ -83,6 +85,11 @@ func TestBuildAlgoReviewBasic(t *testing.T) {
 		t.Fatalf("gbm = %+v", gbm)
 	}
 
+	lear := byAlgo[s_db_model.ForecastAlgoLEAR]
+	if lear == nil || lear.Pairs != 48 || math.Abs(lear.MAE-15) > 1e-9 {
+		t.Fatalf("lear = %+v, want pairs=48 MAE=15", lear)
+	}
+
 	fusion := byAlgo[AlgoFusion]
 	if fusion == nil || fusion.Days != 2 || fusion.Pairs != 48 {
 		t.Fatalf("fusion = %+v", fusion)
@@ -94,11 +101,11 @@ func TestBuildAlgoReviewBasic(t *testing.T) {
 		t.Errorf("fusion coverage = %v, want nil（融合没有分位带）", *fusion.Coverage)
 	}
 
-	if len(got.Daily) != 6 { // 3 算法 × 2 天
-		t.Errorf("daily 行数 = %d, want 6", len(got.Daily))
+	if len(got.Daily) != 8 { // 4 算法 × 2 天
+		t.Errorf("daily 行数 = %d, want 8", len(got.Daily))
 	}
-	if len(got.Hourly) != 3*24 {
-		t.Errorf("hourly 行数 = %d, want %d", len(got.Hourly), 3*24)
+	if len(got.Hourly) != 4*24 {
+		t.Errorf("hourly 行数 = %d, want %d", len(got.Hourly), 4*24)
 	}
 	if got.Dropped.NoActual != 0 || got.Dropped.Backfilled != 0 || got.Dropped.IncompleteDay != 0 {
 		t.Errorf("dropped = %+v, want 全 0", got.Dropped)
@@ -191,14 +198,14 @@ func TestBuildAlgoReviewUsesLatestRunPerPoint(t *testing.T) {
 
 func TestParseAlgos(t *testing.T) {
 	all, err := ParseAlgos("")
-	if err != nil || len(all) != 3 || all[0] != s_db_model.ForecastAlgoTimesFM {
+	if err != nil || len(all) != 4 || all[0] != s_db_model.ForecastAlgoTimesFM {
 		t.Fatalf("默认算法 = %v, err=%v", all, err)
 	}
-	got, err := ParseAlgos("FUSION, gbm,timesfm,gbm")
+	got, err := ParseAlgos("FUSION, gbm,timesfm,lear,gbm")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{s_db_model.ForecastAlgoTimesFM, s_db_model.ForecastAlgoGBM, AlgoFusion}
+	want := []string{s_db_model.ForecastAlgoTimesFM, s_db_model.ForecastAlgoGBM, s_db_model.ForecastAlgoLEAR, AlgoFusion}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("ParseAlgos = %v, want %v（去重且固定顺序）", got, want)
 	}

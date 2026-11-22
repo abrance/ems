@@ -4,7 +4,7 @@ import "github.com/gogf/gf/v2/frame/g"
 
 // GetAlgoReviewReq 小时电价预测算法回测（只读留痕，不重跑模型）。
 //
-// 口径：读 gd_price_forecast 里 grain=hour 的**当时留痕**，按 algo（timesfm / gbm）
+// 口径：读 gd_price_forecast 里 grain=hour 的**当时留痕**，按 algo（timesfm / gbm / lear）
 // 分组，与实际值（gd_home_24h 的 ahead_price / realtime_price）逐点配对。
 // 融合（fusion）= 同一目标时刻两个算法点预测的均值，展示时实时计算，不落库。
 type GetAlgoReviewReq struct {
@@ -12,14 +12,14 @@ type GetAlgoReviewReq struct {
 	From   string `json:"from" v:"required" dc:"目标日起点 YYYY-MM-DD"`
 	To     string `json:"to" v:"required" dc:"目标日终点 YYYY-MM-DD，跨度上限 366 天"`
 	Market string `json:"market" dc:"ahead（默认）/ real"`
-	Algos  string `json:"algos" dc:"算法，逗号分隔：timesfm,gbm,fusion；缺省全部"`
+	Algos  string `json:"algos" dc:"算法，逗号分隔：timesfm,gbm,lear,fusion；缺省全部"`
 	// Date 非空时额外返回该目标日的 24 点明细（逐算法预测 vs 实际），供页面点某天查看。
 	Date string `json:"date" dc:"可选：返回该目标日的 24 点明细 YYYY-MM-DD"`
 }
 
 // AlgoReviewSummary 单个算法在区间内的汇总指标。
 type AlgoReviewSummary struct {
-	Algo         string   `json:"algo" dc:"timesfm / gbm / fusion"`
+	Algo         string   `json:"algo" dc:"timesfm / gbm / lear / fusion"`
 	Label        string   `json:"label" dc:"展示名"`
 	Days         int      `json:"days" dc:"有可配对点的目标日数"`
 	Pairs        int      `json:"pairs" dc:"可配对的预测点数"`

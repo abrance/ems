@@ -92,9 +92,10 @@ func loadHourCached(ctx context.Context, req PriceRequest) (*TPriceForecastResul
 	if err != nil || !req.Compare {
 		return result, err
 	}
-	// 对比放在缓存之外现算：GBM 每次毫秒级，没必要为它加一份缓存与失效口径。
-	// 对比失败只写 GBMError（见 attachGBM），TimesFM 的结果照常返回。
+	// 对比放在缓存之外现算：GBM/LEAR 每次毫秒级，没必要为它们加一份缓存与失效口径。
+	// 对比失败只写 GBMError/LEARError（见 attachGBM/attachLEAR），TimesFM 的结果照常返回。
 	attachGBM(ctx, result, req.Market)
+	attachLEAR(ctx, result, req.Market)
 	return result, nil
 }
 

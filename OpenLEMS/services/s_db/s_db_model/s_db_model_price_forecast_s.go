@@ -34,6 +34,7 @@ const (
 const (
 	ForecastAlgoTimesFM = "timesfm"
 	ForecastAlgoGBM     = "gbm"
+	ForecastAlgoLEAR    = "lear"
 )
 
 // 电价预测的数据源。粒度与数据源不是一回事：同一份数据只能出一种粒度，
@@ -58,7 +59,7 @@ type SPriceForecastModel struct {
 	GeneratedOn string      `json:"generatedOn" orm:"generated_on"` // 生成日 YYYY-MM-DD
 	Market      string      `json:"market" orm:"market"`            // ahead / real
 	Grain       string      `json:"grain" orm:"grain"`              // day / hour / intraday
-	Algo        string      `json:"algo" orm:"algo"`                // timesfm / gbm：算法对比维度，稳定不变
+	Algo        string      `json:"algo" orm:"algo"`                // timesfm / gbm / lear：算法对比维度，稳定不变
 	TargetTime  string      `json:"targetTime" orm:"target_time"`   // 日粒度=YYYY-MM-DD；96 点=YYYY-MM-DD HH:MM
 	Point       float64     `json:"point" orm:"point"`
 	Q10         float64     `json:"q10" orm:"q10"`

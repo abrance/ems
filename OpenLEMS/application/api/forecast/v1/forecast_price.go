@@ -21,7 +21,7 @@ type GetPriceForecastReq struct {
 	HorizonDays  int    `json:"horizonDays" dc:"预测天数，默认 5；intraday 上限 5；hour 忽略（步数由目标日与锚点推出）"`
 	Quantiles    string `json:"quantiles" dc:"分位点，逗号分隔，默认 0.1,0.5,0.9"`
 	ForceRefresh bool   `json:"forceRefresh" dc:"跳过缓存，手动刷新用"`
-	Compare      bool   `json:"compare" dc:"仅 grain=hour：额外跑 GBM（modelman price-gbm）做算法对比"`
+	Compare      bool   `json:"compare" dc:"仅 grain=hour：额外跑 GBM（price-gbm）与 LEAR（price-lear）做算法对比"`
 }
 
 // PriceForecastPoint 单点预测结果
@@ -65,6 +65,11 @@ type PriceForecast struct {
 	GBM *PriceForecastGBM `json:"gbm,omitempty" dc:"第二算法预测（仅 hour + compare）"`
 	// GBMError 对比不可用的原因（未配置/调用失败）。有它时 TimesFM 结果仍然有效。
 	GBMError string `json:"gbmError,omitempty" dc:"对比算法不可用的原因"`
+	// LEAR 仅 hour + compare：第三算法（Lasso 线性回归强基线）对同一目标日的 24 点预测。
+	// 形状与 GBM 完全一致，复用 PriceForecastGBM 对象。
+	LEAR *PriceForecastGBM `json:"lear,omitempty" dc:"LEAR 算法预测（仅 hour + compare）"`
+	// LEARError 对比不可用的原因（未配置/调用失败）。有它时主结果仍然有效。
+	LEARError string `json:"learError,omitempty" dc:"LEAR 对比算法不可用的原因"`
 }
 
 // PriceForecastGBM 第二算法（modelman price-gbm / LightGBM）的结果。
@@ -77,7 +82,7 @@ type PriceForecastGBM struct {
 	HorizonDays int                   `json:"horizonDays" dc:"目标日距锚点天数"`
 	HistoryDays int                   `json:"historyDays" dc:"送入的连续完整日数"`
 	Forecast    []*PriceForecastPoint `json:"forecast" dc:"目标日 24 点预测，按整点升序"`
-	TimeMs      float64               `json:"timeMs" dc:"GBM 推理耗时（毫秒）"`
+	TimeMs      float64               `json:"timeMs" dc:"算法推理耗时（毫秒）"`
 }
 
 // GetPriceForecastRes 电价预测响应

@@ -81,6 +81,8 @@ func (c *ControllerV1) GetPriceForecast(ctx context.Context, req *v1.GetPriceFor
 		Recorded:       result.Recorded,
 		GBM:            gbmDTO(result.GBM),
 		GBMError:       result.GBMError,
+		LEAR:           learDTO(result.LEAR),
+		LEARError:      result.LEARError,
 	}}, nil
 }
 
@@ -115,6 +117,41 @@ func gbmDTO(g *forecastlogic.TPriceForecastGBM) *v1.PriceForecastGBM {
 		HistoryDays: g.HistoryDays,
 		Forecast:    points,
 		TimeMs:      g.TimeMs,
+	}
+}
+
+// learDTO 第三算法（LEAR）结果转 DTO。与 gbmDTO 同构（两者响应形状一致），
+// 分开函数只为类型清晰：TPriceForecastLEAR 与 TPriceForecastGBM 字段相同但语义不同。
+func learDTO(l *forecastlogic.TPriceForecastLEAR) *v1.PriceForecastGBM {
+	if l == nil {
+		return nil
+	}
+	points := make([]*v1.PriceForecastPoint, 0, len(l.Points))
+	for _, p := range l.Points {
+		atTime, runDate := "", ""
+		if !p.TargetTime.IsZero() {
+			atTime = p.TargetTime.Format("15:04")
+			runDate = p.TargetTime.Format("2006-01-02")
+		}
+		points = append(points, &v1.PriceForecastPoint{
+			RunDate:    runDate,
+			TargetTime: p.TargetTime.Format("2006-01-02 15:04"),
+			Point:      p.Point,
+			Quantiles: map[string]float64{
+				"0.1": p.Q10,
+				"0.5": p.Q50,
+				"0.9": p.Q90,
+			},
+			AtTime: atTime,
+		})
+	}
+	return &v1.PriceForecastGBM{
+		Model:       l.Model,
+		TargetDate:  l.TargetDate,
+		HorizonDays: l.HorizonDays,
+		HistoryDays: l.HistoryDays,
+		Forecast:    points,
+		TimeMs:      l.TimeMs,
 	}
 }
 
