@@ -634,9 +634,10 @@ def main():
             if not args.skip_lear:
                 kinds.append("lear")
             kinds.append("lightgbm")
-            if not args.skip_timesfm and not args.skip_direction_timesfm:
-                kinds.append("timesfm-3.0")
-            fuse_w = fusion["weights"] if (fusion and "timesfm-3.0" not in kinds) else None
+            # 注：方向分支的实时价预测目前只实现 lightgbm/lear（predict_realtime_by_model
+            # 不支持 timesfm），故不把 timesfm 加入 kinds，避免 ValueError: unknown kind。
+            # --skip-direction-timesfm 保留为兼容开关（现已默认不跑 timesfm 方向分）。
+            fuse_w = fusion["weights"] if fusion else None
             if fuse_w is not None:
                 # 权重键与方向分支 kind 对齐（方向分支只用非-timesfm 模型时键一致）
                 fuse_w = {k: v for k, v in fuse_w.items() if k in kinds}
