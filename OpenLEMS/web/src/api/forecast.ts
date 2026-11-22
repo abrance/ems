@@ -130,6 +130,10 @@ export interface PriceForecast {
   gbm?: GbmForecast
   /** 对比算法不可用的原因（未配置/调用失败）。有它时 forecast 仍然有效 */
   gbmError?: string
+  /** 仅 hour + compare：第三算法（modelman price-lear / Lasso 线性回归）的预测 */
+  lear?: GbmForecast
+  /** LEAR 对比算法不可用的原因 */
+  learError?: string
 }
 
 /** 第二算法结果，与 forecast 同构，可并排画也能逐点算误差 */
@@ -185,7 +189,7 @@ export function fetchPriceForecast(
     horizonDays?: number
     quantiles?: string
     forceRefresh?: boolean
-    /** 仅 grain=hour：额外跑 GBM（price-gbm 服务）做算法对比 */
+    /** 仅 grain=hour：额外跑 GBM（price-gbm）与 LEAR（price-lear）做算法对比 */
     compare?: boolean
   },
   signal?: AbortSignal,
@@ -233,7 +237,7 @@ export function fetchPriceBacktest(
 
 /**
  * 算法回测（留痕口径）：读每天 00:05 写下的 hour 留痕，按 algo 与实际值配对。
- * 传播口径：fusion 由后端用 timesfm / gbm 的点预测均值实时算，不落库、没有分位带。
+ * 传播口径：fusion 由后端用 timesfm / gbm 的点预测均值实时算（LEAR 不参与融合），不落库、没有分位带。
  */
 export interface AlgoReviewSummary {
   algo: string

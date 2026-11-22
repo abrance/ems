@@ -10,7 +10,7 @@ import { CHART_COLORS, useECharts } from '@/composables/useECharts'
  *
  * 只统计留痕：每天 00:05 写下的当时预测（gd_price_forecast 的 grain=hour 行），
  * 按算法与实际值（gd_home_24h）逐点配对。不重跑模型 —— 数字不会因为今天换了模型而变。
- * 融合（fusion）由后端用 TimesFM / GBM 的点预测均值实时算，没有分位带。
+ * 融合（fusion）由后端用 TimesFM / GBM 的点预测均值实时算（LEAR 不参与融合），没有分位带。
  */
 
 const PRESETS = [
@@ -23,11 +23,12 @@ const PRESETS = [
 const ALGO_META: Record<string, { label: string; color: string }> = {
   timesfm: { label: 'TimesFM', color: CHART_COLORS.brand },
   gbm: { label: 'GBM', color: CHART_COLORS.blue },
+  lear: { label: 'LEAR', color: CHART_COLORS.green },
   fusion: { label: '融合（两者均值）', color: CHART_COLORS.purple },
 }
 
 const market = ref<'ahead' | 'real'>('ahead')
-const selected = ref<string[]>(['timesfm', 'gbm', 'fusion'])
+const selected = ref<string[]>(['timesfm', 'gbm', 'lear', 'fusion'])
 const from = ref('')
 const to = ref('')
 const preset = ref('30')
@@ -90,6 +91,12 @@ const gbmMissing = computed(() => {
   if (!data.value) return false
   const gbm = data.value.summary.find((s) => s.algo === 'gbm')
   return gbm !== undefined ? gbm.pairs === 0 : false
+})
+
+const learMissing = computed(() => {
+  if (!data.value) return false
+  const lear = data.value.summary.find((s) => s.algo === 'lear')
+  return lear !== undefined ? lear.pairs === 0 : false
 })
 
 const dropped = computed(() => data.value?.dropped ?? { noActual: 0, backfilled: 0, incompleteDay: 0 })
@@ -390,6 +397,9 @@ onMounted(() => {
       </div>
       <div v-if="gbmMissing" class="hint">
         GBM 还没有留痕：线上 lems 未配置 <code>PRICE_GBM_BASE_URL</code>（或 <code>price_gbm.base_url</code>），每日任务只写了 TimesFM。
+      </div>
+      <div v-if="learMissing" class="hint">
+        LEAR 还没有留痕：线上 lems 未配置 <code>PRICE_LEAR_BASE_URL</code>（或 <code>price_lear.base_url</code>），每日任务只写了其他算法。
       </div>
     </PanelBox>
 

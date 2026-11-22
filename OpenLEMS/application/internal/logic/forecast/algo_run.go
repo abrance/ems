@@ -42,7 +42,7 @@ func runHourForecastRange(
 		days++
 		date := d.Format(priceDateLayout)
 		for _, market := range markets {
-			// Compare=true：同一锚点把 GBM 也跑一遍，两个算法才可比；
+			// Compare=true：同一锚点把 GBM、LEAR 也跑一遍，三个算法才可比；
 			// ForceRefresh=true：回放不读页面缓存，按目标日能拿到的最新锚点算。
 			res, lerr := load(ctx, PriceRequest{
 				Market:       market,
@@ -66,6 +66,11 @@ func runHourForecastRange(
 				n += recordHourPoints(ctx, market, res.To, res.GBM.Model, res.Unit, res.GBM.Points, s_db_model.ForecastAlgoGBM)
 			} else if res.GBMError != "" {
 				skipped = append(skipped, fmt.Sprintf("%s/%s：GBM 不可用（%s）", date, market, res.GBMError))
+			}
+			if res.LEAR != nil {
+				n += recordHourPoints(ctx, market, res.To, res.LEAR.Model, res.Unit, res.LEAR.Points, s_db_model.ForecastAlgoLEAR)
+			} else if res.LEARError != "" {
+				skipped = append(skipped, fmt.Sprintf("%s/%s：LEAR 不可用（%s）", date, market, res.LEARError))
 			}
 			if n == 0 {
 				skipped = append(skipped, fmt.Sprintf("%s/%s：没有可写入的 24 点结果", date, market))

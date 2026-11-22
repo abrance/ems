@@ -14,7 +14,8 @@ import (
 // 按 algo 分组，与实际值（gd_home_24h）逐点配对算误差。不重跑模型。
 //
 // 融合（fusion）没有自己的留痕：同一 (market, target_time) 上 TimesFM 与 GBM
-// 都存在时，取两个点预测的均值。它没有分位带，覆盖率返回 nil 而不是编一个。
+// 都存在时，取两个点预测的均值（LEAR 不参与融合，只作独立第三算法对比）。
+// 它没有分位带，覆盖率返回 nil 而不是编一个。
 
 const (
 	// AlgoFusion 融合算法（展示时实时算，不落库）。
@@ -26,6 +27,7 @@ const (
 var algoDisplayOrder = []string{
 	s_db_model.ForecastAlgoTimesFM,
 	s_db_model.ForecastAlgoGBM,
+	s_db_model.ForecastAlgoLEAR,
 	AlgoFusion,
 }
 
@@ -36,6 +38,8 @@ func AlgoLabel(algo string) string {
 		return "TimesFM"
 	case s_db_model.ForecastAlgoGBM:
 		return "GBM"
+	case s_db_model.ForecastAlgoLEAR:
+		return "LEAR"
 	case AlgoFusion:
 		return "融合（两者均值）"
 	default:
@@ -56,7 +60,7 @@ func ParseAlgos(s string) ([]string, error) {
 			continue
 		}
 		if !isKnownAlgo(algo) {
-			return nil, fmt.Errorf("未知算法 %q（可选 timesfm、gbm、fusion）", strings.TrimSpace(raw))
+			return nil, fmt.Errorf("未知算法 %q（可选 timesfm、gbm、lear、fusion）", strings.TrimSpace(raw))
 		}
 		seen[algo] = true
 	}
@@ -198,7 +202,8 @@ func BuildAlgoReview(
 		if algo == "" {
 			algo = s_db_model.ForecastAlgoTimesFM
 		}
-		if algo != s_db_model.ForecastAlgoTimesFM && algo != s_db_model.ForecastAlgoGBM {
+		if algo != s_db_model.ForecastAlgoTimesFM && algo != s_db_model.ForecastAlgoGBM &&
+			algo != s_db_model.ForecastAlgoLEAR {
 			continue
 		}
 		if byAlgo[algo] == nil {
