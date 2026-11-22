@@ -71,6 +71,8 @@ func TestAPIRoutesRegistered(t *testing.T) {
 		"GET /api/forecast/price",
 		"GET /api/forecast/recorded",
 		"GET /api/forecast/backtest",
+		"GET /api/forecast/algo-review",
+		"POST /api/forecast/algo-review/run",
 		// 效果
 		"GET /api/effect/summary",
 		"GET /api/effect/backtest",

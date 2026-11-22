@@ -230,3 +230,102 @@ export function fetchPriceBacktest(
     points: r.points ?? [],
   }))
 }
+
+/**
+ * 算法回测（留痕口径）：读每天 00:05 写下的 hour 留痕，按 algo 与实际值配对。
+ * 传播口径：fusion 由后端用 timesfm / gbm 的点预测均值实时算，不落库、没有分位带。
+ */
+export interface AlgoReviewSummary {
+  algo: string
+  label: string
+  days: number
+  pairs: number
+  mae: number
+  rmse: number
+  /** %，仅 |实际| >= 1 的点；没有可用点时为 0 */
+  mape: number
+  mapeExcluded: number
+  /** 平均有符号误差（预测-实际），正=偏高 */
+  bias: number
+  /** P10~P90 覆盖率（%）；融合没有分位带，为 null */
+  coverage: number | null
+}
+
+export interface AlgoReviewDaily {
+  algo: string
+  date: string
+  pairs: number
+  mae: number
+  mape: number
+  mapeExcluded: number
+  coverage: number | null
+}
+
+export interface AlgoReviewHourly {
+  algo: string
+  hour: number
+  pairs: number
+  mae: number
+  mape: number
+}
+
+export interface AlgoReviewPoint {
+  algo: string
+  hour: number
+  targetTime: string
+  predicted: number
+  actual: number | null
+  q10: number
+  q50: number
+  q90: number
+}
+
+export interface AlgoReview {
+  market: string
+  unit: string
+  from: string
+  to: string
+  algos: string[]
+  summary: AlgoReviewSummary[]
+  daily: AlgoReviewDaily[]
+  hourly: AlgoReviewHourly[]
+  detail: AlgoReviewPoint[]
+  dropped: { noActual: number; backfilled: number; incompleteDay: number }
+  dataAsOf: string
+  /** 实际值滞后天数；-1 表示拿不到 */
+  lagDays: number
+  truthSource: string
+}
+
+export function fetchAlgoReview(
+  params: { from: string; to: string; market?: string; algos?: string; date?: string },
+  signal?: AbortSignal,
+): Promise<AlgoReview> {
+  return api.get<AlgoReview>('/api/forecast/algo-review', params, signal).then((r) => ({
+    ...r,
+    algos: r.algos ?? [],
+    summary: r.summary ?? [],
+    daily: r.daily ?? [],
+    hourly: r.hourly ?? [],
+    detail: r.detail ?? [],
+    dropped: r.dropped ?? { noActual: 0, backfilled: 0, incompleteDay: 0 },
+  }))
+}
+
+/** 主动运行一次小时预测并写留痕；与看统计解耦。 */
+export interface AlgoReviewRunResult {
+  days: number
+  written: Record<string, number>
+  skipped: string[]
+}
+
+export function runAlgoReview(
+  params: { from: string; to: string; market?: string },
+  signal?: AbortSignal,
+): Promise<AlgoReviewRunResult> {
+  return api.post<AlgoReviewRunResult>('/api/forecast/algo-review/run', params, signal).then((r) => ({
+    ...r,
+    written: r.written ?? {},
+    skipped: r.skipped ?? [],
+  }))
+}

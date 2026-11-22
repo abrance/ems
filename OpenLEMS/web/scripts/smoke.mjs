@@ -3021,7 +3021,7 @@ console.log('\n== 日志级别页 ==')
 console.log('\n== 导航结构 ==')
 // 期望页数写在这里：改成别处时必须有意识，不能让导航悄悄少一项还没人发现。
 // 当前 33；删掉「审计」页后从 34 减 1（运行日志/日志表链路已移除）
-const EXPECTED_PAGES = 33
+const EXPECTED_PAGES = 34
 const tabEls = [...doc.querySelectorAll('.tabs .tab')]
 check(tabEls.length === 5, `Tab 数量 = ${tabEls.length}（期望 5）`, tabEls.map((e) => e.textContent.trim()).join('/'))
 check(
@@ -3033,7 +3033,7 @@ check(
 const marketTab = NAV.find((t) => t.key === 'market')
 const analysisTab = NAV.find((t) => t.key === 'analysis')
 check(marketTab?.pages.length === 6, `市场数据页 6 个（实际 ${marketTab?.pages.length}）`)
-check(analysisTab?.pages.length === 4, `分析预测页 4 个（实际 ${analysisTab?.pages.length}）`)
+check(analysisTab?.pages.length === 5, `分析预测页 5 个（实际 ${analysisTab?.pages.length}）`)
 check(!NAV.some((t) => t.key === 'scene'), '原「场景」Tab 已拆掉，不留空壳')
 const totalPages = NAV.reduce((n, t) => n + t.pages.length, 0)
 check(totalPages === EXPECTED_PAGES, `页面总数 ${EXPECTED_PAGES}（实际 ${totalPages}）`)
