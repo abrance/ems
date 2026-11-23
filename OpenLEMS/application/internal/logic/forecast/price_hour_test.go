@@ -190,6 +190,35 @@ func TestLoadPriceHourRejectsPartialDayInHistory(t *testing.T) {
 	}
 }
 
+// 锚点前紧邻的一天是 0 点空洞（官网站点临时挂掉/采集失败）时，跳过空洞继续往前凑历史，
+// 而不是在空洞处截断。这是线上 2026-11-18 锚点、11-17 0 点时仍能预测 11-19 的关键。
+func TestLoadPriceHourSkipsZeroPointHole(t *testing.T) {
+	target := mustDay(t, "2026-11-19")
+	anchor := mustDay(t, "2026-11-18")
+	// 锚点 11-18 + 11-17 之前的 8 个完整日（11-16 ~ 11-09）；11-17 整日 0 点留空。
+	rows := historyWindow(mustDay(t, "2026-11-16"), 8)
+	rows = append(rows, hourRows(dayStr(anchor), 100, 200)...)
+
+	src := &stubHourSource{rows: rows}
+	cli := &stubForecastClient{}
+	got, err := loadPriceHourWith(context.Background(), cli, src.load, "ahead", "2026-11-19", 7,
+		defaultQuantiles, priceLocation(), target)
+	if err != nil {
+		t.Fatalf("跳过 0 点空洞后应能预测: %v", err)
+	}
+	if got.To != "2026-11-18" {
+		t.Errorf("锚点 = %s，期望 2026-11-18", got.To)
+	}
+	// 历史应是 7 天（锚点 11-18 + 11-16~11-10，跳过 11-17），而不是撞空洞只剩 1 天。
+	wantPoints := 7 * home24hPointsPerDay
+	if len(got.HistoryValues) != wantPoints {
+		t.Errorf("历史点数 = %d，期望 %d（跳过 11-17 空洞）", len(got.HistoryValues), wantPoints)
+	}
+	if len(got.Points) != home24hPointsPerDay {
+		t.Errorf("预测点数 = %d，期望 24", len(got.Points))
+	}
+}
+
 // 整天没有行 = 采集窗口的边界（库里只留最近 N 天）：到边界就停，用已有一天数。
 // 线上就是这种形态：24 点只留最近 14 天，请求 14 天时正好差一天。
 func TestLoadPriceHourStopsAtHistoryBoundary(t *testing.T) {
