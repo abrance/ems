@@ -164,24 +164,39 @@ func loadPriceHourWith(
 		return nil, err
 	}
 
-	// 从锚点往前取连续完整日，最多 historyDays 天。
+	// 从锚点往前取完整日，最多 historyDays 天。
 	//
-	// 两种「不完整」要分开处理：
-	//   - 整天没有行：多半是采集窗口边界（库里只留最近 N 天），到边界就停，
-	//     用已有的天数（太短则报错）。这不是数据缺陷，不该让整张图挂掉。
+	// 三种「不完整」分开处理：
+	//   - 整天没有行 / 0 点（采集空洞或站点临时挂掉）：**跳过**，继续往前找完整日，
+	//     直到凑够 historyDays 或扫到查询下界 from。官网主页网关会偶发某天 0 点，
+	//     耿直地在空洞处 break 会让本来够用的历史被浪费（锚点 11-18、11-17 空洞
+	//     就只剩 1 天可用）。跳过空洞是数据缺口，不该让整张图出不来。
+	//     权衡：TimesFM 吃的是连续序列，跳过一天等于在数值序列上抹掉一天（日历轴
+	//     在 HistoryDates 里仍是真实日期，前端按数组下标画不会错位）；站点挂掉期间
+	//     这是「有个近似预测」优于「整张图空白」的取舍。GBM/LEAR 的日历特征由锚点
+	//     与目标日直接算，不依赖历史序列连续性，影响更小。
 	//   - 有行但不满 24 点：源站当天只返回了部分小时，是数据缺陷，报错点名，不拿残缺日凑数。
+	//   - 扫到 from 仍不足 minHourHistoryDays：才报错。
 	days := make([]string, 0, historyDays)
-	for i := 0; i < historyDays; i++ {
-		d := anchor.AddDate(0, 0, -i).Format(priceDateLayout)
-		hours, seen := valuesByDate[d]
-		if !seen || len(hours) == 0 {
+	fromDate, _ := time.ParseInLocation(priceDateLayout, from, loc)
+	// 循环上界用 anchor 到 from 的整个跨度（而非 historyDays）：跳过空洞后要多扫几天
+	// 才能凑满 historyDays。扫到查询下界即止，凑不满则由下面的 minHourHistoryDays 报错。
+	span := int(anchor.Sub(fromDate).Hours()/24) + 1
+	for i := 0; i < span && len(days) < historyDays; i++ {
+		d := anchor.AddDate(0, 0, -i)
+		if d.Before(fromDate) {
 			break
+		}
+		key := d.Format(priceDateLayout)
+		hours, seen := valuesByDate[key]
+		if !seen || len(hours) == 0 {
+			continue // 0 点空洞：跳过，继续往前
 		}
 		if len(hours) != home24hPointsPerDay {
 			return nil, errors.Errorf("24 点电价数据不足：%s 只有 %d 点（需要完整 24 点）",
-				d, len(hours))
+				key, len(hours))
 		}
-		days = append(days, d)
+		days = append(days, key)
 	}
 	if len(days) < minHourHistoryDays {
 		return nil, errors.Errorf("24 点电价数据不足：锚点 %s 往前只有 %d 个完整日（至少需要 %d 天）",

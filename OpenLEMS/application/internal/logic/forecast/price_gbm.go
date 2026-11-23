@@ -128,20 +128,29 @@ func requestGBM(
 	values := groupHome24h(rows, market)
 	power := groupHome24hPower(rows)
 
-	// 从锚点倒着数连续完整日，再反转成升序：GBM 要求 days 升序且最后一天是锚点
+	// 从锚点倒着取完整日，跳过 0 点空洞，再反转成升序：GBM 要求 days 升序且最后一天是锚点。
+	// 与主路径一致：某天 0 点（采集空洞）不该截断整个历史窗口。
 	days := make([]gbmDay, 0, gbmMaxDays)
-	for i := 0; i < gbmMaxDays; i++ {
-		d := anchor.AddDate(0, 0, -i).Format(priceDateLayout)
-		hours, ok := values[d]
-		if !ok || len(hours) != home24hPointsPerDay {
+	fromDate := anchor.AddDate(0, 0, -(gbmMaxDays - 1))
+	for i := 0; i < gbmMaxDays && len(days) < gbmMaxDays; i++ {
+		d := anchor.AddDate(0, 0, -i)
+		if d.Before(fromDate) {
 			break
 		}
-		day := gbmDay{Date: d, Values: make([]float64, home24hPointsPerDay)}
+		key := d.Format(priceDateLayout)
+		hours, ok := values[key]
+		if !ok || len(hours) == 0 {
+			continue // 0 点空洞：跳过
+		}
+		if len(hours) != home24hPointsPerDay {
+			break // 不满 24 点：这段历史不取，主路径会点名报错
+		}
+		day := gbmDay{Date: key, Values: make([]float64, home24hPointsPerDay)}
 		for h := 0; h < home24hPointsPerDay; h++ {
 			day.Values[h] = hours[h]
 		}
 		// 电量是可选的：缺了 GBM 侧按缺失特征处理，不给它补 0（0 会被当成真实负荷）
-		if pw, ok := power[d]; ok && len(pw) == home24hPointsPerDay {
+		if pw, ok := power[key]; ok && len(pw) == home24hPointsPerDay {
 			day.Power = make([]float64, home24hPointsPerDay)
 			for h := 0; h < home24hPointsPerDay; h++ {
 				day.Power[h] = pw[h]
